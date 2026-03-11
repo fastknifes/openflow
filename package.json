@@ -1,0 +1,50 @@
+{
+  "name": "@fastknife/openflow",
+  "version": "0.1.0",
+  "description": "OpenFlow - DevFlow OpenCode Plugin for enhanced development workflow",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "workflow",
+    "devflow",
+    "tdd",
+    "archive"
+  ],
+  "author": "fastknife <2777314125@qq.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:fastknifes/openflow.git"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@types/node": "^25.4.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
