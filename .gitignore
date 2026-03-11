@@ -27,3 +27,6 @@ coverage/
 
 # Sisyphus builds (generated during execution)
 .sisyphus/builds/
+
+# Git
+.git/
