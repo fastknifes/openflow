@@ -262,12 +262,29 @@ docs/archive/{feature}/
 
 ## 4. 修改的文件
 
-| 文件 | 变更类型 |
-|------|----------|
-| src/auth/login.ts | created |
-| src/auth/jwt.ts | created |
+| 文件 | 变更类型 | 阶段 |
+|------|----------|------|
+| src/auth/login.ts | created | 实现 |
+| src/auth/jwt.ts | created | 实现 |
+| src/auth/2fa.ts | created | 验收 |
 
-## 5. 相关文档
+## 5. 验收阶段变更
+
+> 记录验收阶段的代码调整
+
+| 变更时间 | 变更内容 | 原因 |
+|----------|----------|------|
+| 2026-03-12 14:35 | 新增 2FA 支持 | 用户验收时要求 |
+
+## 6. 已知偏差
+
+> 记录实现与设计文档不一致的部分
+
+| 偏差项 | 设计文档 | 实际实现 | 原因 |
+|--------|----------|----------|------|
+| 2FA 登录 | 未包含 | 已实现 | 验收阶段新增需求 |
+
+## 7. 相关文档
 - 设计文档：docs/design/{feature}/
 - 执行计划：.sisyphus/plans/{feature}.md
 ```
@@ -280,6 +297,8 @@ docs/archive/{feature}/
 | 代码符号 | `lsp_symbols` 工具（由 AI 调用） |
 | 业务流程 | 计划文档（由 AI 解析） |
 | 设计决策 | design/decisions.md（由 AI 解析） |
+| 验收阶段变更 | Session 按时间戳分段 |
+| 设计文档漂移 | 漂移检测器对比分析 |
 
 #### 3.3.6 配置项
 
@@ -400,13 +419,32 @@ Skills 动态注册到：
       "quality": ["lint", "typecheck", "test"],
       "auto_fix": false
     },
+    "acceptance": {
+      "enabled": true,
+      "trigger_words_zh": ["调整", "改一下", "测试发现", "验收", "检查", "问题"],
+      "trigger_words_en": ["adjust", "fix", "test found", "acceptance", "check", "issue"],
+      "doc_sync_prompt": true,
+      "drift_detection": true
+    },
     "archive": {
       "enabled": true,
-      "output_dir": "docs/archive"
+      "output_dir": "docs/archive",
+      "drift_check": true
     }
   }
 }
 ```
+
+### 6.3 验收阶段配置项
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `acceptance.enabled` | boolean | true | 是否启用验收阶段追踪 |
+| `acceptance.trigger_words_zh` | string[] | 见上表 | 中文触发词 |
+| `acceptance.trigger_words_en` | string[] | 见上表 | 英文触发词 |
+| `acceptance.doc_sync_prompt` | boolean | true | 代码变更后是否提示更新设计文档 |
+| `acceptance.drift_detection` | boolean | true | 是否启用设计文档漂移检测 |
+| `archive.drift_check` | boolean | true | 归档前是否检查设计文档漂移 |
 
 ### 6.2 配置验证
 
@@ -559,16 +597,115 @@ interface ParsedTask {
    │  (OpenCode 自动记录所有变更到 session)
    │
    ▼
-8. 用户: skill(name="openflow-archive", feature="user-login")
+   ┌─────────────────────────────────────────────────┐
+   │ ✅ 实现阶段完成                                  │
+   │                                                 │
+   │ 📋 下一步：手动验收测试                          │
+   │    - 测试功能是否符合预期                        │
+   │    - 如需修改，直接告诉 AI 即可                  │
+   │                                                 │
+   │ ✅ 验收通过后运行归档：                          │
+   │    skill(name="openflow-archive",               │
+   │           feature="user-login")                 │
+   └─────────────────────────────────────────────────┘
    │
    ▼
-9. AI 执行归档
-   ├── 从 session 读取变更记录
-   ├── 读取设计文档和计划
+8. [验收阶段] 用户手动验收 + vben programming
+   │
+   ├── 用户: "调整一下登录逻辑" / "测试发现个问题"
+   │   │
+   │   ▼
+   │   [自动] Acceptance Hook 识别验收模式
+   │   ├── 匹配验收触发词
+   │   ├── 设置 phase = 'acceptance'
+   │   └── 绑定 activeFeature = 'user-login'
+   │   │
+   │   ▼
+   │   AI 执行代码修改 (write/edit)
+   │   │
+   │   ▼
+   │   [自动] 输出设计文档同步提示
+   │   ┌─────────────────────────────────────────────┐
+   │   │ 📝 验收阶段变更已记录                        │
+   │   │                                            │
+   │   │ 变更文件: src/auth/login.ts                 │
+   │   │ 是否更新设计文档？                          │
+   │   │                                            │
+   │   │ [Y] 更新设计文档（推荐）                    │
+   │   │ [N] 仅代码变更，稍后处理                    │
+   │   │ [S] 跳过，归档时再处理                      │
+   │   └─────────────────────────────────────────────┘
+   │   │
+   │   ├── 用户选 Y → AI 引导更新 docs/design/user-login/
+   │   ├── 用户选 N → 记录到待处理队列
+   │   └── 用户选 S → 归档时统一处理
+   │
+   └── 验收完成，用户确认功能符合预期
+   │
+   ▼
+9. 用户: skill(name="openflow-archive", feature="user-login")
+   │
+   ▼
+10. AI 执行归档
+   │
+   ├── 📊 从 Session 提取变更记录
+   │   ├── 实现阶段变更（计划时间戳之前）
+   │   └── 验收阶段变更（计划时间戳之后）
+   │
+   ├── ⚠️ 检测设计文档漂移
+   │   ├── 无漂移 → 继续归档
+   │   └── 有漂移 → 提示用户确认：
+   │       ┌─────────────────────────────────────────┐
+   │       │ ⚠️ 检测到验收阶段新增了以下功能：        │
+   │       │                                        │
+   │       │ - 2FA 支持 (src/auth/2fa.ts)           │
+   │       │ - 登录失败次数限制 (src/auth/rate.ts)   │
+   │       │                                        │
+   │       │ 设计文档中未包含，请选择：              │
+   │       │                                        │
+   │       │ [1] 更新设计文档后归档                  │
+   │       │ [2] 记录为已知偏差，继续归档            │
+   │       │ [3] 取消，稍后处理                      │
+   │       └─────────────────────────────────────────┘
+   │
    ├── 调用 LSP 获取代码符号
-   ├── 生成 SRS 文档
+   │
+   ├── 生成 SRS 文档（包含偏差说明）
+   │
    └── 复制相关文档到归档目录
 ```
+
+### 11.2 验收阶段触发词
+
+以下词汇会自动触发验收模式：
+
+| 中文触发词 | 英文触发词 | 说明 |
+|-----------|-----------|------|
+| 调整一下 | adjust, tweak | 微调现有功能 |
+| 改一下 | fix, modify | 修改现有代码 |
+| 测试发现 | test found | 测试阶段发现问题 |
+| 验收 | acceptance | 明确的验收行为 |
+| 检查一下 | check, verify | 验证性修改 |
+| 还有问题 | still has issue | 问题修复 |
+| 需要改 | need to change | 变更需求 |
+
+### 11.3 验收阶段状态管理
+
+```typescript
+// 验收阶段状态（内存 + 文件持久化）
+interface AcceptanceState {
+  feature: string           // 当前验收的功能
+  phase: 'implementation' | 'acceptance' | 'archived'
+  phaseStartedAt: string    // ISO 时间戳
+  pendingDocUpdates: Array<{
+    file: string
+    timestamp: string
+    reason?: string
+  }>
+}
+```
+
+状态持久化位置：`.sisyphus/acceptance.local.md`
 
 ---
 
@@ -616,14 +753,25 @@ interface ParsedTask {
 - [x] 添加验证任务阶段
 - [x] 防止重复增强
 
-### 13.3 归档阶段
+### 13.3 验收阶段
+
+- [ ] 识别验收触发词，自动进入验收模式
+- [ ] 代码变更后输出设计文档同步提示
+- [ ] 用户确认后引导更新设计文档
+- [ ] 记录验收阶段变更到 `.sisyphus/acceptance.local.md`
+- [ ] 支持中英文触发词
+
+### 13.4 归档阶段
 
 - [x] `openflow-archive` skill 可用
 - [x] 从 session 读取变更记录
 - [x] 生成包含代码映射的 SRS 文档
 - [x] 复制设计文档和计划到归档目录
+- [ ] 按时间戳区分实现阶段 vs 验收阶段变更
+- [ ] 检测设计文档漂移并提示用户确认
+- [ ] SRS 文档包含偏差说明章节
 
-### 13.4 安全要求
+### 13.5 安全要求
 
 - [x] 路径遍历防护
 - [x] 符号链接防护
@@ -638,8 +786,13 @@ interface ParsedTask {
 |------|------|------|
 | `src/index.ts` | ~300 | 插件入口，Hooks，Handlers |
 | `src/config.ts` | ~100 | 配置加载与验证 |
-| `src/types.ts` | ~100 | 类型定义 |
+| `src/types.ts` | ~120 | 类型定义（含验收阶段类型） |
 | `src/skills/index.ts` | ~150 | Skills 注册 |
+| `src/hooks/acceptance.ts` | ~150 | 验收阶段 Hook（触发词识别、状态管理） |
+| `src/hooks/acceptance-prompt.ts` | ~80 | 验收阶段提示输出 |
+| `src/utils/acceptance-state.ts` | ~60 | 验收状态持久化 |
+| `src/utils/session.ts` | ~70 | Session API 封装（含阶段分段） |
+| `src/utils/drift-detector.ts` | ~100 | 设计文档漂移检测 |
 | `src/utils/security.ts` | ~100 | 安全工具 |
 | `src/utils/errors.ts` | ~40 | 错误处理 |
 | `src/utils/logger.ts` | ~50 | 日志系统 |
@@ -658,6 +811,9 @@ interface ParsedTask {
 | TDD | 测试驱动开发 (Test-Driven Development) |
 | SRS | 软件需求规格说明书 (Software Requirements Specification) |
 | Session API | OpenCode 提供的会话记录 API |
+| 验收阶段 | 实现完成后、归档前的手动测试和调整阶段 |
+| vben programming | 用户通过 AI 对话进行迭代式编程 |
+| 设计文档漂移 | 实际代码与设计文档不一致的状态 |
 
 ---
 
@@ -671,11 +827,16 @@ interface ParsedTask {
 
 ---
 
-**文档版本**: 3.0  
-**更新日期**: 2026-03-11  
+**文档版本**: 4.0  
+**更新日期**: 2026-03-12  
 **作者**: OpenFlow Team  
-**状态**: 与代码实现同步
+**状态**: 设计完成，待实现
 
 **变更记录**:
+- v4.0: 新增验收阶段（Acceptance Phase）设计
+  - 验收触发词自动识别
+  - 代码变更后设计文档同步提示
+  - 归档时设计文档漂移检测
+  - SRS 文档包含偏差说明
 - v3.0: 移除 BuildTracker 和 changes.json，改用 OpenCode Session API
 - v2.0: 初始版本

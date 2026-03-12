@@ -1,4 +1,4 @@
-import type { FileChangeRecord } from '../types.js'
+import type { FileChangeRecord, PhasedChanges } from '../types.js'
 
 interface ToolPart {
   type: 'tool'
@@ -54,6 +54,57 @@ export async function getSessionFileChanges(
   }
 
   return changes
+}
+
+export async function getPhasedFileChanges(
+  client: { session: { messages: (args: { sessionID: string }) => Promise<{ data?: SessionMessage[]; messages?: SessionMessage[] }> } },
+  sessionID: string,
+  implementationEndTime?: string
+): Promise<PhasedChanges> {
+  const response = await client.session.messages({ sessionID })
+  const messages = response.data ?? response.messages ?? []
+
+  const implementationCutoff = implementationEndTime 
+    ? new Date(implementationEndTime).getTime() 
+    : Date.now()
+
+  const result: PhasedChanges = {
+    implementation: [],
+    acceptance: []
+  }
+
+  for (const message of messages) {
+    if (message.info.role !== 'assistant') continue
+
+    for (const part of message.parts) {
+      if (!isToolPart(part)) continue
+      if (part.tool !== 'write' && part.tool !== 'edit') continue
+
+      const filePath = part.state.input.filePath as string | undefined
+      if (!filePath) continue
+
+      if (filePath.includes('.sisyphus/') || filePath.includes('node_modules/')) continue
+
+      const timestamp = Date.now()
+      const change: FileChangeRecord = {
+        filePath,
+        tool: part.tool,
+        timestamp
+      }
+
+      if (timestamp < implementationCutoff) {
+        if (!result.implementation.some(c => c.filePath === filePath)) {
+          result.implementation.push(change)
+        }
+      } else {
+        if (!result.acceptance.some(c => c.filePath === filePath)) {
+          result.acceptance.push(change)
+        }
+      }
+    }
+  }
+
+  return result
 }
 
 export function formatFileChangesForSrs(changes: FileChangeRecord[]): string {

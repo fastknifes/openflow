@@ -22,12 +22,22 @@ export type QualityCheckType = 'lint' | 'typecheck' | 'test' | 'format'
 export interface ArchiveConfig {
   enabled: boolean
   output_dir: string
+  drift_check?: boolean
+}
+
+export interface AcceptanceConfig {
+  enabled: boolean
+  trigger_words_zh: string[]
+  trigger_words_en: string[]
+  doc_sync_prompt: boolean
+  drift_detection: boolean
 }
 
 export interface OpenFlowConfig {
   brainstorming: BrainstormingConfig
   tdd: TddConfig
   verification: VerificationConfig
+  acceptance: AcceptanceConfig
   archive: ArchiveConfig
 }
 
@@ -47,9 +57,17 @@ export const defaultConfig: OpenFlowConfig = {
     quality: ['lint', 'typecheck', 'test'],
     auto_fix: false,
   },
+  acceptance: {
+    enabled: true,
+    trigger_words_zh: ['调整', '改一下', '测试发现', '验收', '检查', '问题', '还有问题', '需要改'],
+    trigger_words_en: ['adjust', 'fix', 'test found', 'acceptance', 'check', 'issue', 'tweak', 'modify'],
+    doc_sync_prompt: true,
+    drift_detection: true,
+  },
   archive: {
     enabled: true,
     output_dir: 'docs/archive',
+    drift_check: true,
   },
 }
 
@@ -85,4 +103,35 @@ export interface ParsedTask {
   isImplementation: boolean
   raw: string
   lineNumber: number
+}
+
+// 验收阶段类型
+export type DevelopmentPhase = 'implementation' | 'acceptance' | 'archived'
+
+export interface PendingDocUpdate {
+  file: string
+  timestamp: string
+  reason?: string
+}
+
+export interface AcceptanceState {
+  feature: string
+  phase: DevelopmentPhase
+  phaseStartedAt: string
+  implementationEndedAt?: string
+  pendingDocUpdates: PendingDocUpdate[]
+}
+
+// 按阶段分段的文件变更记录
+export interface PhasedChanges {
+  implementation: FileChangeRecord[]
+  acceptance: FileChangeRecord[]
+}
+
+// 设计文档漂移检测结果
+export interface DriftItem {
+  item: string
+  designDoc: string
+  actualCode: string
+  reason: string
 }

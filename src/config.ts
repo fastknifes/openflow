@@ -19,6 +19,10 @@ function isValidQualityChecks(value: unknown): value is QualityCheckType[] {
   return value.every(item => (VALID_QUALITY_CHECKS as readonly string[]).includes(item))
 }
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return isStringArray(value) && value.length > 0
+}
+
 function deepMerge<T extends Record<string, unknown>>(
   target: T,
   source: Partial<T>
@@ -93,11 +97,21 @@ function validateConfigValue(config: unknown): boolean {
     if (a.enabled !== undefined && typeof a.enabled !== 'boolean') return false
     if (a.output_dir !== undefined && typeof a.output_dir !== 'string') return false
     if (a.generate_srs !== undefined && typeof a.generate_srs !== 'boolean') return false
+    if (a.drift_check !== undefined && typeof a.drift_check !== 'boolean') return false
     try {
       if (a.output_dir !== undefined) validateConfigPath(a.output_dir as string)
     } catch {
       return false
     }
+  }
+
+  if (c.acceptance !== undefined) {
+    const ac = c.acceptance as Record<string, unknown>
+    if (ac.enabled !== undefined && typeof ac.enabled !== 'boolean') return false
+    if (ac.trigger_words_zh !== undefined && !isNonEmptyStringArray(ac.trigger_words_zh)) return false
+    if (ac.trigger_words_en !== undefined && !isNonEmptyStringArray(ac.trigger_words_en)) return false
+    if (ac.doc_sync_prompt !== undefined && typeof ac.doc_sync_prompt !== 'boolean') return false
+    if (ac.drift_detection !== undefined && typeof ac.drift_detection !== 'boolean') return false
   }
 
   return true
@@ -140,6 +154,14 @@ export function getDesignPath(projectDir: string, featureName: string): string {
 
 export function getArchivePath(projectDir: string, featureName: string): string {
   return `${projectDir}/${defaultConfig.archive.output_dir}/${featureName}`
+}
+
+export function getAcceptanceStatePath(projectDir: string): string {
+  return `${projectDir}/.sisyphus/acceptance.local.md`
+}
+
+export function getPlanPath(projectDir: string, featureName: string): string {
+  return `${projectDir}/.sisyphus/plans/${featureName}.md`
 }
 
 export { defaultConfig }
