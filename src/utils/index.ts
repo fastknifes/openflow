@@ -26,3 +26,19 @@ export {
   catchAndLogAsync,
 } from './errors.js'
 export { getSessionFileChanges, formatFileChangesForSrs } from './session.js'
+export {
+  createChangeTracker,
+  trackFileChange,
+  getBuildChanges,
+  listBuilds,
+  type ChangeTracker,
+  type ChangeTrackerOptions,
+} from './file-tracker.js'
+export {
+  cleanBuild,
+  cleanAllBuilds,
+  getBuildDiskUsage,
+  formatBytes,
+  type CleanBuildOptions,
+  type CleanAllBuildsOptions,
+} from './build-cleaner.js'

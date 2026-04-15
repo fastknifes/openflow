@@ -1,10 +1,12 @@
 import * as fs from 'node:fs/promises'
-import * as path from 'node:path'
 import type { OpenFlowConfig } from '../types.js'
 import type { ParsedTask } from './parser.js'
 import { parsePlanTasks, extractPlanName } from './parser.js'
 import { escapeMarkdown, findLatestDocument } from '../utils/index.js'
+import { getDesignCandidatePaths } from '../config.js'
 import { logger } from '../utils/logger.js'
+import { formatSecurityChecks, formatQualityChecks } from '../utils/verification-checks.js'
+import type { VerificationFailureCategory } from '../types.js'
 
 interface DesignDocSummary {
   proposal?: string
@@ -12,10 +14,25 @@ interface DesignDocSummary {
   decisions?: string
 }
 
+const DESIGN_CONTEXT_HEADER = '## Design Context'
+const TDD_EXPANDED_HEADER = '## TDD Expanded Tasks'
+const VERIFICATION_HEADER = '## Verification Phase'
+
 export interface EnhancePlanOptions {
   planPath: string
   config: OpenFlowConfig
   baseDir: string
+}
+
+export function classifyVerificationFailure(reason: string): VerificationFailureCategory {
+  const normalized = reason.toLowerCase()
+  if (/secret|vuln|security|credential|token/.test(normalized)) {
+    return 'security'
+  }
+  if (/drift|mismatch|sync|inconsistent|doc/.test(normalized)) {
+    return 'consistency'
+  }
+  return 'quality'
 }
 
 export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean> {
@@ -35,11 +52,14 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
     let enhancementAdded = false
 
     if (featureName && config.brainstorming.enabled) {
-      const designSummary = await readDesignDocuments(baseDir, config.brainstorming.output_dir, featureName)
+      const designSummary = await readDesignDocuments(baseDir, featureName)
       if (designSummary) {
-        enhancedContent = addDesignContextSection(enhancedContent, designSummary, featureName)
-        enhancementAdded = true
-        logger.info('Added design context to plan', { feature: featureName })
+        const withDesignContext = addDesignContextSection(enhancedContent, designSummary, featureName)
+        if (withDesignContext !== enhancedContent) {
+          enhancedContent = withDesignContext
+          enhancementAdded = true
+          logger.info('Added design context to plan', { feature: featureName })
+        }
       }
     }
 
@@ -47,16 +67,22 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
       const implementationTasks = tasks.filter((t) => t.isImplementation)
 
       if (implementationTasks.length >= config.tdd.expand_threshold) {
-        enhancedContent = addTddExpansionComment(enhancedContent, implementationTasks)
-        enhancementAdded = true
-        logger.info('Added TDD expansion hints', { count: implementationTasks.length })
+        const withTddExpansion = addTddExpansionComment(enhancedContent, implementationTasks)
+        if (withTddExpansion !== enhancedContent) {
+          enhancedContent = withTddExpansion
+          enhancementAdded = true
+          logger.info('Added TDD expansion hints', { count: implementationTasks.length })
+        }
       }
     }
 
     if (config.verification.in_plan) {
-      enhancedContent = addVerificationSection(enhancedContent, config.verification)
-      enhancementAdded = true
-      logger.info('Added verification tasks section')
+      const withVerificationSection = addVerificationSection(enhancedContent, config.verification)
+      if (withVerificationSection !== enhancedContent) {
+        enhancedContent = withVerificationSection
+        enhancementAdded = true
+        logger.info('Added verification tasks section')
+      }
     }
 
     if (enhancementAdded) {
@@ -74,40 +100,41 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
 
 async function readDesignDocuments(
   baseDir: string,
-  outputDir: string,
   feature: string
 ): Promise<DesignDocSummary | null> {
-  const designDir = path.join(baseDir, outputDir, feature)
+  const candidateDirs = getDesignCandidatePaths(baseDir, feature)
 
-  try {
-    const stats = await fs.stat(designDir)
-    if (!stats.isDirectory()) return null
-  } catch {
-    return null
+  for (const designDir of candidateDirs) {
+    try {
+      const stats = await fs.stat(designDir)
+      if (!stats.isDirectory()) continue
+    } catch {
+      continue
+    }
+
+    const summary: DesignDocSummary = {}
+
+    const proposalPath = await findLatestDocument(designDir, /^\d{8}-proposal\.md$/)
+    if (proposalPath) {
+      summary.proposal = await extractKeySections(proposalPath)
+    }
+
+    const designPath = await findLatestDocument(designDir, /^\d{8}-design\.md$/)
+    if (designPath) {
+      summary.design = await extractKeySections(designPath)
+    }
+
+    const decisionsPath = await findLatestDocument(designDir, /^\d{8}-decisions\.md$/)
+    if (decisionsPath) {
+      summary.decisions = await extractKeySections(decisionsPath)
+    }
+
+    if (summary.proposal || summary.design || summary.decisions) {
+      return summary
+    }
   }
 
-  const summary: DesignDocSummary = {}
-
-  const proposalPath = await findLatestDocument(designDir, /^\d{8}-proposal\.md$/)
-  if (proposalPath) {
-    summary.proposal = await extractKeySections(proposalPath)
-  }
-
-  const designPath = await findLatestDocument(designDir, /^\d{8}-design\.md$/)
-  if (designPath) {
-    summary.design = await extractKeySections(designPath)
-  }
-
-  const decisionsPath = await findLatestDocument(designDir, /^\d{8}-decisions\.md$/)
-  if (decisionsPath) {
-    summary.decisions = await extractKeySections(decisionsPath)
-  }
-
-  if (!summary.proposal && !summary.design && !summary.decisions) {
-    return null
-  }
-
-  return summary
+  return null
 }
 
 async function extractKeySections(filePath: string): Promise<string> {
@@ -152,6 +179,8 @@ async function extractKeySections(filePath: string): Promise<string> {
 }
 
 function addDesignContextSection(content: string, summary: DesignDocSummary, feature: string): string {
+  if (content.includes(DESIGN_CONTEXT_HEADER)) return content
+
   const sections: string[] = []
 
   if (summary.proposal) {
@@ -168,99 +197,87 @@ function addDesignContextSection(content: string, summary: DesignDocSummary, fea
 
   const designSection = `
 ---
-## Design Context
+${DESIGN_CONTEXT_HEADER}
 
-> Auto-injected from \`docs/design/${escapeMarkdown(feature)}/\` by OpenFlow.
+> Auto-injected from the active OpenFlow design workspace for \`${escapeMarkdown(feature)}\`.
 > Refer to the original design documents for full details.
 
 ${sections.join('\n\n')}
 
 `
-
-  const lines = content.split('\n')
-  let insertIndex = 1
-
-  for (let i = 0; i < lines.length; i++) {
-    const currentLine = lines[i]
-    if (currentLine?.startsWith('# ')) {
-      insertIndex = i + 1
-      break
-    }
-  }
-
-  lines.splice(insertIndex, 0, designSection)
-  return lines.join('\n')
+  return insertAfterTopTitle(content, designSection)
 }
 
 function addTddExpansionComment(content: string, tasks: ParsedTask[]): string {
-  const taskList = tasks.map((t) => `- Task ${t.id}: ${escapeMarkdown(t.title)}`).join('\n')
+  if (content.includes(TDD_EXPANDED_HEADER)) return content
 
-  const tddComment = `
-<!-- OpenFlow TDD Expansion Hint
-The following implementation tasks should follow TDD (Red-Green-Refactor):
+  const tddExpandedTasks: string[] = []
+  
+  for (const task of tasks) {
+    tddExpandedTasks.push(`
+### Task ${task.id}: ${escapeMarkdown(task.title)} (TDD)
 
-${taskList}
+**Files:**
+- Test: \`tests/unit/path/to/test.ts\`
+- Implementation: \`src/path/to/file.ts\`
 
-For each implementation task:
-1. RED: Write failing test first
-2. GREEN: Implement minimal code to pass
-3. REFACTOR: Clean up while keeping tests green
--->
+- [ ] **Step 1: RED - Write failing test**
+\`\`\`typescript
+// Write test for ${task.title}
+describe('${task.title}', () => {
+  it('should work correctly', () => {
+    // Arrange
+    // Act
+    // Assert
+  })
+})
+\`\`\`
 
-`
+- [ ] **Step 2: Run test to verify it fails**
+Run: \`bun test tests/unit/path/to/test.ts\`
+Expected: FAIL
 
-  const lines = content.split('\n')
-  let insertIndex = 1
+- [ ] **Step 3: GREEN - Implement minimal code**
+\`\`\`typescript
+// Minimal implementation to pass
+\`\`\`
 
-  for (let i = 0; i < lines.length; i++) {
-    const currentLine = lines[i]
-    if (currentLine?.startsWith('# ')) {
-      insertIndex = i + 1
-      break
-    }
+- [ ] **Step 4: Run test to verify it passes**
+Run: \`bun test tests/unit/path/to/test.ts\`
+Expected: PASS
+
+- [ ] **Step 5: REFACTOR - Clean up while keeping tests green**
+
+- [ ] **Step 6: Commit**
+\`\`\`bash
+git add tests/ src/
+git commit -m "feat: ${task.title}"
+\`\`\`
+`)
   }
 
-  lines.splice(insertIndex, 0, tddComment)
-  return lines.join('\n')
+  const tddSection = `
+---
+${TDD_EXPANDED_HEADER}
+
+> Auto-expanded by OpenFlow. Each implementation task follows Red-Green-Refactor cycle.
+
+${tddExpandedTasks.join('\n')}
+
+`
+  return insertAfterTopTitle(content, tddSection)
 }
 
 function addVerificationSection(content: string, verification: OpenFlowConfig['verification']): string {
-  const securityChecks = verification.security
-    .map((s) => {
-      switch (s) {
-        case 'secret':
-          return '- [ ] **Secret Scan**: Check for accidentally committed secrets'
-        case 'vuln':
-          return '- [ ] **Vulnerability Scan**: Run dependency vulnerability check'
-        case 'dependency':
-          return '- [ ] **Dependency Review**: Verify new dependencies are trusted'
-        default:
-          return `- [ ] **${escapeMarkdown(s)}**: Run security check`
-      }
-    })
-    .join('\n')
+  if (content.includes(VERIFICATION_HEADER)) return content
 
-  const qualityChecks = verification.quality
-    .map((q) => {
-      switch (q) {
-        case 'lint':
-          return '- [ ] **Lint Check**: Run linter'
-        case 'typecheck':
-          return '- [ ] **Type Check**: Run type checker'
-        case 'test':
-          return '- [ ] **Test Suite**: Run all tests'
-        case 'format':
-          return '- [ ] **Format Check**: Run formatter check'
-        default:
-          return `- [ ] **${escapeMarkdown(q)}**: Run quality check`
-      }
-    })
-    .join('\n')
+  const securityChecks = formatSecurityChecks(verification.security, 'plan')
+  const qualityChecks = formatQualityChecks(verification.quality, 'plan')
 
   const verificationSection = `
 
 ---
-## Verification Phase
+${VERIFICATION_HEADER}
 
 ### Security Checks
 ${securityChecks}
@@ -268,8 +285,28 @@ ${securityChecks}
 ### Quality Checks
 ${qualityChecks}
 
+### Failure Handling
+- Quality failure: fix implementation and rerun verification.
+- Security failure: block archive until fixed.
+- Consistency failure: sync docs and implementation, then rerun verification.
+
 > Auto-generated by OpenFlow. Complete all verification tasks before archiving.
 `
 
   return content + verificationSection
+}
+
+function insertAfterTopTitle(content: string, section: string): string {
+  const lines = content.split('\n')
+  let insertIndex = 1
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]?.startsWith('# ')) {
+      insertIndex = i + 1
+      break
+    }
+  }
+
+  lines.splice(insertIndex, 0, section)
+  return lines.join('\n')
 }

@@ -11,6 +11,12 @@ export interface ParsedTask {
   lineNumber: number
 }
 
+const SECTION_END_MARKERS = [
+  /^##\s*(Success\s*Criteria|Final\s*Checklist|Verification|Commit\s*Strategy|Execution|Notes|References|Appendix)/i,
+  /^---\s*$/,
+  /^##\s*[^T]/,
+]
+
 export function parsePlanTasks(content: string): ParsedTask[] {
   const tasks: ParsedTask[] = []
   const lines = content.split('\n')
@@ -22,19 +28,29 @@ export function parsePlanTasks(content: string): ParsedTask[] {
     const line = lines[i]
     if (!line) continue
 
-    if (/^##?\s*(Tasks?|任务)/i.test(line)) {
+    if (/^##?\s*(Tasks?|TODOs?|任务)/i.test(line)) {
       inTaskSection = true
       continue
     }
 
     if (!inTaskSection) continue
 
-    const taskMatch = line.match(/^[-*]\s*\[[ x]\]\s*(.+)$|^(\d+)\.\s+(.+)$|^##\s+(.+)$/i)
+    if (SECTION_END_MARKERS.some(pattern => pattern.test(line))) {
+      break
+    }
+
+    if (/^##[^#\s]/.test(line) && !/^##\s*(Wave|Task|Step)/i.test(line)) {
+      break
+    }
+
+    const taskMatch = line.match(/^[-*]\s*\[[ x]\]\s*(.+)$|^(\d+)\.\s+(.+)$/)
 
     if (taskMatch) {
       taskNumber++
-      const title = taskMatch[1] ?? taskMatch[3] ?? taskMatch[4] ?? ''
+      const title = taskMatch[1] ?? taskMatch[3] ?? ''
       const cleanTitle = title.trim()
+
+      if (cleanTitle.length < 2) continue
 
       tasks.push({
         id: taskNumber,

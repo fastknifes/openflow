@@ -12,7 +12,8 @@ export function handleConfig(ctx: OpenFlowContext): string {
     "brainstorming": {
       "enabled": ${config.brainstorming.enabled},
       "output_dir": "${escapeMarkdown(config.brainstorming.output_dir)}",
-      "auto_trigger": ${config.brainstorming.auto_trigger}
+      "auto_trigger": ${config.brainstorming.auto_trigger},
+      "trigger_mode": "${escapeMarkdown(config.brainstorming.trigger_mode)}"
     },
     "tdd": {
       "enabled": ${config.tdd.enabled},

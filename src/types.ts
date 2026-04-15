@@ -2,6 +2,20 @@ export interface BrainstormingConfig {
   enabled: boolean
   output_dir: string
   auto_trigger: boolean
+  trigger_mode: BrainstormTriggerMode
+  generate_prd: boolean
+  prd_output_dir: string
+  closure: BrainstormClosureConfig
+}
+
+export type BrainstormTriggerMode = 'smart' | 'always' | 'never'
+
+export interface BrainstormClosureConfig {
+  enabled: boolean
+  auto_transition: boolean
+  strong_signals: string[]
+  weak_signals: string[]
+  weak_signal_threshold: number
 }
 
 export interface TddConfig {
@@ -14,6 +28,7 @@ export interface VerificationConfig {
   security: SecurityCheckType[]
   quality: QualityCheckType[]
   auto_fix: boolean
+  completion_prompt: boolean
 }
 
 export type SecurityCheckType = 'secret' | 'vuln' | 'dependency'
@@ -23,6 +38,7 @@ export interface ArchiveConfig {
   enabled: boolean
   output_dir: string
   drift_check?: boolean
+  auto_promote_current?: boolean
 }
 
 export interface AcceptanceConfig {
@@ -44,8 +60,18 @@ export interface OpenFlowConfig {
 export const defaultConfig: OpenFlowConfig = {
   brainstorming: {
     enabled: true,
-    output_dir: 'docs/design',
+    output_dir: 'docs/current/design',
     auto_trigger: true,
+    trigger_mode: 'smart',
+    generate_prd: true,
+    prd_output_dir: 'docs/current/requirements',
+    closure: {
+      enabled: true,
+      auto_transition: true,
+      strong_signals: ['按这个做', '按这个方案推进', '生成正式文档', '就按这个方向', 'go with this', 'proceed with this', 'generate formal docs'],
+      weak_signals: ['可以', '好', '确认', '没问题', 'done', 'looks good', 'approved'],
+      weak_signal_threshold: 2,
+    },
   },
   tdd: {
     enabled: true,
@@ -56,6 +82,7 @@ export const defaultConfig: OpenFlowConfig = {
     security: ['secret', 'vuln'],
     quality: ['lint', 'typecheck', 'test'],
     auto_fix: false,
+    completion_prompt: true,
   },
   acceptance: {
     enabled: true,
@@ -68,6 +95,7 @@ export const defaultConfig: OpenFlowConfig = {
     enabled: true,
     output_dir: 'docs/archive',
     drift_check: true,
+    auto_promote_current: false,
   },
 }
 
@@ -92,6 +120,37 @@ export interface OpenFlowContext {
   enhancedPlans: Set<string>
 }
 
+export type BrainstormWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
+
+export type BrainstormQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
+
+export interface PersistedBrainstormSession {
+  version: 2
+  feature: string
+  workflowState: BrainstormWorkflowState
+  pendingQuestionId: BrainstormQuestionId | null
+  askedQuestionIds: BrainstormQuestionId[]
+  answers: Partial<Record<BrainstormQuestionId, string>>
+  generatedDocs: string[]
+  generationAttemptCount: number
+  lastError?: string
+  lastQuestionPromptedAt?: string
+  lastAnsweredAt?: string
+  updatedAt: string
+}
+
+export interface ActiveBrainstormIndex {
+  bySessionID: Record<string, { feature: string; updatedAt: string }>
+}
+
+export interface RecentBrainstormCompletionIndex {
+  bySessionID: Record<string, { feature: string; completedAt: string }>
+}
+
+export type RequestType = 'trivial' | 'explicit' | 'exploratory' | 'open-ended' | 'fix'
+
+export type BrainstormTriggerSource = 'intent' | 'fallback' | 'config'
+
 export type TaskType = 'implementation' | 'test' | 'verification' | 'review' | 'setup' | 'unknown'
 
 export interface ParsedTask {
@@ -106,7 +165,26 @@ export interface ParsedTask {
 }
 
 // 验收阶段类型
-export type DevelopmentPhase = 'implementation' | 'acceptance' | 'archived'
+export type DevelopmentPhase =
+  | 'implementation'
+  | 'acceptance'
+  | 'verification_pending'
+  | 'verification_failed'
+  | 'archived'
+  | 'promotion_pending'
+  | 'promoted'
+
+export type VerificationFailureCategory = 'quality' | 'security' | 'consistency'
+
+export type PromotionType = 'ADD' | 'UPDATE' | 'REMOVE'
+
+export interface CurrentPromotionSuggestion {
+  type: PromotionType
+  targetArea: 'design' | 'requirements'
+  targetPath: string
+  sourcePath?: string
+  reason: string
+}
 
 export interface PendingDocUpdate {
   file: string
@@ -118,8 +196,18 @@ export interface AcceptanceState {
   feature: string
   phase: DevelopmentPhase
   phaseStartedAt: string
+  sessionID?: string
   implementationEndedAt?: string
+  verificationPromptedAt?: string
+  verificationCompletedAt?: string
+  verificationFailureCategory?: VerificationFailureCategory
   pendingDocUpdates: PendingDocUpdate[]
+  waitingForDocUpdateConfirm?: boolean
+  lastChangedFile?: string
+  promotionSuggestions?: CurrentPromotionSuggestion[]
+  promotionDecidedAt?: string
+  promotionApplied?: boolean
+  promotionAppliedAt?: string
 }
 
 // 按阶段分段的文件变更记录

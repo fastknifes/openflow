@@ -23,6 +23,10 @@ export function handleStatus(ctx: OpenFlowContext): string {
 | Verification | ${config.verification.in_plan ? '✅' : '❌'} |
 | Archive | ${config.archive.enabled ? '✅' : '❌'} |
 
+### Brainstorm Trigger
+- mode: ${escapeMarkdown(config.brainstorming.trigger_mode)}
+- behavior: standalone command with one-question workflow
+
 ### Enhanced Plans
 ${enhancedPlansStr}
 

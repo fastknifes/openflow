@@ -1,0 +1,159 @@
+import { describe, expect, test } from 'bun:test'
+import { access, readFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { OpenFlowPlugin } from '../src/index.js'
+
+function createPluginInput(directory: string) {
+  return {
+    directory,
+    worktree: directory,
+    client: {},
+    $: {},
+    config: {},
+  }
+}
+
+function createToolContext(directory: string, sessionID = 'session-1') {
+  return {
+    sessionID,
+    messageID: 'message-1',
+    agent: 'test-agent',
+    directory,
+    worktree: directory,
+    abort: new AbortController().signal,
+    metadata: () => void 0,
+    ask: async () => void 0,
+  }
+}
+
+describe('OpenFlowPlugin', () => {
+  test('initializes plugin and registers hooks', async () => {
+    const root = join(process.cwd(), '.test-plugin-init')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    if (!plugin.tool) {
+      throw new Error('Expected plugin.tool to be defined')
+    }
+
+    expect(plugin.tool['openflow/brainstorm']).toBeDefined()
+    expect(plugin.tool['openflow/archive']).toBeDefined()
+    expect(plugin.tool['openflow/status']).toBeDefined()
+    expect(plugin.tool['openflow/config']).toBeDefined()
+    expect(plugin['chat.message']).toBeFunction()
+    expect(plugin['tool.execute.before']).toBeFunction()
+    expect(plugin['tool.execute.after']).toBeFunction()
+    expect(plugin.config).toBeFunction()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('dispatches tool actions and applies config reload', async () => {
+    const root = join(process.cwd(), '.test-plugin-tool')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    if (!plugin.tool) {
+      throw new Error('Expected plugin.tool to be defined')
+    }
+    const toolContext = createToolContext(root)
+
+    const statusBefore = await plugin.tool['openflow/status'].execute({}, toolContext)
+    expect(statusBefore).toContain('mode: smart')
+
+    const configOutput = await plugin.tool['openflow/config'].execute({}, toolContext)
+    expect(configOutput).toContain('OpenFlow Configuration')
+
+    const brainstormOutput = await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login' }, toolContext)
+    expect(brainstormOutput).toContain('Brainstorm Question')
+
+    const nextConfig = {
+      openflow: {
+        brainstorming: {
+          trigger_mode: 'always',
+        },
+      },
+    } as unknown as Parameters<NonNullable<typeof plugin.config>>[0]
+
+    await plugin.config?.(nextConfig)
+
+    const statusAfter = await plugin.tool['openflow/status'].execute({}, toolContext)
+    expect(statusAfter).toContain('mode: always')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('progresses brainstorm across separate tool executions and completes with final document', async () => {
+    const root = join(process.cwd(), '.test-plugin-brainstorm-resume')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    if (!plugin.tool) {
+      throw new Error('Expected plugin.tool to be defined')
+    }
+
+    const toolContext = createToolContext(root, 'plugin-session')
+
+    const first = await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login' }, toolContext)
+    expect(first).toContain('这个功能主要要解决什么问题？')
+
+    const second = await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login', answer: '支持新场景' }, toolContext)
+    expect(second).toContain('这个功能的主要使用者是谁？')
+
+    await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login', answer: '内部开发者' }, toolContext)
+    await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login', answer: 'new-feature' }, toolContext)
+    await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login', answer: '风险最小' }, toolContext)
+    const final = await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login', answer: '兼容现有系统' }, toolContext)
+
+    expect(final).toContain('Design document generated')
+
+    const designDir = join(root, 'docs', 'changes', 'user-login', 'design')
+    await expect(access(designDir)).resolves.toBeNull()
+
+    const generatedFile = join(designDir, `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}-design.md`)
+    const content = await readFile(generatedFile, 'utf-8')
+    expect(content).toContain('支持新场景')
+    expect(content).toContain('内部开发者')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('resolves active brainstorm by session when feature is omitted', async () => {
+    const root = join(process.cwd(), '.test-plugin-brainstorm-session-resume')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    if (!plugin.tool) {
+      throw new Error('Expected plugin.tool to be defined')
+    }
+
+    const toolContext = createToolContext(root, 'plugin-session-resume')
+    await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login' }, toolContext)
+
+    const resumed = await plugin.tool['openflow/brainstorm'].execute({ answer: '支持新场景' } as never, toolContext)
+    expect(resumed).toContain('这个功能的主要使用者是谁？')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('initializes plugin even when directory is missing', async () => {
+    const plugin = await OpenFlowPlugin({
+      worktree: process.cwd(),
+      client: {},
+      $: {},
+      config: {},
+    } as never)
+
+    if (!plugin.tool) {
+      throw new Error('Expected plugin.tool to be defined')
+    }
+
+    expect(plugin.tool['openflow/brainstorm']).toBeDefined()
+    expect(plugin.tool['openflow/archive']).toBeDefined()
+    expect(plugin.tool['openflow/status']).toBeDefined()
+    expect(plugin.tool['openflow/config']).toBeDefined()
+    expect(plugin['chat.message']).toBeFunction()
+    expect(plugin['tool.execute.before']).toBeFunction()
+    expect(plugin['tool.execute.after']).toBeFunction()
+  })
+})

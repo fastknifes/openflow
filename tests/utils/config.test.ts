@@ -1,24 +1,43 @@
 import { describe, expect, test } from 'bun:test'
-import { loadConfig, defaultConfig } from '../src/config.js'
+import { loadConfig, defaultConfig } from '../../src/config'
 
 describe('loadConfig', () => {
-  it('should return default config when no input', () => {
+  test('should return default config when no input', () => {
     const config = loadConfig()
     expect(config).toEqual(defaultConfig)
   })
 
-  it('should return merged config when valid input', () => {
-    const config = loadConfig({ openflow: { brainstorming: { enabled: true } })
-    expect(result.brainstorming.enabled).toBe(true)
-    expect(result.tdd.enabled).toBe(true)
-    expect(result.verification.in_plan).toBe(true)
-    expect(result.archive.enabled).toBe(true)
+  test('should return merged config when valid input', () => {
+    const config = loadConfig({
+      openflow: {
+        brainstorming: {
+          enabled: true,
+          trigger_mode: 'always',
+          closure: {
+            enabled: true,
+            auto_transition: false,
+            strong_signals: ['ship it'],
+            weak_signals: ['ok'],
+            weak_signal_threshold: 1,
+          },
+        },
+        archive: {
+          auto_promote_current: true,
+        },
+      },
+    })
+    expect(config.brainstorming.enabled).toBe(true)
+    expect(config.brainstorming.trigger_mode).toBe('always')
+    expect(config.brainstorming.closure.auto_transition).toBe(false)
+    expect(config.tdd.enabled).toBe(true)
+    expect(config.verification.in_plan).toBe(true)
+    expect(config.archive.enabled).toBe(true)
+    expect(config.archive.auto_promote_current).toBe(true)
   })
 
-  it('should warn and return default config for invalid input', () => {
-    const invalidConfig = { brainstorming: { enabled: 'invalid' } }
-    const config = loadConfig({ openflow: { brainstorming: { enabled: 'invalid' } })
-    expect(config.brainstorming.enabled).toBe(false)
+  test('should warn and return default config for invalid input', () => {
+    const config = loadConfig({ openflow: { brainstorming: { enabled: 'invalid' } } })
+    expect(config.brainstorming.enabled).toBe(defaultConfig.brainstorming.enabled)
     expect(config.tdd.enabled).toBe(true)
     expect(config.verification.in_plan).toBe(true)
     expect(config.archive.enabled).toBe(true)

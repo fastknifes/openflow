@@ -1,17 +1,12 @@
 import type { OpenFlowContext } from '../types.js'
-import { loadAcceptanceState, addPendingDocUpdate } from '../utils/acceptance-state.js'
+import { loadAcceptanceState, addPendingDocUpdate, setWaitingForDocUpdateConfirm } from '../utils/acceptance-state.js'
 import { logger } from '../utils/logger.js'
 
-const DOC_SYNC_PROMPT = `
-📝 **验收阶段变更已记录**
+const DOC_SYNC_PROMPT = `📝 **验收阶段变更已记录**
 
 变更文件: {{file}}
-是否更新设计文档？
 
-[Y] 更新设计文档（推荐）
-[N] 仅代码变更，稍后处理
-[S] 跳过，归档时再处理
-`
+是否需要我帮你同步更新相关设计/需求文档？`
 
 export function createAcceptancePromptHook(ctx: OpenFlowContext) {
   return async (input: { tool: string; args?: Record<string, unknown> }): Promise<string | void> => {
@@ -31,10 +26,10 @@ export function createAcceptancePromptHook(ctx: OpenFlowContext) {
       timestamp: new Date().toISOString()
     })
     
+    await setWaitingForDocUpdateConfirm(ctx.directory, filePath)
+    
     logger.info('Acceptance phase code change detected', { file: filePath })
     
-    if (ctx.config.acceptance.doc_sync_prompt) {
-      return DOC_SYNC_PROMPT.replace('{{file}}', filePath)
-    }
+    return DOC_SYNC_PROMPT.replace('{{file}}', filePath)
   }
 }

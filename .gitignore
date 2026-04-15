@@ -28,5 +28,17 @@ coverage/
 # Sisyphus builds (generated during execution)
 .sisyphus/builds/
 
-# Git
-.git/
+# Smoke test directories (auto-generated)
+.pack-smoke/
+.pack-smoke-node/
+.test-tool-after/
+.test-tool-after-track/
+.smoke-opencode-*/
+
+# OpenCode (IDE managed)
+.opencode/
+
+# Packaged tgz
+*.tgz
+.gitnexus
+.claude/
