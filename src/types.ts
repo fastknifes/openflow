@@ -60,11 +60,11 @@ export interface OpenFlowConfig {
 export const defaultConfig: OpenFlowConfig = {
   brainstorming: {
     enabled: true,
-    output_dir: 'docs/current/design',
+    output_dir: 'docs/changes',
     auto_trigger: true,
     trigger_mode: 'smart',
     generate_prd: true,
-    prd_output_dir: 'docs/current/requirements',
+    prd_output_dir: 'docs/changes',
     closure: {
       enabled: true,
       auto_transition: true,
@@ -95,7 +95,7 @@ export const defaultConfig: OpenFlowConfig = {
     enabled: true,
     output_dir: 'docs/archive',
     drift_check: true,
-    auto_promote_current: false,
+    auto_promote_current: true,
   },
 }
 
@@ -178,11 +178,14 @@ export type VerificationFailureCategory = 'quality' | 'security' | 'consistency'
 
 export type PromotionType = 'ADD' | 'UPDATE' | 'REMOVE'
 
+export type CurrentPromotionStrategy = 'direct_migration' | 'synthesized_refresh'
+
 export interface CurrentPromotionSuggestion {
   type: PromotionType
   targetArea: 'design' | 'requirements'
   targetPath: string
   sourcePath?: string
+  strategy?: CurrentPromotionStrategy
   reason: string
 }
 
@@ -190,6 +193,28 @@ export interface PendingDocUpdate {
   file: string
   timestamp: string
   reason?: string
+}
+
+export enum VerifyReadinessStatus {
+  Ready = 'ready',
+  ReadyWithDocUpdates = 'ready_with_doc_updates',
+  NotReady = 'not_ready',
+  NeedsDecision = 'needs_decision',
+}
+
+export enum VerifyDecisionType {
+  RuleConflict = 'rule_conflict',
+  CurrentConflict = 'current_conflict',
+  BusinessDecision = 'business_decision',
+}
+
+export interface VerifyResult {
+  readiness: VerifyReadinessStatus
+  reasonCodes: string[]
+  decisionType?: VerifyDecisionType
+  evidenceSummary: string
+  constraintsChecked: string[]
+  verifiedAt: string
 }
 
 export interface AcceptanceState {
@@ -208,6 +233,8 @@ export interface AcceptanceState {
   promotionDecidedAt?: string
   promotionApplied?: boolean
   promotionAppliedAt?: string
+  readiness?: VerifyReadinessStatus
+  verifyResult?: VerifyResult
 }
 
 // 按阶段分段的文件变更记录
