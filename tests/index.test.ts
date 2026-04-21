@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { access, readFile, rm } from 'node:fs/promises'
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { OpenFlowPlugin } from '../src/index.js'
+import { loadAcceptanceState, saveAcceptanceState } from '../src/utils/acceptance-state.js'
 
 function createPluginInput(directory: string) {
   return {
@@ -38,8 +39,10 @@ describe('OpenFlowPlugin', () => {
 
     expect(plugin.tool['openflow/brainstorm']).toBeDefined()
     expect(plugin.tool['openflow/archive']).toBeDefined()
+    expect(plugin.tool['openflow/init']).toBeDefined()
     expect(plugin.tool['openflow/status']).toBeDefined()
     expect(plugin.tool['openflow/config']).toBeDefined()
+    expect(plugin.tool['openflow/verify']).toBeDefined()
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()
@@ -63,6 +66,11 @@ describe('OpenFlowPlugin', () => {
 
     const configOutput = await plugin.tool['openflow/config'].execute({}, toolContext)
     expect(configOutput).toContain('OpenFlow Configuration')
+
+    const verifyOutput = await plugin.tool['openflow/verify'].execute({}, toolContext)
+    expect(verifyOutput).toContain('## Verify')
+    expect(verifyOutput).toContain('### Evidence')
+    expect(verifyOutput).toContain('### Readiness')
 
     const brainstormOutput = await plugin.tool['openflow/brainstorm'].execute({ feature: 'user-login' }, toolContext)
     expect(brainstormOutput).toContain('Brainstorm Question')
@@ -107,10 +115,8 @@ describe('OpenFlowPlugin', () => {
 
     expect(final).toContain('Design document generated')
 
-    const designDir = join(root, 'docs', 'changes', 'user-login', 'design')
-    await expect(access(designDir)).resolves.toBeNull()
-
-    const generatedFile = join(designDir, `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}-design.md`)
+    const generatedFile = join(root, 'docs', 'changes', 'user-login', 'design.md')
+    await expect(access(generatedFile)).resolves.toBeNull()
     const content = await readFile(generatedFile, 'utf-8')
     expect(content).toContain('支持新场景')
     expect(content).toContain('内部开发者')
@@ -150,10 +156,95 @@ describe('OpenFlowPlugin', () => {
 
     expect(plugin.tool['openflow/brainstorm']).toBeDefined()
     expect(plugin.tool['openflow/archive']).toBeDefined()
+    expect(plugin.tool['openflow/init']).toBeDefined()
     expect(plugin.tool['openflow/status']).toBeDefined()
     expect(plugin.tool['openflow/config']).toBeDefined()
+    expect(plugin.tool['openflow/verify']).toBeDefined()
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()
+  })
+
+  test('routes acceptance detection through plugin chat.message hook', async () => {
+    const root = join(process.cwd(), '.test-plugin-acceptance-chat')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(root, '.sisyphus', 'plans', 'demo-feature.md'), '# demo', 'utf-8')
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    const output = {
+      message: {
+        id: 'm-acceptance',
+        sessionID: 'session-acceptance-chat',
+        role: 'user' as const,
+      },
+      parts: [{ id: 'p-1', sessionID: 'session-acceptance-chat', messageID: 'm-acceptance', type: 'text' as const, text: '测试发现这个功能还有问题，需要调整' }],
+    }
+
+    await plugin['chat.message']?.({ sessionID: 'session-acceptance-chat' } as never, output as never)
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.phase).toBe('acceptance')
+    expect(state?.feature).toBe('demo-feature')
+    expect(state?.sessionID).toBe('session-acceptance-chat')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('routes acceptance doc-sync prompt through plugin tool.execute.after hook', async () => {
+    const root = join(process.cwd(), '.test-plugin-acceptance-tool-after')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await saveAcceptanceState(root, {
+      feature: 'demo-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    const output = { title: '', output: '', metadata: {} }
+
+    await plugin['tool.execute.after']?.(
+      { tool: 'write', sessionID: 'session-acceptance-tool', callID: 'call-acceptance-tool', args: { filePath: 'src/demo.ts' } } as never,
+      output as never
+    )
+
+    expect(output.output).toContain('验收阶段变更已记录')
+    expect(output.output).toContain('src/demo.ts')
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.pendingDocUpdates).toHaveLength(1)
+    expect(state?.waitingForDocUpdateConfirm).toBe(true)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('executes openflow/init command and creates AGENTS.md', async () => {
+    const root = join(process.cwd(), '.test-plugin-init-command')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    if (!plugin.tool) {
+      throw new Error('Expected plugin.tool to be defined')
+    }
+
+    const toolContext = createToolContext(root)
+
+    // Execute init command
+    const result = await plugin.tool['openflow/init'].execute({}, toolContext)
+    expect(result).toBe('initialized AGENTS.md and added OpenFlow docs guide')
+
+    // Verify AGENTS.md was created
+    const agentsPath = join(root, 'AGENTS.md')
+    await expect(access(agentsPath)).resolves.toBeNull()
+
+    const content = await readFile(agentsPath, 'utf-8')
+    expect(content).toContain('# OpenFlow')
+    expect(content).toContain('<!-- OPENFLOW DOCS GUIDE:BEGIN -->')
+    expect(content).toContain('<!-- OPENFLOW DOCS GUIDE:END -->')
+
+    await rm(root, { recursive: true, force: true })
   })
 })

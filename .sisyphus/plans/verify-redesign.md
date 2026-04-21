@@ -190,7 +190,7 @@ Wave 4: compatibility hardening + end-to-end command-path verification
 
   **Commit**: YES | Message: `refactor(state): persist verify readiness metadata` | Files: `src/utils/acceptance-state.ts`, tests/fixtures
 
-- [ ] 3. Add the real openflow/verify command shell and single-entry registration
+- [x] 3. Add the real openflow/verify command shell and single-entry registration
 
   **What to do**: Introduce a real `src/commands/verify.ts` command and register `openflow/verify` in `src/index.ts` and command exports. The command must be the single workflow entry for verification and return a stable result shape summarizing Evidence and Readiness. Initially wire the command around the persisted contract from Tasks 1–2, but keep readiness classification pure: Evidence may collect/run checks and compare against `changes/{feature}` plus stable constraints; Readiness only classifies outputs, it does not mutate archive/current. Update help/error messaging so the absence of a feature or missing active context produces deterministic user-facing responses.
   **Must NOT do**: Do not hide this behind skill text only. Do not let the command write `current/*` or any archive artifacts.

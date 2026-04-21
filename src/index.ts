@@ -5,7 +5,7 @@ import { cleanupLegacyCommandArtifacts } from './command-registration.js'
 import { loadConfig } from './config.js'
 import { registerSkills } from './skills/registration.js'
 import { logger, OpenFlowError } from './utils/index.js'
-import { handleArchive, handleBrainstorm, handleStatus, handleConfig } from './commands/index.js'
+import { handleArchive, handleBrainstorm, handleInit, handleStatus, handleConfig, handleVerify } from './commands/index.js'
 import { createChatMessageHook } from './hooks/chat-message.js'
 import { createToolBeforeHook } from './hooks/tool-before.js'
 import { createToolAfterHook } from './hooks/tool-after.js'
@@ -84,6 +84,21 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
+      'openflow/init': tool({
+        description: 'OpenFlow init command for initializing AGENTS.md with docs guide',
+        args: {},
+        execute: async (_args: Record<string, never>, toolContext) => {
+          void toolContext
+          try {
+            return await handleInit(openflowCtx)
+          } catch (error) {
+            if (error instanceof OpenFlowError) {
+              return error.toUserMessage()
+            }
+            return `Error: ${error instanceof Error ? error.message : String(error)}`
+          }
+        },
+      }),
       'openflow/status': tool({
         description: 'OpenFlow status command',
         args: {},
@@ -106,6 +121,23 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           void toolContext
           try {
             return handleConfig(openflowCtx)
+          } catch (error) {
+            if (error instanceof OpenFlowError) {
+              return error.toUserMessage()
+            }
+            return `Error: ${error instanceof Error ? error.message : String(error)}`
+          }
+        },
+      }),
+      'openflow/verify': tool({
+        description: 'OpenFlow verify command for evidence and readiness checks',
+        args: {
+          feature: tool.schema.string().max(64).optional(),
+        },
+        execute: async (args: { feature?: string }, toolContext) => {
+          void toolContext
+          try {
+            return await handleVerify(openflowCtx, args.feature)
           } catch (error) {
             if (error instanceof OpenFlowError) {
               return error.toUserMessage()
