@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import type { AcceptanceState, PendingDocUpdate, DevelopmentPhase, VerificationFailureCategory, CurrentPromotionSuggestion } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult } from '../types.js'
 import { getAcceptanceStatePath } from '../config.js'
 import { logger } from './logger.js'
 
@@ -26,6 +26,12 @@ const FIELD_PREFIXES = {
   promotionApplied: 'promotionApplied:',
   promotionDecidedAt: 'promotionDecidedAt:',
   promotionAppliedAt: 'promotionAppliedAt:',
+  readiness: 'readiness:',
+  readinessReasonCodes: 'readinessReasonCodes:',
+  readinessDecisionType: 'readinessDecisionType:',
+  readinessEvidenceSummary: 'readinessEvidenceSummary:',
+  readinessConstraintsChecked: 'readinessConstraintsChecked:',
+  readinessVerifiedAt: 'readinessVerifiedAt:',
 } as const
 
 const PROMOTION_SUGGESTIONS_HEADER = '## Current Promotion Suggestions'
@@ -39,6 +45,12 @@ function parseStateFile(content: string): AcceptanceState | null {
   const result: Partial<AcceptanceState> = {
     pendingDocUpdates: []
   }
+  let readinessReasonCodes: string[] = []
+  let readinessDecisionType: VerifyDecisionType | undefined
+  let readinessEvidenceSummary: string | undefined
+  let readinessConstraintsChecked: string[] = []
+  let readinessVerifiedAt: string | undefined
+  let hasReadinessField = false
   
   let inPendingUpdates = false
   
@@ -85,6 +97,30 @@ function parseStateFile(content: string): AcceptanceState | null {
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.promotionAppliedAt)) {
       result.promotionAppliedAt = extractFieldValue(trimmed, FIELD_PREFIXES.promotionAppliedAt)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.readiness)) {
+      result.readiness = extractFieldValue(trimmed, FIELD_PREFIXES.readiness) as VerifyReadinessStatus
+      hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.readinessReasonCodes)) {
+      readinessReasonCodes = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.readinessReasonCodes))
+      hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.readinessDecisionType)) {
+      readinessDecisionType = extractFieldValue(trimmed, FIELD_PREFIXES.readinessDecisionType) as VerifyDecisionType
+      hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.readinessEvidenceSummary)) {
+      readinessEvidenceSummary = extractFieldValue(trimmed, FIELD_PREFIXES.readinessEvidenceSummary)
+      hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.readinessConstraintsChecked)) {
+      readinessConstraintsChecked = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.readinessConstraintsChecked))
+      hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.readinessVerifiedAt)) {
+      readinessVerifiedAt = extractFieldValue(trimmed, FIELD_PREFIXES.readinessVerifiedAt)
+      hasReadinessField = true
       inPendingUpdates = false
     } else if (trimmed === PENDING_UPDATES_HEADER) {
       inPendingUpdates = true
@@ -167,6 +203,26 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.promotionAppliedAt) {
     state.promotionAppliedAt = result.promotionAppliedAt
   }
+  if (result.readiness) {
+    state.readiness = result.readiness
+  }
+  if (hasReadinessField) {
+    state.verifyResult = {
+      readiness: result.readiness ?? state.readiness ?? VerifyReadinessStatus.NotReady,
+      reasonCodes: readinessReasonCodes,
+      evidenceSummary: readinessEvidenceSummary || '',
+      constraintsChecked: readinessConstraintsChecked,
+      verifiedAt: readinessVerifiedAt || '',
+    }
+    if (readinessDecisionType) {
+      state.verifyResult.decisionType = readinessDecisionType
+    }
+  }
+
+  // Legacy compatibility: verification_failed implies not_ready
+  if (state.phase === 'verification_failed' && !state.readiness) {
+    state.readiness = VerifyReadinessStatus.NotReady
+  }
   
   return state
 }
@@ -193,6 +249,14 @@ function serializeState(state: AcceptanceState): string {
   }
   pushOptionalLine(lines, FIELD_PREFIXES.promotionDecidedAt, state.promotionDecidedAt)
   pushOptionalLine(lines, FIELD_PREFIXES.promotionAppliedAt, state.promotionAppliedAt)
+  pushOptionalLine(lines, FIELD_PREFIXES.readiness, state.readiness)
+  if (state.verifyResult) {
+    pushOptionalLine(lines, FIELD_PREFIXES.readinessReasonCodes, state.verifyResult.reasonCodes.join(', '))
+    pushOptionalLine(lines, FIELD_PREFIXES.readinessDecisionType, state.verifyResult.decisionType)
+    pushOptionalLine(lines, FIELD_PREFIXES.readinessEvidenceSummary, state.verifyResult.evidenceSummary)
+    pushOptionalLine(lines, FIELD_PREFIXES.readinessConstraintsChecked, state.verifyResult.constraintsChecked.join(', '))
+    pushOptionalLine(lines, FIELD_PREFIXES.readinessVerifiedAt, state.verifyResult.verifiedAt)
+  }
   lines.push('')
   
   lines.push(PENDING_UPDATES_HEADER)
@@ -222,6 +286,14 @@ function serializeState(state: AcceptanceState): string {
 
 function extractFieldValue(line: string, prefix: string): string {
   return line.slice(prefix.length).trim()
+}
+
+function parseCommaSeparatedField(value: string): string[] {
+  if (!value) {
+    return []
+  }
+
+  return value.split(',').map(item => item.trim()).filter(Boolean)
 }
 
 function pushOptionalLine(lines: string[], key: string, value?: string): void {
@@ -343,4 +415,19 @@ export async function markImplementationComplete(projectDir: string): Promise<vo
     state.implementationEndedAt = formatTimestamp()
     await saveAcceptanceState(projectDir, state)
   }
+}
+
+export async function saveVerifyResult(
+  projectDir: string,
+  verifyResult: VerifyResult
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot save verify result: no active acceptance state')
+    return
+  }
+  state.readiness = verifyResult.readiness
+  state.verifyResult = verifyResult
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Saved verify result', { feature: state.feature, readiness: verifyResult.readiness })
 }
