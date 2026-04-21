@@ -208,6 +208,23 @@ export enum VerifyDecisionType {
   BusinessDecision = 'business_decision',
 }
 
+export interface VerifyEvidenceCheckResult {
+  name: string
+  passed: boolean
+  category: VerificationFailureCategory
+  detail?: string
+}
+
+export interface VerifyEvidencePacket {
+  checksRun: string[]
+  checkResults: VerifyEvidenceCheckResult[]
+  observedBehaviorSummary: string
+  intendedVsActualDelta: string
+  docAlignmentSummary: string
+  constraintConflictSummary: string
+  knownRisksOrMissingEvidence: string
+}
+
 export interface VerifyResult {
   readiness: VerifyReadinessStatus
   reasonCodes: string[]
