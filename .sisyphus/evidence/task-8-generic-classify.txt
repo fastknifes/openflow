@@ -1,0 +1,30 @@
+QA Scenario: Generic adapter classifies by filename keywords
+Tool: Bun Test
+Command: bun test tests/phases/migrate-docs/adapters/generic.test.ts --test-name-pattern "keyword|filename|classify"
+Date: 2026-04-24
+Result: PASS
+
+Test Results:
+- 20 pass
+- 0 fail
+- 56 expect() calls
+
+Verified Classifications:
+- DESIGN.md -> current/design (0.5) ✓
+- DEPRECATED.md -> archive (0.6) ✓
+- README.md -> references/raw (0.3) ✓
+- SPEC.md -> current/spec (0.5) ✓
+- REQUIREMENT.md -> current/requirements (0.5) ✓
+- TODO.md -> changes (0.4) ✓
+- CHANGELOG.md -> changes (0.4) ✓
+- legacy.md -> archive (0.6) ✓
+- old.md -> archive (0.6) ✓
+- ADR.md -> decisions (0.4) ✓
+- decision.md -> decisions (0.4) ✓
+- notes.md (unrecognized) -> references/raw (0.3) ✓
+
+Heading extraction verified:
+- First heading "# Design Architecture" -> current/design (0.5) ✓
+- First heading "# API Specification" -> current/spec (0.5) ✓
+- First heading "# Product Requirements" -> current/requirements (0.5) ✓
+- No heading match -> references/raw (0.3) ✓

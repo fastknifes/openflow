@@ -1,0 +1,23 @@
+QA Scenario: Cursor rules get medium confidence for workflow classification
+Tool: Bun Test
+Command: bun test tests/phases/migrate-docs/adapters/cursor.test.ts --test-name-pattern "rules|workflow|confidence"
+Date: 2026-04-24
+Result: PASS
+
+Test Results:
+- 10 pass
+- 0 fail
+- 48 expect() calls
+
+Verified Behavior:
+- .cursor/rules/ files -> current/workflow/cursor-rules.md with confidence 0.6 ✓
+- Conversation history files -> references/raw/cursor-conversations/ with confidence 0.4 ✓
+- cursor.md -> references/raw/ with confidence 0.4 ✓
+- cursor-rules.md -> references/raw/ with confidence 0.4 ✓
+- Default unrecognized -> references/raw/ with confidence 0.3 ✓
+
+Detection verified:
+- .cursor/rules/ directory exists -> confidence 0.9 ✓
+- cursor.md exists -> confidence 0.6 ✓
+- cursor-rules.md exists -> confidence 0.6 ✓
+- No cursor files -> detected: false, confidence: 0 ✓
