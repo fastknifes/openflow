@@ -208,6 +208,8 @@ export enum VerifyDecisionType {
   BusinessDecision = 'business_decision',
 }
 
+export type ArchiveDocUpdateConfirmationStatus = 'confirmed' | 'declined'
+
 export interface VerifyEvidenceCheckResult {
   name: string
   passed: boolean
@@ -246,6 +248,9 @@ export interface AcceptanceState {
   pendingDocUpdates: PendingDocUpdate[]
   waitingForDocUpdateConfirm?: boolean
   lastChangedFile?: string
+  archiveUsedDocUpdateConfirmPath?: boolean
+  archiveDocUpdateConfirmationStatus?: ArchiveDocUpdateConfirmationStatus
+  archiveDocUpdateConfirmedAt?: string
   promotionSuggestions?: CurrentPromotionSuggestion[]
   promotionDecidedAt?: string
   promotionApplied?: boolean

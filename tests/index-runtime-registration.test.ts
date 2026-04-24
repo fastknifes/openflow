@@ -39,7 +39,7 @@ describe('OpenFlowPlugin runtime registration', () => {
     const globalSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow', 'brainstorm', 'SKILL.md')
     await expect(access(globalSkillPath)).resolves.toBeNull()
     const content = await readFile(globalSkillPath, 'utf-8')
-    expect(content).toContain('name: openflow/brainstorm')
+    expect(content).toContain('name: brainstorm')
 
     await rm(root, { recursive: true, force: true })
   })

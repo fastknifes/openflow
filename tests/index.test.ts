@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { OpenFlowPlugin } from '../src/index.js'
 import { loadAcceptanceState, saveAcceptanceState } from '../src/utils/acceptance-state.js'
@@ -115,7 +115,8 @@ describe('OpenFlowPlugin', () => {
 
     expect(final).toContain('Design document generated')
 
-    const generatedFile = join(root, 'docs', 'changes', 'user-login', 'design.md')
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
     await expect(access(generatedFile)).resolves.toBeNull()
     const content = await readFile(generatedFile, 'utf-8')
     expect(content).toContain('支持新场景')

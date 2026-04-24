@@ -1,5 +1,6 @@
 export { getSkills, findSkillByName } from './registry.js'
 export { getBrainstormSkill } from './brainstorm-skill.js'
+export { getInitSkill } from './init-skill.js'
 export { getVerifySkill } from './verify-skill.js'
 export { getArchiveSkill } from './archive-skill.js'
 

@@ -102,29 +102,33 @@ async function readDesignDocuments(
   baseDir: string,
   feature: string
 ): Promise<DesignDocSummary | null> {
-  const candidateDirs = getDesignCandidatePaths(baseDir, feature)
+  const candidatePaths = await getDesignCandidatePaths(baseDir, feature)
 
-  for (const designDir of candidateDirs) {
+  for (const candidatePath of candidatePaths) {
+    const summary: DesignDocSummary = {}
+
     try {
-      const stats = await fs.stat(designDir)
+      const stats = await fs.stat(candidatePath)
+      if (stats.isFile()) {
+        summary.design = await extractKeySections(candidatePath)
+        return summary.design ? summary : null
+      }
       if (!stats.isDirectory()) continue
     } catch {
       continue
     }
 
-    const summary: DesignDocSummary = {}
-
-    const proposalPath = await findLatestDocument(designDir, /^\d{8}-proposal\.md$/)
+    const proposalPath = await findLatestDocument(candidatePath, /^(?:proposal|\d{8}-proposal)\.md$/)
     if (proposalPath) {
       summary.proposal = await extractKeySections(proposalPath)
     }
 
-    const designPath = await findLatestDocument(designDir, /^\d{8}-design\.md$/)
+    const designPath = await findLatestDocument(candidatePath, /^(?:design|\d{8}-design)\.md$/)
     if (designPath) {
       summary.design = await extractKeySections(designPath)
     }
 
-    const decisionsPath = await findLatestDocument(designDir, /^\d{8}-decisions\.md$/)
+    const decisionsPath = await findLatestDocument(candidatePath, /^(?:decisions|\d{8}-decisions)\.md$/)
     if (decisionsPath) {
       summary.decisions = await extractKeySections(decisionsPath)
     }

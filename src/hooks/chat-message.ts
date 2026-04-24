@@ -2,6 +2,7 @@ import type { Hooks } from '@opencode-ai/plugin'
 import type { OpenFlowContext } from '../types.js'
 import { handleBrainstorm } from '../commands/brainstorm.js'
 import { normalizeBrainstormSession, isAwaitingFormalAnswer } from '../phases/brainstorm/state-machine.js'
+import { createAcceptanceHook } from './acceptance.js'
 import {
   appendGuardMessage,
   clearRecentBrainstormCompletion,
@@ -22,9 +23,9 @@ function isCompletionMessage(message: string): boolean {
 }
 
 export function createChatMessageHook(ctx: OpenFlowContext) {
-  const hook: NonNullable<Hooks['chat.message']> = async (input, output): Promise<void> => {
-    if (!ctx.config.brainstorming.enabled) return
+  const acceptanceHook = createAcceptanceHook(ctx)
 
+  const hook: NonNullable<Hooks['chat.message']> = async (input, output): Promise<void> => {
     const rawInput = input as Record<string, unknown>
     const rawOutput = output as unknown as Record<string, unknown>
     const role = getMessageRole(rawOutput)
@@ -32,6 +33,12 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
 
     const message = extractMessageText(rawOutput)
     if (!message) return
+
+    await acceptanceHook({ sessionID: input.sessionID, message })
+
+    if (!ctx.config.brainstorming.enabled) {
+      return
+    }
 
     const activeFeature = await getActiveBrainstormFeature(ctx.directory, input.sessionID)
     if (activeFeature && !(await hasDesignDoc(ctx, activeFeature))) {

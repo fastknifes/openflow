@@ -99,12 +99,38 @@ describe('acceptance hook', () => {
 
     const state = await loadAcceptanceState(root)
     expect(state?.waitingForDocUpdateConfirm).toBe(false)
+    expect(state?.archiveDocUpdateConfirmationStatus).toBe('declined')
     expect(state?.lastChangedFile).toBeUndefined()
 
     await rm(root, { recursive: true, force: true })
   })
 
-  test('marks verification pending on completion message', async () => {
+  test('records confirmed doc update status when user reply accepts updates', async () => {
+    const root = join(process.cwd(), '.test-acceptance-hook-confirm-accept')
+    await rm(root, { recursive: true, force: true })
+
+    await saveAcceptanceState(root, {
+      feature: 'confirm-accept-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+      waitingForDocUpdateConfirm: true,
+      lastChangedFile: 'src/confirm-accept.ts',
+    })
+
+    const ctx = createContext(root)
+    const hook = createAcceptanceHook(ctx)
+    await hook({ message: '需要，更新文档吧' })
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.waitingForDocUpdateConfirm).toBe(false)
+    expect(state?.archiveDocUpdateConfirmationStatus).toBe('confirmed')
+    expect(state?.archiveDocUpdateConfirmedAt).toBeDefined()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('completion language does not create a hidden verify path', async () => {
     const root = join(process.cwd(), '.test-acceptance-hook-completion')
     await rm(root, { recursive: true, force: true })
 
@@ -120,8 +146,32 @@ describe('acceptance hook', () => {
     await hook({ sessionID: 'session-completion-1', message: '这个功能完成了，可以收尾' })
 
     const state = await loadAcceptanceState(root)
-    expect(state?.phase).toBe('verification_pending')
-    expect(state?.verificationPromptedAt).toBeDefined()
+    expect(state?.phase).toBe('acceptance')
+    expect(state?.verificationPromptedAt).toBeUndefined()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('keeps acceptance phase for trigger words without switching to verification pending', async () => {
+    const root = join(process.cwd(), '.test-acceptance-hook-keep-acceptance')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(root, '.sisyphus', 'plans', 'keep-acceptance-feature.md'), '# demo', 'utf-8')
+
+    await saveAcceptanceState(root, {
+      feature: 'keep-acceptance-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    })
+
+    const ctx = createContext(root)
+    const hook = createAcceptanceHook(ctx)
+    await hook({ message: '测试发现这里需要调整' })
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.phase).toBe('acceptance')
+    expect(state?.verificationPromptedAt).toBeUndefined()
 
     await rm(root, { recursive: true, force: true })
   })

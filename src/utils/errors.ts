@@ -6,6 +6,7 @@ export enum ErrorCode {
   OPERATION_FAILED = 'OPERATION_FAILED',
   CONFIG_ERROR = 'CONFIG_ERROR',
   ARCHIVE_FAILED = 'ARCHIVE_FAILED',
+  MIGRATION_FAILED = 'MIGRATION_FAILED',
 }
 
 export class OpenFlowError extends Error {
@@ -34,6 +35,8 @@ export class OpenFlowError extends Error {
         return `Configuration error: ${this.message}`
       case ErrorCode.ARCHIVE_FAILED:
         return `Archive failed: ${this.message}`
+      case ErrorCode.MIGRATION_FAILED:
+        return `Migration failed: ${this.message}`
       default:
         return `Error: ${this.message}`
     }

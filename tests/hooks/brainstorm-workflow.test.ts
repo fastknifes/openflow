@@ -74,7 +74,7 @@ describe('brainstorm workflow lifecycle', () => {
         pendingQuestionId: null,
         askedQuestionIds: ['problem'],
         answers: { problem: 'done' },
-        generatedDocs: ['docs/changes/user-login/design/20260414-design.md'],
+        generatedDocs: ['docs/changes/user-login/design.md'],
         generationAttemptCount: 1,
         updatedAt: new Date().toISOString(),
       }),

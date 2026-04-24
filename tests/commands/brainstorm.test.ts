@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { handleBrainstorm } from '../../src/commands/brainstorm.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 
@@ -201,10 +201,9 @@ describe('brainstorm command', () => {
 
     expect(result).toContain('Design document generated')
 
-    const designDir = join(root, 'docs', 'changes', 'user-login', 'design')
-    await expect(access(designDir)).resolves.toBeNull()
-
-    const generatedFile = join(designDir, `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}-design.md`)
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
+    await expect(access(generatedFile)).resolves.toBeNull()
     const content = await readFile(generatedFile, 'utf-8')
     expect(content).toContain('减少重复登录操作')
     expect(content).toContain('内部开发者')

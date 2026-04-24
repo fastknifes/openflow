@@ -30,7 +30,7 @@ Start with:
 
 - Brainstorm is a soft workflow entrypoint, not a hard gate.
 - Research, reading, and implementation tasks should remain non-blocking.
-- Design outputs belong in \`docs/changes/{feature}/\`.
+- Design outputs belong in a dated workspace such as \`docs/changes/2026-04-17-{feature}/\`.
 `,
   }
 }

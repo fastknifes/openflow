@@ -72,7 +72,7 @@
 
 ## 6. 相关文档
 
-- [设计文档](../../design/{{feature}}/)
+- [设计文档](./design.md)
 - [执行计划](../../.sisyphus/plans/{{feature}}.md)
 
 ---

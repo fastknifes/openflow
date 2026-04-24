@@ -2,12 +2,28 @@ import * as path from 'node:path'
 import type { OpenFlowConfig, SecurityCheckType, QualityCheckType } from './types.js'
 import { defaultConfig } from './types.js'
 import { validateConfigPath } from './utils/security.js'
+import {
+  ensureArchiveUnitDir,
+  ensureChangeUnitDir,
+  resolveArchiveUnitDir,
+  resolveChangeUnitDir,
+} from './utils/change-units.js'
 
 export const LEGACY_DESIGN_OUTPUT_DIR = 'docs/design'
 export const LEGACY_REQUIREMENTS_OUTPUT_DIR = 'docs/requirements'
 export const CHANGE_WORKSPACE_DIR = 'docs/changes'
 export const CURRENT_SPEC_DIR = 'docs/current/spec'
 export const CURRENT_WORKFLOW_DIR = 'docs/current/workflow'
+
+export type ChangeArtifactKind = 'design' | 'proposal' | 'decisions' | 'prd' | 'plan'
+
+const CHANGE_ARTIFACT_FILENAMES: Readonly<Record<ChangeArtifactKind, string>> = Object.freeze({
+  design: 'design.md',
+  proposal: 'proposal.md',
+  decisions: 'decisions.md',
+  prd: 'prd.md',
+  plan: 'plan.md',
+})
 
 const VALID_SECURITY_CHECKS: readonly SecurityCheckType[] = ['secret', 'vuln', 'dependency']
 const VALID_QUALITY_CHECKS: readonly QualityCheckType[] = ['lint', 'typecheck', 'test', 'format']
@@ -179,9 +195,10 @@ export function getLegacyDesignPath(projectDir: string, featureName: string): st
   return path.join(projectDir, LEGACY_DESIGN_OUTPUT_DIR, featureName)
 }
 
-export function getArchivePath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+export async function getArchivePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
   const outputDir = config?.archive?.output_dir ?? defaultConfig.archive.output_dir
-  return path.join(projectDir, outputDir, featureName)
+  const archiveDir = await resolveArchiveUnitDir(projectDir, featureName)
+  return path.join(projectDir, outputDir, archiveDir)
 }
 
 export function getAcceptanceStatePath(projectDir: string): string {
@@ -192,20 +209,26 @@ export function getPlanPath(projectDir: string, featureName: string): string {
   return path.join(projectDir, '.sisyphus', 'plans', `${featureName}.md`)
 }
 
-export function getChangeWorkspacePath(projectDir: string, featureName: string): string {
-  return path.join(projectDir, CHANGE_WORKSPACE_DIR, featureName)
+export async function getChangeWorkspacePath(projectDir: string, featureName: string): Promise<string> {
+  const changeDir = await resolveChangeUnitDir(projectDir, featureName)
+  return path.join(projectDir, CHANGE_WORKSPACE_DIR, changeDir)
 }
 
-export function getChangeDesignPath(projectDir: string, featureName: string): string {
-  return path.join(getChangeWorkspacePath(projectDir, featureName), 'design')
+export async function getChangeDesignPath(projectDir: string, featureName: string): Promise<string> {
+  return getChangeDocumentPath(projectDir, featureName, 'design')
 }
 
-export function getChangeRequirementsPath(projectDir: string, featureName: string): string {
-  return path.join(getChangeWorkspacePath(projectDir, featureName), 'requirements')
+export async function getChangeRequirementsPath(projectDir: string, featureName: string): Promise<string> {
+  return getChangeDocumentPath(projectDir, featureName, 'prd')
 }
 
-export function getChangePlansPath(projectDir: string, featureName: string): string {
-  return path.join(getChangeWorkspacePath(projectDir, featureName), 'plans')
+export async function getChangePlansPath(projectDir: string, featureName: string): Promise<string> {
+  return getChangeDocumentPath(projectDir, featureName, 'plan')
+}
+
+export async function getChangeDocumentPath(projectDir: string, featureName: string, kind: ChangeArtifactKind): Promise<string> {
+  const workspacePath = await getChangeWorkspacePath(projectDir, featureName)
+  return path.join(workspacePath, CHANGE_ARTIFACT_FILENAMES[kind])
 }
 
 export function getRequirementsPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
@@ -217,20 +240,37 @@ export function getLegacyRequirementsPath(projectDir: string, featureName: strin
   return path.join(projectDir, LEGACY_REQUIREMENTS_OUTPUT_DIR, featureName)
 }
 
-export function getDesignCandidatePaths(projectDir: string, featureName: string, config?: OpenFlowConfig): string[] {
+export async function getDesignCandidatePaths(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string[]> {
+  const changeWorkspacePath = await getChangeWorkspacePath(projectDir, featureName)
+  const changeDesignPath = await getChangeDocumentPath(projectDir, featureName, 'design')
   return uniquePaths([
-    getChangeDesignPath(projectDir, featureName),
+    changeDesignPath,
+    path.join(changeWorkspacePath, 'design'),
     getDesignPath(projectDir, featureName, config),
     getLegacyDesignPath(projectDir, featureName),
   ])
 }
 
-export function getRequirementsCandidatePaths(projectDir: string, featureName: string, config?: OpenFlowConfig): string[] {
+export async function getRequirementsCandidatePaths(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string[]> {
+  const changeWorkspacePath = await getChangeWorkspacePath(projectDir, featureName)
+  const changeRequirementsPath = await getChangeDocumentPath(projectDir, featureName, 'prd')
   return uniquePaths([
-    getChangeRequirementsPath(projectDir, featureName),
+    changeRequirementsPath,
+    path.join(changeWorkspacePath, 'requirements'),
     getRequirementsPath(projectDir, featureName, config),
     getLegacyRequirementsPath(projectDir, featureName),
   ])
+}
+
+export async function ensureChangeWorkspacePath(projectDir: string, featureName: string): Promise<string> {
+  const changeDir = await ensureChangeUnitDir(projectDir, featureName)
+  return path.join(projectDir, CHANGE_WORKSPACE_DIR, changeDir)
+}
+
+export async function ensureArchivePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+  const outputDir = config?.archive?.output_dir ?? defaultConfig.archive.output_dir
+  const archiveDir = await ensureArchiveUnitDir(projectDir, featureName)
+  return path.join(projectDir, outputDir, archiveDir)
 }
 
 function uniquePaths(paths: string[]): string[] {

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { createChatMessageHook } from '../../src/hooks/chat-message.js'
+import { loadAcceptanceState } from '../../src/utils/acceptance-state.js'
 import type { OpenFlowContext } from '../../src/types.js'
 import { defaultConfig } from '../../src/types.js'
 
@@ -9,6 +10,30 @@ function createContext(directory: string): OpenFlowContext {
   return {
     config: {
       ...defaultConfig,
+      brainstorming: {
+        ...defaultConfig.brainstorming,
+        closure: {
+          ...defaultConfig.brainstorming.closure,
+          strong_signals: [...defaultConfig.brainstorming.closure.strong_signals],
+          weak_signals: [...defaultConfig.brainstorming.closure.weak_signals],
+        },
+      },
+      tdd: {
+        ...defaultConfig.tdd,
+      },
+      verification: {
+        ...defaultConfig.verification,
+        security: [...defaultConfig.verification.security],
+        quality: [...defaultConfig.verification.quality],
+      },
+      acceptance: {
+        ...defaultConfig.acceptance,
+        trigger_words_zh: [...defaultConfig.acceptance.trigger_words_zh],
+        trigger_words_en: [...defaultConfig.acceptance.trigger_words_en],
+      },
+      archive: {
+        ...defaultConfig.archive,
+      },
     },
     directory,
     worktree: directory,
@@ -181,6 +206,29 @@ describe('chat-message hook', () => {
 
     expect((output.parts[0] as { text?: string }).text).toContain('Verification Suggested')
     expect((output.parts[0] as { text?: string }).text).toContain('non-blocking')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('runs acceptance detection even when brainstorming is disabled', async () => {
+    const root = join(process.cwd(), '.test-chat-acceptance-detection')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(root, '.sisyphus', 'plans', 'demo-feature.md'), '# demo', 'utf-8')
+
+    const ctx = createContext(root)
+    ctx.config.brainstorming.enabled = false
+
+    const hook = createChatMessageHook(ctx)
+    const output = createHookOutput('测试发现这个功能还有问题，需要调整')
+
+    await hook(createInput('session-acceptance'), output)
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.phase).toBe('acceptance')
+    expect(state?.feature).toBe('demo-feature')
+    expect(state?.sessionID).toBe('session-acceptance')
+    expect(output.parts).toHaveLength(1)
 
     await rm(root, { recursive: true, force: true })
   })

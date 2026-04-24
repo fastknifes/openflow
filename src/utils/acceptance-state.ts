@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { VerifyReadinessStatus, type AcceptanceState, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type ArchiveDocUpdateConfirmationStatus, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult } from '../types.js'
 import { getAcceptanceStatePath } from '../config.js'
 import { logger } from './logger.js'
 
@@ -23,6 +23,9 @@ const FIELD_PREFIXES = {
   verificationFailureCategory: 'verificationFailureCategory:',
   waitingForDocUpdateConfirm: 'waitingForDocUpdateConfirm:',
   lastChangedFile: 'lastChangedFile:',
+  archiveUsedDocUpdateConfirmPath: 'archiveUsedDocUpdateConfirmPath:',
+  archiveDocUpdateConfirmationStatus: 'archiveDocUpdateConfirmationStatus:',
+  archiveDocUpdateConfirmedAt: 'archiveDocUpdateConfirmedAt:',
   promotionApplied: 'promotionApplied:',
   promotionDecidedAt: 'promotionDecidedAt:',
   promotionAppliedAt: 'promotionAppliedAt:',
@@ -87,6 +90,16 @@ function parseStateFile(content: string): AcceptanceState | null {
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.lastChangedFile)) {
       result.lastChangedFile = extractFieldValue(trimmed, FIELD_PREFIXES.lastChangedFile)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.archiveUsedDocUpdateConfirmPath)) {
+      const value = extractFieldValue(trimmed, FIELD_PREFIXES.archiveUsedDocUpdateConfirmPath)
+      result.archiveUsedDocUpdateConfirmPath = value === 'true'
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.archiveDocUpdateConfirmationStatus)) {
+      result.archiveDocUpdateConfirmationStatus = extractFieldValue(trimmed, FIELD_PREFIXES.archiveDocUpdateConfirmationStatus) as ArchiveDocUpdateConfirmationStatus
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.archiveDocUpdateConfirmedAt)) {
+      result.archiveDocUpdateConfirmedAt = extractFieldValue(trimmed, FIELD_PREFIXES.archiveDocUpdateConfirmedAt)
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.promotionApplied)) {
       const value = extractFieldValue(trimmed, FIELD_PREFIXES.promotionApplied)
@@ -191,6 +204,15 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.lastChangedFile) {
     state.lastChangedFile = result.lastChangedFile
   }
+  if (result.archiveUsedDocUpdateConfirmPath !== undefined) {
+    state.archiveUsedDocUpdateConfirmPath = result.archiveUsedDocUpdateConfirmPath
+  }
+  if (result.archiveDocUpdateConfirmationStatus) {
+    state.archiveDocUpdateConfirmationStatus = result.archiveDocUpdateConfirmationStatus
+  }
+  if (result.archiveDocUpdateConfirmedAt) {
+    state.archiveDocUpdateConfirmedAt = result.archiveDocUpdateConfirmedAt
+  }
   if (result.promotionSuggestions && result.promotionSuggestions.length > 0) {
     state.promotionSuggestions = result.promotionSuggestions
   }
@@ -244,6 +266,11 @@ function serializeState(state: AcceptanceState): string {
     lines.push(`${FIELD_PREFIXES.waitingForDocUpdateConfirm} ${state.waitingForDocUpdateConfirm}`)
   }
   pushOptionalLine(lines, FIELD_PREFIXES.lastChangedFile, state.lastChangedFile)
+  if (state.archiveUsedDocUpdateConfirmPath !== undefined) {
+    lines.push(`${FIELD_PREFIXES.archiveUsedDocUpdateConfirmPath} ${state.archiveUsedDocUpdateConfirmPath}`)
+  }
+  pushOptionalLine(lines, FIELD_PREFIXES.archiveDocUpdateConfirmationStatus, state.archiveDocUpdateConfirmationStatus)
+  pushOptionalLine(lines, FIELD_PREFIXES.archiveDocUpdateConfirmedAt, state.archiveDocUpdateConfirmedAt)
   if (state.promotionApplied !== undefined) {
     lines.push(`${FIELD_PREFIXES.promotionApplied} ${state.promotionApplied}`)
   }
@@ -395,14 +422,27 @@ export async function setWaitingForDocUpdateConfirm(
   
   state.waitingForDocUpdateConfirm = true
   state.lastChangedFile = filePath
+  delete state.archiveDocUpdateConfirmationStatus
+  delete state.archiveDocUpdateConfirmedAt
   await saveAcceptanceState(projectDir, state)
 }
 
-export async function clearWaitingForDocUpdateConfirm(projectDir: string): Promise<void> {
+export async function clearWaitingForDocUpdateConfirm(
+  projectDir: string,
+  confirmationStatus?: ArchiveDocUpdateConfirmationStatus
+): Promise<void> {
   const state = await loadAcceptanceState(projectDir)
   
   if (state) {
     state.waitingForDocUpdateConfirm = false
+    if (confirmationStatus) {
+      state.archiveDocUpdateConfirmationStatus = confirmationStatus
+      if (confirmationStatus === 'confirmed') {
+        state.archiveDocUpdateConfirmedAt = formatTimestamp()
+      } else {
+        delete state.archiveDocUpdateConfirmedAt
+      }
+    }
     delete state.lastChangedFile
     await saveAcceptanceState(projectDir, state)
   }

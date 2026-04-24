@@ -5,6 +5,7 @@ import { enhancePlan } from '../plan/enhancer.js'
 import { trackFileChange } from '../utils/file-tracker.js'
 import { generateBuildId } from '../utils/security.js'
 import { logger } from '../utils/logger.js'
+import { createAcceptancePromptHook } from './acceptance-prompt.js'
 import {
   evaluateDocumentBundle,
   ensureDecisionsDocument,
@@ -25,21 +26,22 @@ function isPlanFile(normalizedPath: string): boolean {
 }
 
 function isDesignDoc(normalizedPath: string): boolean {
-  return /^\d{8}-(proposal|design|decisions)\.md$/.test(normalizedPath.split('/').pop() || '')
+  return /^(?:\d{8}-(proposal|design|decisions)|(proposal|design|decisions))\.md$/.test(normalizedPath.split('/').pop() || '')
 }
 
 function extractFeatureFromDesignPath(filePath: string): string | null {
   const parts = filePath.split(/[/\\]/)
-  const designIdx = parts.lastIndexOf('design')
-  if (designIdx === -1) return null
-
-  const nextPart = parts[designIdx + 1]
-  if (nextPart && !/\.md$/i.test(nextPart)) {
-    return nextPart
+  const changesIdx = parts.lastIndexOf('changes')
+  if (changesIdx !== -1) {
+    const featurePart = parts[changesIdx + 1]
+    if (featurePart && !/\.md$/i.test(featurePart)) {
+      return featurePart.replace(/^\d{4}-\d{2}-\d{2}-/, '')
+    }
   }
 
-  const previousPart = parts[designIdx - 1]
-  return previousPart || null
+  const designIdx = parts.lastIndexOf('design')
+  if (designIdx === -1) return null
+  return parts[designIdx - 1] || null
 }
 
 function shouldTrackChange(normalizedPath: string): boolean {
@@ -63,9 +65,27 @@ function resolveBuildId(sessionID?: string): string {
   return buildId
 }
 
+function shouldPromptForAcceptanceDocSync(normalizedPath: string): boolean {
+  return !normalizedPath.startsWith('docs/') && !normalizedPath.includes('/docs/')
+}
+
+function appendToolAfterPrompt(output: unknown, prompt: string): void {
+  if (!output || typeof output !== 'object') {
+    return
+  }
+
+  const rawOutput = output as Record<string, unknown>
+  const existingOutput = typeof rawOutput.output === 'string' ? rawOutput.output : ''
+  rawOutput.output = existingOutput ? `${existingOutput}\n\n${prompt}` : prompt
+}
+
 export function createToolAfterHook(ctx: OpenFlowContext) {
+  const acceptancePromptHook = createAcceptancePromptHook(ctx)
+
   const hook: NonNullable<Hooks['tool.execute.after']> = async (input, _output): Promise<void> => {
     if (input.tool !== 'write' && input.tool !== 'edit') return
+
+    const output = _output as unknown as Record<string, unknown>
 
     const args = input.args as Record<string, unknown> | undefined
     const filePath = typeof args?.filePath === 'string' ? args.filePath : undefined
@@ -78,8 +98,8 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
       const feature = extractFeatureFromDesignPath(filePath)
       
       if (feature) {
-        // Only generate PRD when design.md is written (final design doc)
-        if (normalizedPath.endsWith('design.md')) {
+        // Only generate PRD when the primary design doc is written
+        if (normalizedPath.endsWith('/design.md') || normalizedPath.endsWith('-design.md')) {
           const bundle = await evaluateDocumentBundle(ctx.directory, feature, ctx.config)
 
           if (bundle.generatePrd) {
@@ -152,6 +172,16 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
         logger.debug('Tracked file change', { filePath, buildId })
       } catch (error) {
         logger.error('Failed to track file change', error instanceof Error ? error : undefined)
+      }
+
+      if (shouldPromptForAcceptanceDocSync(normalizedPath)) {
+        const acceptancePromptInput = args
+          ? { tool: input.tool, args }
+          : { tool: input.tool }
+        const acceptancePrompt = await acceptancePromptHook(acceptancePromptInput)
+        if (acceptancePrompt) {
+          appendToolAfterPrompt(output, acceptancePrompt)
+        }
       }
     }
   }

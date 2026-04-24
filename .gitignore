@@ -26,7 +26,7 @@ coverage/
 *.temp
 
 # Sisyphus builds (generated during execution)
-.sisyphus/builds/
+.sisyphus/
 
 # Smoke test directories (auto-generated)
 .pack-smoke/
@@ -42,3 +42,5 @@ coverage/
 *.tgz
 .gitnexus
 .claude/
+log/
+logs/

@@ -11,6 +11,7 @@ const FEATURE_PATTERNS = [
   /\.sisyphus[\\/]plans[\\/]([^\\/\s]+)\.md/i,
   /docs[\\/]current[\\/]design[\\/]([^\\/\s]+)/i,
   /docs[\\/]current[\\/]requirements[\\/]([^\\/\s]+)/i,
+  /docs[\\/]changes[\\/]([^\\/\s]+)[\\/](?:design|proposal|decisions|prd|plan)\.md/i,
   /docs[\\/]changes[\\/]([^\\/\s]+)[\\/](?:design|requirements|plans)/i,
   /docs[\\/]design[\\/]([^\\/\s]+)/i,
   /docs[\\/]requirements[\\/]([^\\/\s]+)/i,
@@ -51,18 +52,22 @@ ${currentPrompt}`
 function extractFeature(prompt: string): string | undefined {
   for (const pattern of FEATURE_PATTERNS) {
     const match = prompt.match(pattern)
-    if (match?.[1]) return match[1]
+    if (match?.[1]) return normalizeFeatureFromPath(match[1])
   }
 
   return undefined
 }
 
+function normalizeFeatureFromPath(value: string): string {
+  return value.replace(/^\d{4}-\d{2}-\d{2}-/, '')
+}
+
 async function getFeatureSources(ctx: OpenFlowContext, feature: string): Promise<string[]> {
   const items: string[] = []
   const planPath = getPlanPath(ctx.directory, feature)
-  const changePlansPath = getChangePlansPath(ctx.directory, feature)
-  const designPaths = getDesignCandidatePaths(ctx.directory, feature, ctx.config)
-  const requirementsPaths = getRequirementsCandidatePaths(ctx.directory, feature, ctx.config)
+  const changePlansPath = await getChangePlansPath(ctx.directory, feature)
+  const designPaths = await getDesignCandidatePaths(ctx.directory, feature, ctx.config)
+  const requirementsPaths = await getRequirementsCandidatePaths(ctx.directory, feature, ctx.config)
 
   if (await fileExists(planPath)) {
     items.push(`- Plan: \`${planPath}\``)

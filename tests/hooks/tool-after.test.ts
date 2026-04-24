@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createToolAfterHook } from '../../src/hooks/tool-after.js'
+import { loadAcceptanceState, saveAcceptanceState } from '../../src/utils/acceptance-state.js'
 import type { OpenFlowContext } from '../../src/types.js'
 import { defaultConfig } from '../../src/types.js'
 
@@ -47,9 +48,9 @@ describe('tool-after hook', () => {
     await rm(root, { recursive: true, force: true })
 
     const feature = 'bundle-feature'
-    const designDir = join(root, 'docs', 'current', 'design', feature)
+    const designDir = join(root, 'docs', 'changes', feature)
     await mkdir(designDir, { recursive: true })
-    const designPath = join(designDir, '20260325-design.md')
+    const designPath = join(designDir, 'design.md')
     await writeFile(
       designPath,
       '# Design\n\n## Overview\n\nArchitecture trade-off and user value\n\n### A\n### B\n### C\n',
@@ -64,24 +65,23 @@ describe('tool-after hook', () => {
       { title: '', output: '', metadata: {} }
     )
 
-    const requirementsDir = join(root, 'docs', 'current', 'requirements', feature)
-    const requirementFiles = await readdir(requirementsDir)
-    expect(requirementFiles.some(file => /^\d{8}-prd\.md$/.test(file))).toBe(true)
+    const requirementContent = await readFile(join(root, 'docs', 'changes', feature, 'prd.md'), 'utf-8')
+    expect(requirementContent).toContain('Product Requirements Document')
 
-    const designFiles = await readdir(designDir)
-    expect(designFiles.some(file => /^\d{8}-decisions\.md$/.test(file))).toBe(true)
+    const decisionsContent = await readFile(join(root, 'docs', 'changes', feature, 'decisions.md'), 'utf-8')
+    expect(decisionsContent).toContain('Decision Summary')
 
     await rm(root, { recursive: true, force: true })
   })
 
-  test('extracts feature from docs/changes/{feature}/design path and writes requirements in change workspace', async () => {
+  test('extracts feature from a dated change-workspace design.md path and writes requirements in the same workspace', async () => {
     const root = join(process.cwd(), '.test-tool-after-change-workspace')
     await rm(root, { recursive: true, force: true })
 
     const feature = 'change-workspace-feature'
-    const designDir = join(root, 'docs', 'changes', feature, 'design')
+    const designDir = join(root, 'docs', 'changes', feature)
     await mkdir(designDir, { recursive: true })
-    const designPath = join(designDir, '20260325-design.md')
+    const designPath = join(designDir, 'design.md')
     await writeFile(designPath, '# Design\n\n## Overview\n\nUser value and architecture trade-off', 'utf-8')
 
     const ctx = createContext(root)
@@ -92,9 +92,74 @@ describe('tool-after hook', () => {
       { title: '', output: '', metadata: {} }
     )
 
-    const requirementsDir = join(root, 'docs', 'changes', feature, 'requirements')
-    const requirementFiles = await readdir(requirementsDir)
-    expect(requirementFiles.some(file => /^\d{8}-prd\.md$/.test(file))).toBe(true)
+    const requirementContent = await readFile(join(root, 'docs', 'changes', feature, 'prd.md'), 'utf-8')
+    expect(requirementContent).toContain('Product Requirements Document')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('appends acceptance doc-sync prompt and records pending update for code changes', async () => {
+    const root = join(process.cwd(), '.test-tool-after-acceptance-prompt')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await saveAcceptanceState(root, {
+      feature: 'demo-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    })
+
+    const ctx = createContext(root)
+    const hook = createToolAfterHook(ctx)
+    const output = { title: '', output: '', metadata: {} }
+
+    await hook(
+      { tool: 'write', sessionID: 'session-acceptance', callID: 'call-acceptance', args: { filePath: 'src/demo.ts' } },
+      output
+    )
+
+    expect(output.output).toContain('验收阶段变更已记录')
+    expect(output.output).toContain('src/demo.ts')
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.pendingDocUpdates).toHaveLength(1)
+    expect(state?.pendingDocUpdates[0]?.file).toBe('src/demo.ts')
+    expect(state?.waitingForDocUpdateConfirm).toBe(true)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('does not prompt again when updating docs during acceptance', async () => {
+    const root = join(process.cwd(), '.test-tool-after-acceptance-docs-skip')
+    await rm(root, { recursive: true, force: true })
+
+    const feature = 'demo-feature'
+    const designDir = join(root, 'docs', 'changes', feature)
+    await mkdir(designDir, { recursive: true })
+    const designPath = join(designDir, 'design.md')
+    await writeFile(designPath, '# Design', 'utf-8')
+
+    await saveAcceptanceState(root, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    })
+
+    const ctx = createContext(root)
+    const hook = createToolAfterHook(ctx)
+    const output = { title: '', output: '', metadata: {} }
+
+    await hook(
+      { tool: 'write', sessionID: 'session-docs', callID: 'call-docs', args: { filePath: designPath } },
+      output
+    )
+
+    expect(output.output).toBe('')
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.pendingDocUpdates).toHaveLength(0)
 
     await rm(root, { recursive: true, force: true })
   })

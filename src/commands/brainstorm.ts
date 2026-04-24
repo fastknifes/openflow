@@ -1,10 +1,10 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { OpenFlowContext } from '../types.js'
-import { getChangeDesignPath } from '../config.js'
+import { ensureChangeWorkspacePath } from '../config.js'
 import { clearRecentBrainstormCompletion, markRecentBrainstormCompletion } from '../hooks/brainstorm-workflow.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
-import { createSafePath, escapeMarkdown, getDatePrefix, sanitizeFeatureName } from '../utils/security.js'
+import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import {
   applyBrainstormAnswer,
   BrainstormQuestion,
@@ -317,12 +317,12 @@ async function generateDesignDocument(ctx: OpenFlowContext, session: BrainstormS
     }
   }
 
-  const designDir = getChangeDesignPath(ctx.directory, session.feature)
-  const relativeDesignDir = path.relative(ctx.directory, designDir)
-  const safeDesignDir = createSafePath(ctx.directory, relativeDesignDir)
-  await fs.mkdir(safeDesignDir, { recursive: true })
+  const workspaceDir = await ensureChangeWorkspacePath(ctx.directory, session.feature)
+  const relativeWorkspaceDir = path.relative(ctx.directory, workspaceDir)
+  const safeWorkspaceDir = createSafePath(ctx.directory, relativeWorkspaceDir)
+  await fs.mkdir(safeWorkspaceDir, { recursive: true })
 
-  const designPath = path.join(safeDesignDir, `${getDatePrefix()}-design.md`)
+  const designPath = path.join(safeWorkspaceDir, 'design.md')
   const content = renderDesignDocument(session)
   await fs.writeFile(designPath, content, 'utf-8')
   return designPath

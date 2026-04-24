@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { handleArchive } from '../../src/commands/archive.js'
-import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
+import { defaultConfig, type OpenFlowContext, VerifyReadinessStatus } from '../../src/types.js'
 import { join } from 'node:path'
-import { mkdir, rm, writeFile, access, readFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile, access, readFile, readdir } from 'node:fs/promises'
 import { loadAcceptanceState, saveAcceptanceState } from '../../src/utils/acceptance-state.js'
 
 function createContext(configOverride?: Partial<typeof defaultConfig>): OpenFlowContext {
@@ -16,6 +16,68 @@ function createContext(configOverride?: Partial<typeof defaultConfig>): OpenFlow
       ...configOverride,
     },
     enhancedPlans: new Set<string>(),
+  }
+}
+
+async function resolveArchiveDir(testDir: string, feature: string): Promise<string> {
+  const archiveRoot = join(testDir, 'docs', 'archive')
+  const entries = await readdir(archiveRoot, { withFileTypes: true })
+  const matched = entries.find(entry => entry.isDirectory() && (entry.name === feature || entry.name.endsWith(`-${feature}`)))
+  if (!matched) {
+    throw new Error(`Archive directory not found for feature: ${feature}`)
+  }
+  return join(archiveRoot, matched.name)
+}
+
+async function resolveChangeDir(testDir: string, feature: string): Promise<string> {
+  const changeRoot = join(testDir, 'docs', 'changes')
+  const entries = await readdir(changeRoot, { withFileTypes: true })
+  const matched = entries.find(entry => entry.isDirectory() && (entry.name === feature || entry.name.endsWith(`-${feature}`)))
+  if (!matched) {
+    throw new Error(`Change directory not found for feature: ${feature}`)
+  }
+  return join(changeRoot, matched.name)
+}
+
+async function setupReadinessArchiveFixture(
+  testDir: string,
+  feature: string,
+  options?: {
+    readiness?: VerifyReadinessStatus
+    pendingDocUpdates?: Array<{ file: string; timestamp: string; reason?: string }>
+  }
+): Promise<OpenFlowContext> {
+  await rm(testDir, { recursive: true, force: true })
+
+  await mkdir(join(testDir, 'docs', 'changes', feature), { recursive: true })
+  await writeFile(join(testDir, 'docs', 'changes', feature, 'design.md'), '# Design\n\nArchive readiness fixture', 'utf-8')
+
+  await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+  await writeFile(join(testDir, '.sisyphus', 'plans', `${feature}.md`), '# Plan', 'utf-8')
+
+  await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260421-000001'), { recursive: true })
+  await writeFile(
+    join(testDir, '.sisyphus', 'builds', 'build-20260421-000001', 'changes.json'),
+    JSON.stringify([{ filePath: `src/${feature}.ts`, tool: 'edit', timestamp: Date.now() }]),
+    'utf-8'
+  )
+
+  await saveAcceptanceState(testDir, {
+    feature,
+    phase: 'acceptance',
+    phaseStartedAt: '2026-04-21T00:00:00.000Z',
+    pendingDocUpdates: options?.pendingDocUpdates ?? [],
+    ...(options?.readiness ? { readiness: options.readiness } : {}),
+  })
+
+  return {
+    ...createContext(),
+    directory: testDir,
+    worktree: testDir,
+    config: {
+      ...defaultConfig,
+      archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: true },
+    },
   }
 }
 
@@ -82,7 +144,8 @@ describe('archive command', () => {
     expect(result).toContain('Requirements documents: ✅')
 
     // Verify requirements were archived
-    const archivedReqPath = join(testDir, 'docs', 'archive', 'req-feature', 'requirements', '20260322-prd.md')
+    const archiveDir = await resolveArchiveDir(testDir, 'req-feature')
+    const archivedReqPath = join(archiveDir, 'prd.md')
     const archivedReq = await readFile(archivedReqPath, 'utf-8')
     expect(archivedReq).toContain('Test requirements document')
 
@@ -237,28 +300,343 @@ describe('archive command', () => {
 
     await handleArchive(ctx, 'session-feature')
 
-    const mapperPath = join(testDir, 'docs', 'archive', 'session-feature', 'implementation-mapper.md')
+    const archiveDir = await resolveArchiveDir(testDir, 'session-feature')
+    const mapperPath = join(archiveDir, 'implementation-mapper.md')
     const mapper = await readFile(mapperPath, 'utf-8')
     expect(mapper).toContain('src/session-feature.ts')
 
     const stateAfter = await loadAcceptanceState(testDir)
-    expect(stateAfter?.phase).toBe('promotion_pending')
+    expect(stateAfter?.phase).toBe('promoted')
     expect(stateAfter?.promotionSuggestions).toBeDefined()
 
     await rm(testDir, { recursive: true, force: true })
   })
 
-  test('applies current promotion when auto_promote_current is enabled', async () => {
+  test('writes requirement-first implementation traceability with real symbols', async () => {
+    const testDir = join(process.cwd(), '.test-archive-traceability')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'trace-feature'), { recursive: true })
+    await writeFile(
+      join(testDir, 'docs', 'changes', 'trace-feature', 'prd.md'),
+      '# Requirements\n## Acceptance Criteria\n- Generated archive traceability links requirement items to code\n',
+      'utf-8'
+    )
+
+    await writeFile(
+      join(testDir, 'docs', 'changes', 'trace-feature', 'design.md'),
+      '# Design\n- This design fallback should not be primary when requirements exist\n',
+      'utf-8'
+    )
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'trace-feature.md'), '# plan', 'utf-8')
+
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260417-000001'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260417-000001', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/trace-feature.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    await mkdir(join(testDir, 'src'), { recursive: true })
+    await writeFile(
+      join(testDir, 'src', 'trace-feature.ts'),
+      'export function generateArchiveTraceability() {}\nexport const extractRequirementEvidence = () => true\n',
+      'utf-8'
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        brainstorming: {
+          ...defaultConfig.brainstorming,
+          output_dir: 'docs/current/design',
+          prd_output_dir: 'docs/current/requirements',
+        },
+      },
+    }
+
+    await handleArchive(ctx, 'trace-feature')
+
+    const archiveDir = await resolveArchiveDir(testDir, 'trace-feature')
+    const mapperPath = join(archiveDir, 'implementation-mapper.md')
+    const mapper = await readFile(mapperPath, 'utf-8')
+    expect(mapper).toContain('Generated archive traceability links requirement items to code')
+    expect(mapper).toContain('prd.md → Acceptance Criteria')
+    expect(mapper).toContain('src/trace-feature.ts')
+    expect(mapper).toContain('generateArchiveTraceability')
+    expect(mapper).toContain('extractRequirementEvidence')
+    expect(mapper).not.toContain('Step 1')
+    expect(mapper).not.toContain('*auto-detect*')
+    expect(mapper).not.toContain('This design fallback should not be primary when requirements exist')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('removes archived docs/changes workspace content after successful archive', async () => {
+    const testDir = join(process.cwd(), '.test-archive-removes-change-workspace')
+    await rm(testDir, { recursive: true, force: true })
+
+    const changeWorkspace = join(testDir, 'docs', 'changes', 'cleanup-feature')
+    await mkdir(changeWorkspace, { recursive: true })
+    await writeFile(join(changeWorkspace, 'design.md'), '# Design\n\nCleanup after archive', 'utf-8')
+    await writeFile(join(changeWorkspace, 'prd.md'), '# Requirements\n\nCleanup after archive', 'utf-8')
+    await writeFile(join(changeWorkspace, 'proposal.md'), '# Proposal', 'utf-8')
+    await writeFile(join(changeWorkspace, 'decisions.md'), '# Decisions', 'utf-8')
+    await writeFile(join(changeWorkspace, 'plan.md'), '# Plan', 'utf-8')
+
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260418-000001'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260418-000001', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/cleanup-feature.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    const resolvedChangeWorkspace = await resolveChangeDir(testDir, 'cleanup-feature')
+
+    await handleArchive(ctx, 'cleanup-feature')
+
+    const archiveDir = await resolveArchiveDir(testDir, 'cleanup-feature')
+    await expect(access(join(archiveDir, 'design.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'prd.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'proposal.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'decisions.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'plan.md'))).resolves.toBeNull()
+
+    await expect(access(join(resolvedChangeWorkspace, 'design.md'))).rejects.toBeDefined()
+    await expect(access(join(resolvedChangeWorkspace, 'prd.md'))).rejects.toBeDefined()
+    await expect(access(join(resolvedChangeWorkspace, 'proposal.md'))).rejects.toBeDefined()
+    await expect(access(join(resolvedChangeWorkspace, 'decisions.md'))).rejects.toBeDefined()
+    await expect(access(join(resolvedChangeWorkspace, 'plan.md'))).rejects.toBeDefined()
+    await expect(access(resolvedChangeWorkspace)).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('preserves docs/changes workspace when archive is blocked before completion', async () => {
+    const testDir = join(process.cwd(), '.test-archive-preserves-blocked-workspace')
+    await rm(testDir, { recursive: true, force: true })
+
+    const changeWorkspace = join(testDir, 'docs', 'changes', 'blocked-feature')
+    await mkdir(changeWorkspace, { recursive: true })
+    await writeFile(join(changeWorkspace, 'design.md'), '# Design\n\nBlocked archive should preserve source', 'utf-8')
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'blocked-feature.md'), '# fallback plan', 'utf-8')
+
+    await saveAcceptanceState(testDir, {
+      feature: 'blocked-feature',
+      phase: 'verification_failed',
+      phaseStartedAt: '2026-04-18T00:00:00.000Z',
+      verificationFailureCategory: 'security',
+      pendingDocUpdates: [],
+    })
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    const result = await handleArchive(ctx, 'blocked-feature')
+    expect(result).toContain('Archive Blocked')
+
+    const resolvedBlockedWorkspace = await resolveChangeDir(testDir, 'blocked-feature')
+    await expect(access(join(resolvedBlockedWorkspace, 'design.md'))).resolves.toBeNull()
+    await expect(access(join(testDir, 'docs', 'archive', 'blocked-feature'))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('rejects archive when readiness is not_ready', async () => {
+    const feature = 'readiness-not-ready'
+    const testDir = join(process.cwd(), '.test-archive-readiness-not-ready')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.NotReady })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('not ready')
+    await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('rejects archive when readiness needs_decision', async () => {
+    const feature = 'readiness-needs-decision'
+    const testDir = join(process.cwd(), '.test-archive-readiness-needs-decision')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.NeedsDecision })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('needs decision')
+    await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('accepts archive when readiness is ready', async () => {
+    const feature = 'readiness-ready'
+    const testDir = join(process.cwd(), '.test-archive-readiness-ready')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+    expect(result).not.toContain('acceptance readiness is missing')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('accepts archive when readiness is ready_with_doc_updates', async () => {
+    const feature = 'readiness-doc-updates'
+    const testDir = join(process.cwd(), '.test-archive-readiness-doc-updates')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+      pendingDocUpdates: [{ file: 'docs/current/design/readiness-doc-updates/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Confirmation Required')
+    expect(result).toContain('Pending Document Updates')
+
+    const stateAfterFirstRun = await loadAcceptanceState(testDir)
+    expect(stateAfterFirstRun?.waitingForDocUpdateConfirm).toBe(true)
+    expect(stateAfterFirstRun?.archiveUsedDocUpdateConfirmPath).toBe(true)
+
+    await saveAcceptanceState(testDir, {
+      ...stateAfterFirstRun!,
+      waitingForDocUpdateConfirm: false,
+      archiveDocUpdateConfirmationStatus: 'confirmed',
+      archiveDocUpdateConfirmedAt: '2026-04-22T00:00:00.000Z',
+    })
+
+    const secondResult = await handleArchive(ctx, feature)
+    expect(secondResult).toContain('Archive Complete')
+    expect(secondResult).toContain('Acceptance changes: ✅')
+    expect(secondResult).toContain('confirmed doc-update reconciliation path')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks archive when ready_with_doc_updates confirmation is declined', async () => {
+    const feature = 'readiness-doc-updates-declined'
+    const testDir = join(process.cwd(), '.test-archive-readiness-doc-updates-declined')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+      pendingDocUpdates: [{ file: 'docs/current/design/readiness-doc-updates-declined/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
+    })
+
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+      pendingDocUpdates: [{ file: 'docs/current/design/readiness-doc-updates-declined/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
+      archiveUsedDocUpdateConfirmPath: true,
+      archiveDocUpdateConfirmationStatus: 'declined',
+      waitingForDocUpdateConfirm: false,
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('explicitly declined')
+    await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('proceeds with warning when readiness is undefined for legacy acceptance state', async () => {
+    const feature = 'readiness-legacy'
+    const testDir = join(process.cwd(), '.test-archive-readiness-legacy')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature)
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+    expect(result).toContain('acceptance readiness is missing')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('does not delete docs/current source documents after archive', async () => {
+    const testDir = join(process.cwd(), '.test-archive-preserves-current-docs')
+    await rm(testDir, { recursive: true, force: true })
+
+    const designDir = join(testDir, 'docs', 'current', 'design', 'current-feature')
+    const requirementsDir = join(testDir, 'docs', 'current', 'requirements', 'current-feature')
+    await mkdir(designDir, { recursive: true })
+    await mkdir(requirementsDir, { recursive: true })
+    await writeFile(join(designDir, '20260418-design.md'), '# Current Design', 'utf-8')
+    await writeFile(join(requirementsDir, '20260418-prd.md'), '# Current Requirements', 'utf-8')
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'current-feature.md'), '# Plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260418-000002'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260418-000002', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/current-feature.ts', tool: 'write', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        brainstorming: {
+          ...defaultConfig.brainstorming,
+          output_dir: 'docs/current/design',
+          prd_output_dir: 'docs/current/requirements',
+        },
+      },
+    }
+
+    await handleArchive(ctx, 'current-feature')
+
+    await expect(access(join(designDir, '20260418-design.md'))).resolves.toBeNull()
+    await expect(access(join(requirementsDir, '20260418-prd.md'))).resolves.toBeNull()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('applies current promotion by default and falls back to direct migration when no match exists', async () => {
     const testDir = join(process.cwd(), '.test-archive-current-promotion')
     await rm(testDir, { recursive: true, force: true })
 
-    await mkdir(join(testDir, 'docs', 'current', 'design', 'promo-feature'), { recursive: true })
-    await writeFile(join(testDir, 'docs', 'current', 'design', 'promo-feature', '20260301-design.md'), '# Old Design', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current', 'design', 'other-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'current', 'design', 'other-feature', '20260301-design.md'), '# Old Design', 'utf-8')
 
-    await mkdir(join(testDir, 'docs', 'changes', 'promo-feature', 'design'), { recursive: true })
-    await writeFile(join(testDir, 'docs', 'changes', 'promo-feature', 'design', '20260325-design.md'), '# New Design', 'utf-8')
-    await mkdir(join(testDir, 'docs', 'changes', 'promo-feature', 'requirements'), { recursive: true })
-    await writeFile(join(testDir, 'docs', 'changes', 'promo-feature', 'requirements', '20260325-prd.md'), '# New PRD', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'promo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'promo-feature', 'design.md'), '# New Design', 'utf-8')
+    await writeFile(join(testDir, 'docs', 'changes', 'promo-feature', 'prd.md'), '# New PRD', 'utf-8')
 
     await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
     await writeFile(join(testDir, '.sisyphus', 'plans', 'promo-feature.md'), '# plan', 'utf-8')
@@ -269,7 +647,7 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', auto_promote_current: true },
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
         brainstorming: { ...defaultConfig.brainstorming, output_dir: 'docs/current/design' },
       },
     }
@@ -277,9 +655,64 @@ describe('archive command', () => {
     const result = await handleArchive(ctx, 'promo-feature')
     expect(result).toContain('Current Promotion')
     expect(result).toContain('applied: 2')
+    expect(result).toContain('no reliable historical design match')
 
-    const promotedDesign = await readFile(join(testDir, 'docs', 'current', 'design', 'promo-feature', '20260325-design.md'), 'utf-8')
+    const promotedDesign = await readFile(join(testDir, 'docs', 'current', 'design', 'promo-feature', 'design.md'), 'utf-8')
     expect(promotedDesign).toContain('New Design')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('synthesizes a matching historical current design doc during archive promotion', async () => {
+    const testDir = join(process.cwd(), '.test-archive-current-synthesis')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'current', 'design', 'archive-history'), { recursive: true })
+    await writeFile(
+      join(testDir, 'docs', 'current', 'design', 'archive-history', '20260401-design.md'),
+      '# Historical Archive Flow\n\n## Problem Statement\nOlder wording for archive evidence.\n\n## Legacy Notes\nKeep this note.\n',
+      'utf-8'
+    )
+
+    await mkdir(join(testDir, 'docs', 'changes', 'synth-feature'), { recursive: true })
+    await writeFile(
+      join(testDir, 'docs', 'changes', 'synth-feature', 'design.md'),
+      '# Archive Sync\n\n## Problem Statement\nRefresh current docs from archive evidence.\n\n## Verification\nRun archive QA checks.\n',
+      'utf-8'
+    )
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'synth-feature.md'), '# plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260420-000003'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260420-000003', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/synth-feature.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false, auto_promote_current: true },
+      },
+    }
+
+    const result = await handleArchive(ctx, 'synth-feature')
+    expect(result).toContain('Current Promotion')
+    expect(result).toContain('applied: 1')
+    expect(result).toContain('reliable historical design match')
+
+    const promotedDesign = await readFile(join(testDir, 'docs', 'current', 'design', 'archive-history', '20260401-design.md'), 'utf-8')
+    expect(promotedDesign).toContain('Refresh current docs from archive evidence.')
+    expect(promotedDesign).toContain('## Verification')
+    expect(promotedDesign).toContain('Run archive QA checks.')
+    expect(promotedDesign).toContain('## Legacy Notes')
+    expect(promotedDesign).toContain('Keep this note.')
+
+    await expect(access(join(testDir, 'docs', 'current', 'design', 'synth-feature', 'design.md'))).rejects.toBeDefined()
 
     await rm(testDir, { recursive: true, force: true })
   })

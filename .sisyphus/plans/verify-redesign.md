@@ -149,7 +149,7 @@ Wave 4: compatibility hardening + end-to-end command-path verification
 
   **Commit**: YES | Message: `refactor(verify): add explicit readiness contract` | Files: `src/types.ts`, related tests
 
-- [ ] 2. Upgrade acceptance-state persistence for readiness and legacy compatibility
+- [x] 2. Upgrade acceptance-state persistence for readiness and legacy compatibility
 
   **What to do**: Update `src/utils/acceptance-state.ts` to persist and read the new readiness/result contract while remaining backward-compatible with existing state files. Add read/write support for readiness status, reason codes, decision type, evidence summary metadata, last verify run time, and bounded verify result information. Define lazy compatibility mapping for legacy states: `verification_pending` remains readable and implies unresolved readiness until Verify runs; `verification_failed` maps to `phase=verification` + `readiness=not_ready` with retained failure category. Ensure rerunning Verify overwrites the latest readiness snapshot without corrupting historical fields like promotion decisions.
   **Must NOT do**: Do not require a one-shot migration script. Do not break old state file parsing. Do not collapse phase and readiness into one field.
@@ -231,7 +231,7 @@ Wave 4: compatibility hardening + end-to-end command-path verification
 
   **Commit**: YES | Message: `feat(verify): add single verify command entry` | Files: `src/commands/verify.ts`, `src/index.ts`, command exports, tests
 
-- [ ] 4. Implement Evidence-to-Readiness classification and strict reason mapping
+- [x] 4. Implement Evidence-to-Readiness classification and strict reason mapping
 
   **What to do**: Implement the concrete classification engine used by `Verify`. It must produce the four readiness states with explicit machine-readable reason codes. Encode exact precedence: `needs_decision` only for rule/current/business-decision cases; `not_ready` covers failed quality/security/consistency/evidence/doc-alignment issues; `ready_with_doc_updates` only when the change is otherwise closure-ready and pending doc updates are the only remaining blocker; `ready` only when no blocking issues remain. Ensure stable-constraint checks against `current/*` / `decisions/*` are represented as constraint conflicts, not confused with primary `changes/{feature}` alignment.
   **Must NOT do**: Do not let implementer improvise outcome precedence. Do not map ordinary failures to `needs_decision`.
@@ -272,7 +272,7 @@ Wave 4: compatibility hardening + end-to-end command-path verification
 
   **Commit**: YES | Message: `feat(verify): add readiness classification rules` | Files: verify command internals, state helpers, tests
 
-- [ ] 5. Gate Archive strictly on persisted readiness
+- [x] 5. Gate Archive strictly on persisted readiness
 
   **What to do**: Refactor `src/commands/archive.ts` so archive admission is driven by the persisted Verify result, not by old heuristic combinations like `verification_pending`, `verificationFailureCategory`, or ad-hoc drift/security handling alone. Preserve Archive as final authority, but require readiness to be `ready` or `ready_with_doc_updates` before canonicalization begins. Keep Archive-side security/drift behavior aligned with the new contract rather than duplicating readiness classification logic. Archive must reject `not_ready` and `needs_decision` deterministically and emit user-facing guidance that points back to Verify or the required decision path.
   **Must NOT do**: Do not make Archive re-classify readiness from scratch. Do not bypass readiness for convenience.

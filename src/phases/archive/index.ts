@@ -4,6 +4,11 @@ export {
   generateAndSaveImplementationMapper,
   type ImplementationMapperOptions,
 } from './implementation-mapper.js'
+export {
+  collectTraceabilityItems,
+  type TraceabilityItem,
+  type TraceabilityResult,
+} from './traceability.js'
 export { 
   extractCodeSymbols, 
   generateCodeMappingTable, 
@@ -12,6 +17,7 @@ export {
   generateCodeMappingMarkdown,
   saveCodeMapping,
   type CodeMappingEntry,
+  type GenerateCodeMappingOptions,
   type ApiEndpoint,
   type Dependency,
 } from './code-mapper.js'

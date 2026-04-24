@@ -6,9 +6,14 @@ import { escapeMarkdown } from '../utils/security.js'
 import { logger } from '../utils/logger.js'
 import { getSkills } from './registry.js'
 
+function getRegisteredSkillName(name: string): string {
+  const segments = name.split('/').filter(Boolean)
+  return segments[segments.length - 1] ?? name
+}
+
 function buildFrontMatter(name: string, description: string): string {
   return `---
-name: ${escapeMarkdown(name)}
+name: ${escapeMarkdown(getRegisteredSkillName(name))}
 description: ${escapeMarkdown(description)}
 ---
 

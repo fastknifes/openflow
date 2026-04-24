@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **openflow** (715 symbols, 1383 relationships, 58 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **openflow** (822 symbols, 1789 relationships, 67 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -99,3 +99,12 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+<!-- OPENFLOW DOCS GUIDE:BEGIN -->
+- OpenFlow docs 采用按需查阅原则，不要默认通读全部 `docs/`。
+- `docs/current/requirements`、`docs/current/design`、`docs/current/spec`、`docs/current/workflow` 用于当前有效事实与当前流程约定。
+- `docs/decisions/` 用于跨 feature 的正式全局决策。
+- `docs/changes/` 用于进行中的 feature/change 工作区，仅在处理当前变更或接手未完成工作时按需查看对应目录。
+- `docs/archive/` 仅用于历史追溯，不作为当前实现的首选依据。
+- 当信息看起来不一致时，按任务类型判断来源：当前事实看 `docs/current/*`，进行中变更看对应 `docs/changes/{YYYY-MM-DD-feature}/*`，全局规则看 `docs/decisions/*`，历史追溯才看 `docs/archive/*`。
+<!-- OPENFLOW DOCS GUIDE:END -->

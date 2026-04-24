@@ -1,9 +1,9 @@
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
-import { escapeMarkdown, getDatePrefix, findLatestDocument, createSafePath } from '../../utils/security.js'
+import { escapeMarkdown, findLatestDocument, createSafePath } from '../../utils/security.js'
 import { logger } from '../../utils/logger.js'
 import type { OpenFlowContext } from '../../types.js'
-import { getChangeDesignPath, getChangeRequirementsPath } from '../../config.js'
+import { getChangeWorkspacePath } from '../../config.js'
 
 export interface PrdGenerationOptions {
   feature: string
@@ -18,7 +18,7 @@ export interface DocumentBundleDecision {
   reason: string
 }
 
-const PRD_TEMPLATE_PATH = 'templates/requirements/prd.md'
+const PRD_TEMPLATE_PATH = 'templates/prd.md'
 
 /**
  * Generate PRD document from design documents
@@ -27,7 +27,6 @@ export async function generatePrd(options: PrdGenerationOptions): Promise<string
   const { feature, projectDir, config } = options
   
   const date = new Date().toISOString().split('T')[0] || new Date().toISOString()
-  const datePrefix = getDatePrefix()
   const safeFeature = escapeMarkdown(feature)
   
   // Resolve workspace paths (prefer docs/changes workspace when available)
@@ -45,13 +44,12 @@ export async function generatePrd(options: PrdGenerationOptions): Promise<string
   const content = fillPrdTemplate(templateContent, {
     feature: safeFeature,
     date,
-    datePrefix,
     designInfo,
   })
   
   // Write to file
   await fs.mkdir(prdDir, { recursive: true })
-  const prdPath = path.join(prdDir, `${datePrefix}-prd.md`)
+  const prdPath = path.join(prdDir, 'prd.md')
   await fs.writeFile(prdPath, content, 'utf-8')
   
   logger.info('Generated PRD document', { path: prdPath, feature })
@@ -87,7 +85,7 @@ async function extractDesignInfo(designDir: string): Promise<DesignInfo> {
   }
   
   // Try to read proposal.md for problem statement and success criteria
-  const proposalPath = await findLatestDocument(designDir, /^\d{8}-proposal\.md$/)
+  const proposalPath = await findPreferredDocument(designDir, ['proposal.md'], /^\d{8}-proposal\.md$/)
   if (proposalPath) {
     try {
       const content = await fs.readFile(proposalPath, 'utf-8')
@@ -102,7 +100,7 @@ async function extractDesignInfo(designDir: string): Promise<DesignInfo> {
   }
   
   // Try to read design.md for overview and components
-  const designPath = await findLatestDocument(designDir, /^\d{8}-design\.md$/)
+  const designPath = await findPreferredDocument(designDir, ['design.md'], /^\d{8}-design\.md$/)
   if (designPath) {
     try {
       const content = await fs.readFile(designPath, 'utf-8')
@@ -181,7 +179,6 @@ function extractComponentNames(content: string): string[] {
 interface TemplateData {
   feature: string
   date: string
-  datePrefix: string
   designInfo: DesignInfo
 }
 
@@ -310,7 +307,7 @@ function getDefaultPrdTemplate(): string {
 
 ## 6. 相关文档
 
-- [设计文档](../../design/{{feature}}/)
+- [设计文档](./design.md)
 - [执行计划](../../.sisyphus/plans/{{feature}}.md)
 
 ---
@@ -339,13 +336,18 @@ export async function hasPrdDocument(
   config: OpenFlowContext['config']
 ): Promise<boolean> {
   const { requirementsDir } = await resolveWorkspacePaths(projectDir, feature, config)
-  const prdDir = requirementsDir
-  
+  const prdPath = path.join(requirementsDir, 'prd.md')
+
   try {
-    const entries = await fs.readdir(prdDir, { withFileTypes: true })
-    return entries.some(entry => entry.isFile() && /^\d{8}-prd\.md$/.test(entry.name))
+    await fs.access(prdPath)
+    return true
   } catch {
-    return false
+    try {
+      const entries = await fs.readdir(requirementsDir, { withFileTypes: true })
+      return entries.some(entry => entry.isFile() && /^\d{8}-prd\.md$/.test(entry.name))
+    } catch {
+      return false
+    }
   }
 }
 
@@ -357,10 +359,15 @@ export async function hasDecisionsDocument(
   const { designDir } = await resolveWorkspacePaths(projectDir, feature, config)
 
   try {
-    const entries = await fs.readdir(designDir, { withFileTypes: true })
-    return entries.some(entry => entry.isFile() && /^\d{8}-decisions\.md$/.test(entry.name))
+    await fs.access(path.join(designDir, 'decisions.md'))
+    return true
   } catch {
-    return false
+    try {
+      const entries = await fs.readdir(designDir, { withFileTypes: true })
+      return entries.some(entry => entry.isFile() && /^\d{8}-decisions\.md$/.test(entry.name))
+    } catch {
+      return false
+    }
   }
 }
 
@@ -415,8 +422,7 @@ export async function ensureDecisionsDocument(
 ): Promise<string> {
   const { designDir } = await resolveWorkspacePaths(projectDir, feature, config)
   await fs.mkdir(designDir, { recursive: true })
-  const datePrefix = getDatePrefix()
-  const decisionsPath = path.join(designDir, `${datePrefix}-decisions.md`)
+  const decisionsPath = path.join(designDir, 'decisions.md')
 
   const content = `# ${feature} - Decisions
 
@@ -449,13 +455,12 @@ async function resolveWorkspacePaths(
   feature: string,
   config: OpenFlowContext['config']
 ): Promise<{ designDir: string; requirementsDir: string }> {
-  const changeDesignDir = getChangeDesignPath(projectDir, feature)
-  const changeRequirementsDir = getChangeRequirementsPath(projectDir, feature)
+  const changeWorkspaceDir = await getChangeWorkspacePath(projectDir, feature)
 
-  if (await hasAnyDesignDoc(changeDesignDir)) {
+  if (await hasAnyDesignDoc(changeWorkspaceDir)) {
     return {
-      designDir: changeDesignDir,
-      requirementsDir: changeRequirementsDir,
+      designDir: changeWorkspaceDir,
+      requirementsDir: changeWorkspaceDir,
     }
   }
 
@@ -468,8 +473,23 @@ async function resolveWorkspacePaths(
 async function hasAnyDesignDoc(designDir: string): Promise<boolean> {
   try {
     const entries = await fs.readdir(designDir, { withFileTypes: true })
-    return entries.some(entry => entry.isFile() && /^\d{8}-(proposal|design|decisions)\.md$/i.test(entry.name))
+    return entries.some(entry => entry.isFile() && /^(?:design|proposal|decisions)\.md$/i.test(entry.name))
+      || entries.some(entry => entry.isFile() && /^\d{8}-(proposal|design|decisions)\.md$/i.test(entry.name))
   } catch {
     return false
   }
+}
+
+async function findPreferredDocument(dir: string, preferredNames: string[], fallbackPattern: RegExp): Promise<string | null> {
+  for (const preferredName of preferredNames) {
+    const preferredPath = path.join(dir, preferredName)
+    try {
+      await fs.access(preferredPath)
+      return preferredPath
+    } catch {
+      void 0
+    }
+  }
+
+  return findLatestDocument(dir, fallbackPattern)
 }

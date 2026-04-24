@@ -10,11 +10,6 @@ function containsAcceptanceTrigger(message: string, triggersZh: string[], trigge
   return triggersZh.some(trigger => message.includes(trigger)) || triggersEn.some(trigger => lowerMessage.includes(trigger))
 }
 
-function containsCompletionTrigger(message: string): boolean {
-  const lower = message.toLowerCase()
-  return ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive'].some(trigger => lower.includes(trigger))
-}
-
 async function findActiveFeature(ctx: OpenFlowContext): Promise<string | null> {
   const plansDir = createSafePath(ctx.directory, '.sisyphus', 'plans')
   
@@ -77,6 +72,15 @@ function isDocUpdateConfirmationResponse(message: string): boolean {
   )
 }
 
+function isDocUpdateConfirmationAccepted(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('yes') ||
+    lower.includes('update') ||
+    message.includes('需要')
+  )
+}
+
 export function createAcceptanceHook(ctx: OpenFlowContext) {
   return async (input: { sessionID?: string; message?: unknown }): Promise<void> => {
     if (!ctx.config.acceptance.enabled) return
@@ -87,17 +91,9 @@ export function createAcceptanceHook(ctx: OpenFlowContext) {
     const currentState = await loadAcceptanceState(ctx.directory)
     if (currentState?.phase === 'acceptance' && currentState.waitingForDocUpdateConfirm) {
       if (isDocUpdateConfirmationResponse(message)) {
-        await clearWaitingForDocUpdateConfirm(ctx.directory)
+        await clearWaitingForDocUpdateConfirm(ctx.directory, isDocUpdateConfirmationAccepted(message) ? 'confirmed' : 'declined')
         logger.info('Resolved doc update confirmation state', { feature: currentState.feature })
       }
-      return
-    }
-
-    if (currentState && containsCompletionTrigger(message)) {
-      currentState.phase = 'verification_pending'
-      currentState.verificationPromptedAt = new Date().toISOString()
-      await saveAcceptanceState(ctx.directory, currentState)
-      logger.info('Marked state as verification pending', { feature: currentState.feature })
       return
     }
 

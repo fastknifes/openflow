@@ -30,30 +30,29 @@ OpenFlow is an OpenCode plugin that enhances the development workflow from requi
 
 ## Reference Docs
 
-Current architecture and design documents live here:
+Current architecture and design references live here:
 
-- `docs/current/design/20260322-openflow-architecture.md` - current system architecture, module boundaries, runtime flows, and migration-state notes
-- `docs/current/design/20260322-openflow-design.md` - current technical design, hook responsibilities, archive behavior, and design debt
+- `docs/changes/openflow-init/design.md` - current shipped design for the OpenFlow init/docs workflow
+- `docs/archive/openflow-init/implementation-mapper.md` - implementation traceability and archived delivery snapshot
 - `docs/decisions/ADR-001-docs-governance-and-workflow.md` - architecture decision record for docs governance and workflow
 
-These files reflect the implemented codebase more accurately than the older proposal documents under `docs/`.
+These files currently reflect the implemented codebase more accurately than older proposal-style documents under `docs/`.
 
 ## Features
 
 | Phase | Feature | Description |
 |-------|---------|-------------|
 | 1. Brainstorming | Explicit Entry | Detects new feature requests and teaches users to proactively run `/openflow/brainstorm <feature>` before design work |
-| 1. Brainstorming | Design Workspace | Writes working design documents into `docs/changes/{feature}/` with `design.md` as the default primary document |
+| 1. Brainstorming | Design Workspace | Writes working design documents into dated change workspaces such as `docs/changes/2026-04-17-feature-name/`, with `design.md` as the default primary document |
 | 1. Brainstorming | Optional Companion Docs | Adds `proposal` / `prd` / `decisions` only when the feature complexity or decision density justifies them |
 | 2. Implementation Context | Context Injection | Prepares plan/design/requirements context for host execution without taking over runtime orchestration |
 | 2. Plan Enhancement | TDD Hints | Adds TDD (Red-Green-Refactor) guidance to plans |
-| 2. Plan Enhancement | Verification Tasks | Auto-generates security and quality checklists |
 | 2. Plan Enhancement | Prompt Injection | Injects implementation context and verification requirements into agent tasks |
-| 3. Acceptance | Auto Detection | Detects acceptance phase triggers and prompts for doc sync |
-| 3. Acceptance | Drift Detection | Tracks changes made during acceptance phase |
+| 3. Verify | Evidence | Produces checks/results, observed behavior, intent-vs-actual deltas, doc alignment, conflicts, and missing evidence |
+| 3. Verify | Readiness | Reports one of `ready`, `ready_with_doc_updates`, `not_ready`, or `needs_decision` before closure |
+| 4. Archive | Final Authority | Performs canonicalization, current promotion, and archive freeze after a valid readiness state |
 | 4. Archive | Implementation Mapper | Creates `implementation-mapper.md` with traceability and code mapping |
 | 4. Archive | Snapshot Freeze | Copies design, requirements, and plans into the archive unit |
-| 4. Archive | Requirements Archive | Archives PRD documents alongside design and plan documents |
 
 ## Installation
 
@@ -129,39 +128,79 @@ OpenFlow may still suggest this skill when it detects a new feature request, but
 1. Explore project context
 2. Ask clarifying questions (one at a time)
 3. Propose 2-3 approaches with trade-offs
-4. Write working documents into `docs/changes/{feature}/`
-5. Treat `design.md` as the primary document and add `proposal` / `prd` / `decisions` only when needed
+4. Write working documents into a dated change workspace such as `docs/changes/2026-04-17-{feature}/`
+5. Treat `design.md` as the primary document and add `proposal.md` / `prd.md` / `decisions.md` only when needed
 
 **Working Documents:**
-- `docs/changes/{feature}/design/YYYYMMDD-design.md` - default primary design document
-- `docs/changes/{feature}/design/YYYYMMDD-proposal.md` - optional problem framing and solution exploration
-- `docs/changes/{feature}/design/YYYYMMDD-decisions.md` - optional decision log for complex trade-offs
-- `docs/changes/{feature}/requirements/YYYYMMDD-prd.md` - optional PRD when user/problem/acceptance detail needs a separate artifact
+- `docs/changes/{YYYY-MM-DD-feature}/design.md` - default primary design document
+- `docs/changes/{YYYY-MM-DD-feature}/proposal.md` - optional problem framing and solution exploration
+- `docs/changes/{YYYY-MM-DD-feature}/decisions.md` - optional decision log for complex trade-offs
+- `docs/changes/{YYYY-MM-DD-feature}/prd.md` - optional PRD when user/problem/acceptance detail needs a separate artifact
 
-## Verification Behavior
+## Verify Command
 
-OpenFlow injects verification requirements when work is nearing completion or when verification-oriented tasks are being prepared.
+Use `/openflow/verify <feature-name>` as the single completion-readiness entrypoint before archive.
 
-OpenFlow's recommended verification UX is non-blocking: near completion, the system should first suggest the verification steps, then let the user choose whether to run them immediately or skip for now.
+`Verify` does not make a change canonical and does not promote `current`. It establishes readiness through two internal phases:
 
-**Security Checks:**
-- Secret Scan (trufflehog, gitleaks)
-- Vulnerability Scan (npm audit, pip-audit)
+### Evidence Phase
 
-**Quality Checks:**
-- Lint (ESLint, Ruff)
-- Type Check (tsc, mypy)
-- Tests (jest, pytest)
+Produces an evidence packet with:
+
+- Checks run / result
+- Observed behavior summary
+- Intent vs actual delta
+- Doc alignment summary
+- `current` / `decisions` conflict summary
+- Known risks / missing evidence
+
+Evidence can include security and quality checks such as secret scans, vulnerability scans, lint, type check, and tests.
+
+### Readiness Phase
+
+Reports one of four readiness states:
+
+- `ready` - evidence is sufficient and the change may proceed to Archive
+- `ready_with_doc_updates` - closure-ready, but Archive must confirm and apply explicit doc updates before canonicalization
+- `not_ready` - evidence is insufficient or constraints are not met
+- `needs_decision` - a rule-level, `current`-level, or explicit business decision is required
+
+> **Principle:** Verify establishes readiness; Archive makes the change canonical.
+
+## Init Command
+
+Use `/openflow/init` when starting a new project or to refresh the OpenFlow docs guide in `AGENTS.md`.
+
+**Behavior:**
+- Creates or updates the root `AGENTS.md` file
+- First run: Creates file with OpenFlow base template and managed docs guide block
+- Re-run: Refreshes only the OpenFlow managed block, preserving all other content
+- Safe repair: If markers are corrupted, appends a fresh valid block without rewriting corrupted areas
+
+**Managed Block:**
+Uses fixed markers `<!-- OPENFLOW DOCS GUIDE:BEGIN -->` and `<!-- OPENFLOW DOCS GUIDE:END -->` to wrap a Chinese-language guide explaining the `docs/current/*`, `docs/decisions/`, `docs/changes/`, and `docs/archive/` directory semantics and on-demand reading principles.
 
 ## Archive Command
 
 Use `/openflow/archive <feature-name>` when a feature is complete and ready to be archived.
 
+Archive is the final authority in the closure flow. It consumes the Verify readiness result, performs canonicalization, executes current promotion, and freezes the historical archive.
+
+Only these readiness states may enter Archive:
+
+- `ready`
+- `ready_with_doc_updates`
+
+The following states cannot proceed to Archive until resolved:
+
+- `not_ready`
+- `needs_decision`
+
 **Generates:**
 - `implementation-mapper.md` with code mapping and traceability
-- Frozen copy of change-workspace design / requirements / plans
+- Frozen copy of flat change-workspace documents (`design.md`, `proposal.md`, `decisions.md`, `prd.md`, `plan.md` when present)
 - Archive snapshot for historical traceability
-- Current-state updates only after archive-time review of completed changes
+- Current-state updates through archive-time canonicalization and promotion
 
 ## Hooks
 
@@ -176,17 +215,23 @@ Injects verification requirements and implementation context into agent tasks.
 - Generates PRD when current design docs are written
 - Tracks file changes for archive generation
 
-### acceptance.trigger
-Detects acceptance phase triggers.
+### verify.readiness
+Builds the Evidence packet and reports the Readiness state before archive.
 
-### acceptance.prompt
-Prompts for document synchronization during acceptance.
+### archive.authority
+Uses the Verify readiness result to perform canonicalization, current promotion, and archive freeze.
 
 ## OpenFlow Tool
 
 ```bash
+# Initialize AGENTS.md with OpenFlow docs guide
+/openflow/init
+
 # Start a brainstorm explicitly
 /openflow/brainstorm user-login
+
+# Verify readiness before archive
+/openflow/verify <feature-name>
 
 # Archive a feature
 /openflow/archive <feature-name>
@@ -216,16 +261,20 @@ docs/
 │   ├── spec/               # authoritative specifications
 │   └── workflow/           # current workflow rules and guidelines
 ├── changes/
-│   └── {feature}/
-│       ├── design/         # working design docs, with design.md as the default primary doc
-│       ├── requirements/   # optional working PRD / requirement docs
-│       └── plans/          # feature execution plans
+│   └── {YYYY-MM-DD-feature}/
+│       ├── design.md       # stable primary design document
+│       ├── proposal.md     # optional: problem framing and solution exploration
+│       ├── decisions.md    # optional: decision log for complex trade-offs
+│       ├── prd.md          # optional: created when a real PRD exists
+│       └── plan.md         # optional: user-facing workspace mirror of the active plan
 ├── archive/
-│   └── {feature}/
-│       ├── implementation-mapper.md
-│       ├── design/
-│       ├── requirements/
-│       └── plans/
+│   └── {YYYY-MM-DD-feature}/
+│       ├── implementation-mapper.md  # mandatory: traceability and code mapping
+│       ├── design.md       # conditional: copied if source exists
+│       ├── proposal.md     # conditional: copied if source exists
+│       ├── decisions.md    # conditional: copied if source exists
+│       ├── prd.md          # conditional: copied if source exists
+│       └── plan.md         # conditional: copied if source exists
 ├── decisions/
 │   └── ADR-*.md            # architecture decision records (global rules)
 └── references/
@@ -234,7 +283,9 @@ docs/
     └── research/           # structured research on specific topics
 ```
 
-For current project-level architecture and design references, see `docs/current/design/` and `docs/decisions/`.
+**Conditional Workspace Files**: under `changes/` and `archive/`, `proposal.md` / `decisions.md` / `prd.md` / `plan.md` appear only when real documents exist. `design.md` remains the stable primary document. Historical migration is deferred; compatibility reads remain enabled for older nested files.
+
+For current project-level architecture and design references in this repository, see `docs/changes/2026-04-15-openflow-init/design.md`, `docs/archive/2026-04-15-openflow-init/implementation-mapper.md`, and `docs/decisions/`.
 
 ## Brainstorm Workflow
 
@@ -254,20 +305,25 @@ When OpenFlow detects a likely new feature request, it suggests an explicit brai
 User request about a new feature
   -> OpenFlow reminds user to run: /openflow/brainstorm <feature>
   -> User proactively enters brainstorm when ready to design
-  -> If run, working docs are written under docs/changes/{feature}/ with design.md as the default primary document
+  -> If run, working docs are written under a dated workspace like docs/changes/2026-04-17-{feature}/ with design.md as the default primary document
   -> Continue implementation through the host runtime using the change workspace as the development source of truth
+  -> Run /openflow/verify <feature>
+     -> Evidence phase: collect checks, behavior, deltas, alignment, conflicts, and missing evidence
+     -> Readiness phase: output ready / ready_with_doc_updates / not_ready / needs_decision
+  -> Run /openflow/archive <feature-name> only when readiness is ready or ready_with_doc_updates
+     -> Archive performs canonicalization, current promotion, and historical freeze
 ```
 
 ## Templates
 
 OpenFlow includes templates for:
 
-- **Design Documents**: `templates/design/`
+- **Design Documents**: `templates/`
   - `proposal.md` - Problem statement and success criteria
   - `design.md` - Architecture and component design
   - `decisions.md` - Design decisions with trade-offs
 
-- **Requirements Documents**: `templates/requirements/`
+- **Requirements Documents**: `templates/`
   - `prd.md` - Product Requirements Document template with user stories and acceptance criteria
 
 

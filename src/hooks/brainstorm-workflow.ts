@@ -39,7 +39,14 @@ const INTENT_KEYWORDS = {
 }
 
 const REQUEST_TYPES = new Set<RequestType>(['trivial', 'explicit', 'exploratory', 'open-ended', 'fix'])
-const DESIGN_DOC_PATTERNS = [/^\d{8}-proposal\.md$/i, /^\d{8}-design\.md$/i, /^\d{8}-decisions\.md$/i]
+const DESIGN_DOC_PATTERNS = [
+  /^\d{8}-proposal\.md$/i,
+  /^\d{8}-design\.md$/i,
+  /^\d{8}-decisions\.md$/i,
+  /^proposal\.md$/i,
+  /^design\.md$/i,
+  /^decisions\.md$/i,
+]
 const DEFAULT_STRONG_CLOSURE_SIGNALS = ['按这个做', '按这个方案推进', '生成正式文档', '就按这个方向', 'go with this', 'proceed with this', 'generate formal docs']
 const DEFAULT_WEAK_CLOSURE_SIGNALS = ['可以', '好', '确认', '没问题', 'done', 'looks good', 'approved']
 const ACTIVE_BRAINSTORM_TTL_MS = 1000 * 60 * 60 * 6
@@ -242,20 +249,26 @@ export function appendGuardMessage(output: Record<string, unknown>, text: string
 }
 
 export async function hasDesignDoc(ctx: OpenFlowContext, featureName: string): Promise<boolean> {
-  const candidateDirs = getDesignCandidatePaths(ctx.directory, featureName, ctx.config)
+  const candidatePaths = await getDesignCandidatePaths(ctx.directory, featureName, ctx.config)
 
-  for (const designDir of candidateDirs) {
-    if (!(await fileExists(designDir))) continue
+  for (const candidatePath of candidatePaths) {
+    if (!(await fileExists(candidatePath))) continue
 
     try {
-      const entries = await fs.readdir(designDir, { withFileTypes: true })
+      const stats = await fs.stat(candidatePath)
+      if (stats.isFile() && DESIGN_DOC_PATTERNS.some(pattern => pattern.test(path.basename(candidatePath)))) {
+        return true
+      }
+      if (!stats.isDirectory()) continue
+
+      const entries = await fs.readdir(candidatePath, { withFileTypes: true })
       if (entries.some(entry => entry.isFile() && DESIGN_DOC_PATTERNS.some(pattern => pattern.test(entry.name)))) {
         return true
       }
     } catch (error) {
       logger.debug('Failed to inspect brainstorm design docs', {
         featureName,
-        designDir,
+        designDir: candidatePath,
         error: error instanceof Error ? error.message : String(error),
       })
     }

@@ -67,7 +67,7 @@ describe('prd-generator', () => {
       const ctx = createContext()
       const designDir = join(testDir, 'docs', 'current', 'design', 'uncertain-feature')
       await mkdir(designDir, { recursive: true })
-      await writeFile(join(designDir, '20260325-design.md'), '# Design\n\n## Overview\n\nSimple notes.', 'utf-8')
+      await writeFile(join(designDir, 'design.md'), '# Design\n\n## Overview\n\nSimple notes.', 'utf-8')
 
       const decision = await evaluateDocumentBundle(testDir, 'uncertain-feature', ctx.config)
       expect(decision.generateDesign).toBe(true)
@@ -111,9 +111,11 @@ describe('prd-generator', () => {
 
     test('returns true when PRD file exists', async () => {
       const ctx = createContext()
-      const prdDir = join(testDir, 'docs', 'current', 'requirements', 'test-feature')
-      await mkdir(prdDir, { recursive: true })
-      await writeFile(join(prdDir, '20260322-prd.md'), '# Test PRD', 'utf-8')
+      // Create design doc first so workspace detection picks change workspace
+      const designDir = join(testDir, 'docs', 'changes', 'test-feature')
+      await mkdir(designDir, { recursive: true })
+      await writeFile(join(designDir, 'proposal.md'), '# Proposal', 'utf-8')
+      await writeFile(join(designDir, 'prd.md'), '# Test PRD', 'utf-8')
       
       const result = await hasPrdDocument(testDir, 'test-feature', ctx.config)
       expect(result).toBe(true)
@@ -141,7 +143,7 @@ describe('prd-generator', () => {
       })
 
       expect(prdPath).toContain('test-feature')
-      expect(prdPath).toContain('-prd.md')
+      expect(prdPath).toContain(join('docs', 'changes', 'test-feature', 'prd.md'))
 
       const content = await readFile(prdPath, 'utf-8')
       expect(content).toContain('test-feature')
@@ -159,7 +161,7 @@ describe('prd-generator', () => {
       await mkdir(designDir, { recursive: true })
       
       await writeFile(
-        join(designDir, '20260322-proposal.md'),
+        join(designDir, 'proposal.md'),
         `# test-feature - Proposal
 
 ## Problem Statement
@@ -175,7 +177,7 @@ This feature solves the problem of X by doing Y.
       )
 
       await writeFile(
-        join(designDir, '20260322-design.md'),
+        join(designDir, 'design.md'),
         `# test-feature - Design Document
 
 ## Overview
@@ -211,10 +213,11 @@ Purpose: Handles authentication
 
     test('does not overwrite existing PRD', async () => {
       const ctx = createContext()
-      
-      const prdDir = join(testDir, 'docs', 'current', 'requirements', 'existing-feature')
-      await mkdir(prdDir, { recursive: true })
-      await writeFile(join(prdDir, '20260322-prd.md'), '# Existing PRD', 'utf-8')
+      // Create design doc first so workspace detection picks change workspace
+      const designDir = join(testDir, 'docs', 'changes', 'existing-feature')
+      await mkdir(designDir, { recursive: true })
+      await writeFile(join(designDir, 'proposal.md'), '# Proposal', 'utf-8')
+      await writeFile(join(designDir, 'prd.md'), '# Existing PRD', 'utf-8')
 
       // This should not throw, but the existing file should remain
       const exists = await hasPrdDocument(testDir, 'existing-feature', ctx.config)
@@ -225,7 +228,7 @@ Purpose: Handles authentication
       const ctx = createContext()
       
       // Create custom template
-      const templateDir = join(testDir, 'templates', 'requirements')
+      const templateDir = join(testDir, 'templates')
       await mkdir(templateDir, { recursive: true })
       await writeFile(
         join(templateDir, 'prd.md'),
@@ -246,9 +249,9 @@ Purpose: Handles authentication
 
     test('prefers change workspace paths when design exists in docs/changes', async () => {
       const ctx = createContext()
-      const changeDesignDir = join(testDir, 'docs', 'changes', 'change-feature', 'design')
+      const changeDesignDir = join(testDir, 'docs', 'changes', 'change-feature')
       await mkdir(changeDesignDir, { recursive: true })
-      await writeFile(join(changeDesignDir, '20260325-design.md'), '# Design\n\n## Overview\n\nUser value and acceptance', 'utf-8')
+      await writeFile(join(changeDesignDir, 'design.md'), '# Design\n\n## Overview\n\nUser value and acceptance', 'utf-8')
 
       const prdPath = await generatePrd({
         feature: 'change-feature',
@@ -256,7 +259,7 @@ Purpose: Handles authentication
         config: ctx.config,
       })
 
-      expect(prdPath).toContain(join('docs', 'changes', 'change-feature', 'requirements'))
+      expect(prdPath).toContain(join('docs', 'changes', 'change-feature', 'prd.md'))
       await expect(access(prdPath)).resolves.toBeNull()
     })
 

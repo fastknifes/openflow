@@ -86,9 +86,11 @@ describe('acceptance-state', () => {
     expect(loaded?.waitingForDocUpdateConfirm).toBe(true)
     expect(loaded?.lastChangedFile).toBe('src/feature-b/service.ts')
 
-    await clearWaitingForDocUpdateConfirm(TEST_ROOT)
+    await clearWaitingForDocUpdateConfirm(TEST_ROOT, 'confirmed')
     loaded = await loadAcceptanceState(TEST_ROOT)
     expect(loaded?.waitingForDocUpdateConfirm).toBe(false)
+    expect(loaded?.archiveDocUpdateConfirmationStatus).toBe('confirmed')
+    expect(loaded?.archiveDocUpdateConfirmedAt).toBeDefined()
     expect(loaded?.lastChangedFile).toBeUndefined()
 
     await clearAcceptanceState(TEST_ROOT)
@@ -96,6 +98,22 @@ describe('acceptance-state', () => {
     expect(cleared).toBeNull()
 
     await rm(TEST_ROOT, { recursive: true, force: true })
+  })
+
+  test('clearing waiting confirmation can record declined status without confirmation timestamp', async () => {
+    const root = join(TEST_ROOT, 'declined-doc-confirm')
+    await rm(root, { recursive: true, force: true })
+
+    await enterAcceptancePhase(root, 'feature-c')
+    await setWaitingForDocUpdateConfirm(root, 'src/feature-c/service.ts')
+    await clearWaitingForDocUpdateConfirm(root, 'declined')
+
+    const loaded = await loadAcceptanceState(root)
+    expect(loaded?.waitingForDocUpdateConfirm).toBe(false)
+    expect(loaded?.archiveDocUpdateConfirmationStatus).toBe('declined')
+    expect(loaded?.archiveDocUpdateConfirmedAt).toBeUndefined()
+
+    await rm(root, { recursive: true, force: true })
   })
 
   test('round-trip with readiness fields', async () => {

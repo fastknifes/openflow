@@ -11,15 +11,15 @@ OpenFlow 当前已经具备较强的工作流增强能力：
 - 基于 `oh-my-openagent` 提供的多代理、需求澄清、计划探索、委派执行能力运行
 - 通过 `/openflow/brainstorm` 提供设计前置与文档生成
 - 在计划阶段注入 TDD 与验证要求
-- 在验收阶段识别触发词、记录漂移、提示文档同步
-- 在归档阶段生成实现映射、代码映射和需求归档
+- 通过 Verify 阶段建立 evidence 与 readiness，判断变更是否具备进入 closure 的条件
+- 在归档阶段完成 canonicalization、current promotion、实现映射、代码映射和需求归档
 
 当前的核心问题已经不再是“有没有流程”，而是以下几个治理问题：
 
 1. `docs/` 目录结构尚未与演进式项目形态完全对齐
 2. 文档维护责任、触发时机、写入边界不清晰
 3. 全局规则与 feature 级事实文档混杂，缺少清晰治理模型
-4. 验收阶段已经存在，但用户侧缺少明确的“如何测试”指引
+4. Verify / Archive 边界需要从“校验与验收”收敛为“readiness 与 canonical authority”
 5. 外部参考项目很多，但需要明确哪些该吸收，哪些不该重复建设
 
 本方案基于前述讨论，结合 `oh-my-openagent`、`Superpowers`、`OpenSpec`、`Spec Kit`、`get-shit-done` 的优缺点，对 OpenFlow 的文档树、治理模型与后续扩展方向做统一收敛。
@@ -32,7 +32,8 @@ OpenFlow 当前已经具备较强的工作流增强能力：
 - 让 `docs/` 能承载演进式项目的“当前事实 + 变更过程 + 历史归档”
 - 让事实类文档和规则类文档职责清晰
 - 让 AI 与用户在人机协作中各自承担合适责任
-- 让验收环节从“阶段识别”升级为“有明确测试指引的人工验收”
+- 让 Verify 从“代码级检查”升级为 Evidence + Readiness 的单一完成前入口
+- 让 Archive 成为 closure 的最终 authority，负责 current promotion 与历史冻结
 - 保持主流程轻量，避免引入过重的 phase/milestone 体系
 
 ## 3. 对外部系统的评估结论
@@ -105,7 +106,7 @@ OpenFlow 的文档体系应整体偏向 `OpenSpec-lite`：
 
 值得吸收的部分只有一个重点：
 
-> 人工验收时，不只进入 acceptance 阶段，还要明确告诉用户“该怎么测、测什么、什么算通过”。
+> 完成前不只运行代码级检查，还要通过 Verify 生成 evidence packet 与 readiness 结论，明确“知道了什么、是否可进入 Archive、还缺什么”。
 
 这部分与 OpenFlow 当前能力高度兼容，适合作为后续增强点。
 
@@ -128,22 +129,25 @@ OpenFlow 应被定义为：
 docs/
 ├── index.md
 ├── current/
-│   ├── requirements/
-│   ├── design/
-│   ├── spec/
-│   └── workflow/
+│   ├── requirements/          # lifecycle-stable current facts area
+│   ├── design/                # lifecycle-stable current design area
+│   ├── spec/                  # lifecycle-stable current spec area
+│   └── workflow/              # lifecycle-stable current workflow area
 ├── changes/
-│   └── {change-or-feature}/
-│       ├── requirements/
-│       ├── design/
-│       ├── plans/
-│       └── index.md
+│   └── {YYYY-MM-DD-feature}/  # dated workspace per feature
+│       ├── design.md          # stable primary design document
+│       ├── proposal.md        # conditional: created when problem framing is needed
+│       ├── decisions.md       # conditional: created when trade-off logging is needed
+│       ├── prd.md             # conditional: created when a real PRD exists
+│       └── plan.md            # conditional: workspace mirror of the active execution plan
 ├── archive/
-│   └── {change-or-feature}/
-│       ├── implementation-mapper.md
-│       ├── design/
-│       ├── requirements/
-│       └── plans/
+│   └── {YYYY-MM-DD-feature}/  # dated snapshot per feature
+│       ├── implementation-mapper.md   # mandatory
+│       ├── design.md          # conditional: copied if source exists
+│       ├── proposal.md        # conditional: copied if source exists
+│       ├── decisions.md       # conditional: copied if source exists
+│       ├── prd.md             # conditional: copied if source exists
+│       └── plan.md            # conditional: copied if source exists
 ├── decisions/
 │   └── ADR-*.md
 └── references/
@@ -156,14 +160,18 @@ docs/
 
 - `docs/current/`
   - 当前有效事实
-  - 用于描述“系统现在是什么样”
+  - 用于描述"系统现在是什么样"
+  - `requirements/`、`design/`、`spec/`、`workflow/` 为生命周期级稳定目录
 - `docs/changes/`
   - 进行中的变更工作区
   - 用于承接某个 feature/change 的需求、设计与计划演进
+  - `design.md` 是稳定的 brainstorm 主文档
+  - `proposal.md`、`decisions.md`、`prd.md`、`plan.md` 是按需出现的工作区文件，仅在存在真实内容时出现
 - `docs/archive/`
   - 已归档的历史快照
   - 冻结，不作为日常编辑对象
-  - 使用 `implementation-mapper.md` 作为实现映射与追溯主文档
+  - `implementation-mapper.md` 是强制生成的实现映射与追溯主文档
+  - `design.md`、`proposal.md`、`decisions.md`、`prd.md`、`plan.md` 是条件性归档文件，仅在源文件存在时复制归档
 - `docs/decisions/`
   - 跨 feature 的正式全局决策
   - 必须经过用户确认
@@ -175,9 +183,8 @@ docs/
 
 `changes/` 是进行中的工作区，应该主要放会持续演化的文档：
 
-- `requirements/`
-- `design/`
-- `plans/`
+- `design.md`（稳定的 brainstorm 主文档）
+- `proposal.md`、`decisions.md`、`prd.md`、`plan.md`（按需出现）
 
 不建议在 `changes/` 中放 `SRS` 或 `implementation-mapper`，原因是：
 
@@ -215,16 +222,18 @@ docs/
 
 | 文档类型 | 建议位置 | 文档性质 | AI职责 | 用户职责 | 主触发流程 |
 |---|---|---|---|---|---|
-| 原始需求输入 | `docs/changes/{feature}/requirements/` | 工作态事实类 | 摘录原始输入、保留来源 | 提供上下文、纠正遗漏 | `brainstorm` |
-| 需求整理文档 | `docs/changes/{feature}/requirements/` | 工作态事实类 | 提炼目标、范围、约束、验收条件 | 确认意图 | `brainstorm` |
-| 当前轮设计文档 | `docs/changes/{feature}/design/` | 工作态事实类 | 起草、同步设计演进 | 确认关键 trade-off | `brainstorm`、`design` |
-| 当前系统规格 | `docs/current/spec/` | 事实类 | 根据实现与归档同步更新 | 审阅重大偏差 | `design`、`archive` |
+| 原始需求输入 | `docs/changes/{YYYY-MM-DD-feature}/prd.md` (conditional) | 工作态事实类 | 摘录原始输入、保留来源 | 提供上下文、纠正遗漏 | `brainstorm` |
+| 需求整理文档 | `docs/changes/{YYYY-MM-DD-feature}/prd.md` (conditional) | 工作态事实类 | 提炼目标、范围、约束、验收条件 | 确认意图 | `brainstorm` |
+| 当前轮设计文档 | `docs/changes/{YYYY-MM-DD-feature}/design.md` | 工作态事实类 | 起草、同步设计演进 | 确认关键 trade-off | `brainstorm`、`design` |
+| 当前系统规格 | `docs/current/spec/` | 事实类 | 根据 Verify readiness 与 Archive 结果同步更新 | 审阅重大偏差 | `design`、`archive` |
 | 当前工作流规则 | `docs/current/workflow/` | 规则类 | 提议、代写、检查一致性 | 决策与批准 | `brainstorm`、`archive` |
 | 全局决策 | `docs/decisions/` | 规则类 | 识别候选、提问、起草 | 批准后生效 | `brainstorm` 主、`archive` 补 |
 | 参考原文 | `docs/references/raw/` | 来源类 | 建索引，不改原意 | 放入外部资料 | 任意 |
 | 参考笔记/调研 | `docs/references/notes/`、`docs/references/research/` | 整理类 | 摘要、对比、提炼结论 | 选择是否采纳 | `brainstorm`、`design` |
-| 归档实现映射 | `docs/archive/{feature}/implementation-mapper.md` | 冻结类 | 生成业务-代码-测试-验收映射 | 确认归档成立 | `archive` |
-| 归档快照 | `docs/archive/` | 冻结类 | 自动复制、整理、冻结 | 确认归档成立 | `archive` |
+| Verify evidence packet | Verify 运行输出 / acceptance state（轻量留痕） | 工作态证据类 | 生成检查结果、行为摘要、intent vs actual delta、文档对齐、冲突与缺失证据 | 审阅关键风险与缺失证据 | `verify` |
+| Verify readiness | Verify 运行输出 / acceptance state（轻量留痕） | 工作态判断类 | 输出 `ready` / `ready_with_doc_updates` / `not_ready` / `needs_decision` | 确认是否进入 Archive 或先补决策/修复 | `verify` |
+| 归档实现映射 | `docs/archive/{YYYY-MM-DD-feature}/implementation-mapper.md` (mandatory) | 冻结类 | 生成业务-代码-测试-验收映射 | 确认归档成立 | `archive` |
+| 归档快照 | `docs/archive/` subdirs (conditional) | 冻结类 | 在 Archive authority 下复制、整理、冻结 | 确认归档成立 | `archive` |
 
 ## 7. 全局决策机制
 
@@ -280,7 +289,7 @@ OpenFlow 当前已经形成以下骨架：
 1. `brainstorm`
 2. Prometheus 计划生成与 OpenFlow 计划增强
 3. 实现执行
-4. acceptance
+4. verify
 5. archive
 
 该骨架不需要被 GSD 或 Superpowers 替换。
@@ -292,9 +301,9 @@ OpenFlow 当前已经形成以下骨架：
   -> brainstorm（澄清需求、方案比较、生成设计/需求）
   -> 计划生成与增强（OMO + OpenFlow）
   -> 实现执行（OMO 子代理）
-  -> acceptance（用户人工验收）
-  -> archive（生成 `implementation-mapper`、冻结快照）
-  -> 必要时回写 current 与 decisions
+  -> verify（Evidence + Readiness，判断是否具备进入 closure 的条件）
+  -> archive（canonicalization、current promotion、生成 `implementation-mapper`、冻结快照）
+  -> 必要时将稳定实践提升到 decisions / current workflow
 ```
 
 ### 8.3 OpenFlow 在各阶段的职责
@@ -303,31 +312,32 @@ OpenFlow 当前已经形成以下骨架：
   - 前置设计、需求整理、在 `changes` 工作区沉淀文档，并默认以 `design.md` 作为主入口
 - `plan enhancement`
   - 注入 TDD、验证和质量要求
-- `acceptance`
-  - 识别验收阶段、记录漂移、生成验收引导
+- `verify`
+  - 作为单一完成前入口，生成 evidence packet 并输出 readiness 状态
+  - readiness 状态包括 `ready`、`ready_with_doc_updates`、`not_ready`、`needs_decision`
 - `archive`
-  - 生成 `implementation-mapper`、复制 plans/design/requirements、完成冻结与追溯
+  - 作为 closure 最终 authority，读取 Verify 结果，执行 canonicalization、current promotion、生成 `implementation-mapper`、复制扁平工作区文档快照、完成冻结与追溯
 
-## 9. 验收阶段增强方案
+## 9. Verify 阶段增强方案
 
-这是本轮评估后最值得新增的能力。
+这是本轮评估后最值得新增的能力：将原先分散在 verification injection、acceptance 提示、漂移检测中的职责，收敛到单一 Verify 入口中。
 
 ### 9.1 当前状态
 
 OpenFlow 已具备：
 
-- 验收触发词识别
-- acceptance 状态持久化
+- verification 注入
+- acceptance 状态持久化（可作为 Verify 轻量留痕位置）
 - 文档同步提示
 - 漂移检测
-- verification 注入
 - `test-mapping.md` 模板
 
 但当前仍缺少：
 
-- 面向用户的“怎么测”指导
-- 将需求/设计/spec 转成可执行验收步骤
-- 明确的通过标准与失败反馈格式
+- 面向用户的单一 Verify 入口
+- Evidence packet：检查结果、行为摘要、intent vs actual delta、文档对齐、冲突与缺失证据
+- Readiness 状态：`ready`、`ready_with_doc_updates`、`not_ready`、`needs_decision`
+- 与 Archive 的准入边界：只有 `ready` / `ready_with_doc_updates` 可以进入 Archive
 
 ### 9.2 外部启发
 
@@ -339,19 +349,45 @@ GSD 在这件事上的有效做法是：
 
 ### 9.3 推荐方案
 
-新增一个验收测试指引命令，作为 acceptance 阶段的用户入口。
+将 `/openflow/verify <feature>` 设计为完成前单一入口，内部包含两个阶段。
 
-命令职责：
+#### Evidence 阶段
 
-- 基于当前 feature 的 `requirements`、`design`、`spec`、实现上下文
-- 直接生成用户可执行的验收步骤
-- 每一步明确：
-  - 操作方式
-  - 预期结果
-  - 通过标准
-  - 失败时应反馈的信息
+生成 evidence packet，包括：
 
-### 9.4 为什么不建议只做瞬时输出
+- checks run / result
+- observed behavior summary
+- intent vs actual delta
+- doc alignment summary
+- `current` / `decisions` conflict summary
+- known risks / missing evidence
+
+#### Readiness 阶段
+
+输出以下四态之一：
+
+- `ready`
+- `ready_with_doc_updates`
+- `not_ready`
+- `needs_decision`
+
+其中 `needs_decision` 仅用于 rule 级变化、`current` 级冲突或需要显式业务裁决的事项，不用于一般 bug 或普通证据缺失。
+
+### 9.4 Archive 准入规则
+
+只有以下状态可以进入 Archive：
+
+- `ready`
+- `ready_with_doc_updates`
+
+以下状态不得进入 Archive：
+
+- `not_ready`
+- `needs_decision`
+
+`ready_with_doc_updates` 进入 Archive 时，应采用半自动确认流：Archive 先展示拟更新文档与内容范围，用户确认后再执行文档更新、current promotion 与 archive freeze。
+
+### 9.5 为什么不建议只做瞬时输出
 
 如果完全不留痕，会带来以下问题：
 
@@ -362,16 +398,16 @@ GSD 在这件事上的有效做法是：
 
 因此推荐模型是：
 
-> 命令作为交互入口，系统保留轻量留痕。
+> Verify 作为交互入口，系统保留轻量 evidence / readiness 留痕。
 
-### 9.5 轻量留痕建议
+### 9.6 轻量留痕建议
 
-不需要为每次验收生成正式 `docs` 文档，但应至少保留以下轻量信息：
+不需要为每次 Verify 生成正式 `docs` 文档，但应至少保留以下轻量信息：
 
-- 本次验收针对哪些能力点生成
-- 哪些项通过/未通过
-- 用户反馈的失败点
-- 验收阶段是否引入新增需求或漂移
+- 本次 Verify 针对哪些能力点生成
+- Evidence packet 摘要
+- Readiness 状态
+- 是否需要文档更新或显式决策
 
 轻量留痕可以进入：
 
@@ -418,17 +454,19 @@ GSD 在这件事上的有效做法是：
 
 维护：
 
-- `changes/{feature}/requirements`
-- `changes/{feature}/design`
+- `changes/{feature}/design.md`
+- `changes/{feature}/prd.md`（按需）
 - 必要时提问并更新 `decisions`
 - 必要时更新 `current/workflow`
+
+说明：其中 `changes/{feature}/prd.md` 是按需工作区文件，仅在真实需求文档存在时出现。
 
 ### 11.2 design / planning
 
 维护：
 
 - `current/design`
-- `changes/{feature}/plans`
+- `changes/{feature}/plan.md`（按需）
 - `references/research`
 
 ### 11.3 implement
@@ -438,14 +476,15 @@ GSD 在这件事上的有效做法是：
 - 不主动维护规则类文档
 - 只在实现明显偏离文档时提示回写
 
-### 11.4 acceptance
+### 11.4 verify
 
 维护：
 
 - acceptance state
-- 漂移信息
-- 验收测试指引输出
-- 失败项回流到后续修正
+- evidence packet
+- readiness 状态
+- 文档更新需求
+- 失败项 / 缺失证据回流到后续修正
 
 ### 11.5 archive
 
@@ -453,6 +492,7 @@ GSD 在这件事上的有效做法是：
 
 - `archive/{feature}`
 - `current/spec`
+- current promotion
 - 必要时将稳定实践提升到 `decisions` 或 `current/workflow`
 
 ## 12. 实施建议
@@ -460,6 +500,9 @@ GSD 在这件事上的有效做法是：
 ### 12.1 第一阶段：目录与治理落地
 
 - 确认 `docs/current`、`docs/changes`、`docs/archive`、`docs/decisions`、`docs/references` 结构
+- 明确 `current/` 为生命周期级稳定目录，`changes/{feature}` 采用扁平工作区文件布局，以 `design.md` 为稳定主文档，`proposal.md`、`decisions.md`、`prd.md`、`plan.md` 按需出现
+- 明确 `archive/{feature}` 强制生成 `implementation-mapper.md`，其余扁平工作区文件仅在源文件存在时复制
+- 明确新写入遵循扁平工作区文件规则，既有历史文档保持原位置可读，兼容性读取持续启用
 - 将现有散落文档逐步迁移到对应位置
 - 明确事实类/规则类文档边界
 
@@ -469,11 +512,12 @@ GSD 在这件事上的有效做法是：
 - 在 `archive` 中加入“实践升格为全局规则”的补录逻辑
 - 仅在用户确认后写入 `docs/decisions/`
 
-### 12.3 第三阶段：验收测试指引命令
+### 12.3 第三阶段：Verify 命令重设计
 
-- 新增验收指引命令
-- 从当前 feature 文档与实现状态提炼用户测试步骤
-- 为失败反馈提供标准格式
+- 将 `/openflow/verify <feature>` 收敛为完成前单一入口
+- 引入 Evidence + Readiness 两阶段
+- 输出 `ready` / `ready_with_doc_updates` / `not_ready` / `needs_decision`
+- 明确 Archive 是最终 authority，负责 current promotion 与 archive freeze
 - 保留轻量留痕，不新增重型文档
 
 ## 13. 非目标
@@ -492,13 +536,15 @@ GSD 在这件事上的有效做法是：
 
 1. OpenFlow 保持对 OMO 的增强层定位，不重复建设执行编排能力
 2. 文档体系采用偏 `OpenSpec` 的演进式结构：`current + changes + archive`
-3. 文档治理按“事实类由 AI 同步，规则类由用户拍板”运行
-4. 全局决策优先嵌入 `brainstorm` 和 `archive` 流程，而非一开始就做成独立 skill
-5. 对 GSD 的唯一重点吸收项，是验收阶段的“用户测试指引能力”
-6. `archive` 不再产出 `SRS` 目录，而是产出单一主文档 `implementation-mapper.md`
-7. `changes` 中不包含 `SRS`；计划目录统一命名为 `plans/`
-8. 验收指引能力应以命令形式提供，并配套轻量留痕，而不是新增厚重文档类型
+3. 目录调整遵循“顶层生命周期分区稳定、feature 工作区扁平化”的原则：`current/` 维持稳定分区，`changes/{feature}` 以 `design.md` 为稳定主文档，其余工作区文件按需出现，`archive/{feature}` 仅复制真实存在的扁平文档
+4. 文档治理按"事实类由 AI 同步，规则类由用户拍板"运行
+5. 新文档遵循扁平工作区文件规则，已存在历史文档保持原位置可读，通过兼容性读取消化过渡，而不要求立即做历史迁移
+6. 全局决策优先嵌入 `brainstorm` 和 `archive` 流程，而非一开始就做成独立 skill
+7. 对 GSD 的重点吸收项，是通过 Verify 的 Evidence + Readiness 机制提供完成前的证据与准备度判断
+8. `archive` 不再产出 `SRS` 目录，而是产出单一主文档 `implementation-mapper.md`
+9. `changes` 中不包含 `SRS`；计划目录统一命名为 `plans/`
+10. Verify 应以命令形式提供，并配套轻量 evidence / readiness 留痕，而不是新增厚重文档类型
 
 一句话总结：
 
-> OpenFlow 的未来不是成为第二个 orchestrator，而是成为 OMO 之上的文档治理、验收引导与归档追溯层。
+> OpenFlow 的未来不是成为第二个 orchestrator，而是成为 OMO 之上的文档治理、Verify readiness、Archive canonicalization 与归档追溯层。
