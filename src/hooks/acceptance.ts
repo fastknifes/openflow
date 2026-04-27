@@ -2,7 +2,7 @@ import type { OpenFlowContext } from '../types.js'
 import { sanitizeFeatureName, createSafePath } from '../utils/security.js'
 import { logger } from '../utils/logger.js'
 import { fileExists } from './file-utils.js'
-import { clearWaitingForDocUpdateConfirm, enterAcceptancePhase, loadAcceptanceState, saveAcceptanceState } from '../utils/acceptance-state.js'
+import { clearWaitingForDocUpdateConfirm, enterAcceptancePhase, loadAcceptanceState } from '../utils/acceptance-state.js'
 import * as fs from 'node:fs/promises'
 
 function containsAcceptanceTrigger(message: string, triggersZh: string[], triggersEn: string[]): boolean {
