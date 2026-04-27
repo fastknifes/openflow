@@ -149,12 +149,13 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
       'openflow/migrate-docs': tool({
         description: 'Migrate documentation from other workflow tools into OpenFlow docs structure',
         args: {
-          sourceDir: tool.schema.string().optional(),
-          targetDir: tool.schema.string().optional(),
+          sourceDir: tool.schema.string().max(256).optional(),
+          targetDir: tool.schema.string().max(256).optional(),
           dryRun: tool.schema.boolean().optional(),
-          answer: tool.schema.string().optional(),
+          answer: tool.schema.string().max(280).optional(),
         },
-        execute: async (args: { sourceDir?: string; targetDir?: string; dryRun?: boolean; answer?: string }) => {
+        execute: async (args: { sourceDir?: string; targetDir?: string; dryRun?: boolean; answer?: string }, toolContext) => {
+          void toolContext
           try {
             return await handleMigrateDocs(openflowCtx, args)
           } catch (error) {
