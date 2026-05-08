@@ -126,14 +126,18 @@ async function finalizeBrainstorm(
     return formatGenerationResult(session.feature, existingGenerated)
   }
 
-  const requirementModel = session.requirementModel ?? buildRequirementModel(session.feature, session.answers)
-  const generatingSession = markGenerating({
-    ...session,
-    requirementModel,
-  })
-  await saveBrainstormSession(ctx.directory, generatingSession)
-
   try {
+    const requirementModel = await prepareRequirementModel(
+      session.feature,
+      session.answers,
+      buildRequirementModel(session.feature, session.answers)
+    )
+    const generatingSession = markGenerating({
+      ...session,
+      requirementModel,
+    })
+    await saveBrainstormSession(ctx.directory, generatingSession)
+
     const { designPath, requirementModel: validatedModel } = await generateDesignDocument(ctx, generatingSession)
     const completedSession = markCompleted(
       {
@@ -148,9 +152,28 @@ async function finalizeBrainstorm(
     return formatGenerationResult(session.feature, designPath)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    const failedSession = markGenerationFailed(generatingSession, message)
+    const failedSession = markGenerationFailed(markGenerating(session), message)
     await saveBrainstormSession(ctx.directory, failedSession)
     return formatGenerationFailure(session.feature, message)
+  }
+}
+
+async function prepareRequirementModel(
+  feature: string,
+  answers: BrainstormSession['answers'],
+  seedModel?: RequirementModel,
+): Promise<RequirementModel> {
+  const baseModel = seedModel ?? buildRequirementModel(feature, answers)
+
+  try {
+    const enrichedModel = await defaultSynthesizer.synthesize(baseModel)
+    return RequirementModelSchema.parse(enrichedModel)
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new Error(error.message)
+    }
+
+    throw error
   }
 }
 
@@ -330,9 +353,7 @@ async function generateDesignDocument(
   if (existingGenerated) {
     try {
       await fs.access(existingGenerated)
-      const existingModel = RequirementModelSchema.parse(
-        session.requirementModel ?? buildRequirementModel(session.feature, session.answers)
-      )
+      const existingModel = await prepareRequirementModel(session.feature, session.answers, session.requirementModel)
       return {
         designPath: existingGenerated,
         requirementModel: existingModel,
@@ -342,18 +363,7 @@ async function generateDesignDocument(
     }
   }
 
-  const baseModel = session.requirementModel ?? buildRequirementModel(session.feature, session.answers)
-
-  let validatedModel: RequirementModel
-  try {
-    const enrichedModel = await defaultSynthesizer.synthesize(baseModel)
-    validatedModel = RequirementModelSchema.parse(enrichedModel)
-  } catch (error) {
-    if (error instanceof ZodError) {
-      throw new Error(error.message)
-    }
-    throw error
-  }
+  const validatedModel = await prepareRequirementModel(session.feature, session.answers, session.requirementModel)
 
   const workspaceDir = await ensureChangeWorkspacePath(ctx.directory, session.feature)
   const relativeWorkspaceDir = path.relative(ctx.directory, workspaceDir)

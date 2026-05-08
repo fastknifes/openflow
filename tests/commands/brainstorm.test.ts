@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { handleBrainstorm } from '../../src/commands/brainstorm.js'
+import { defaultSynthesizer } from '../../src/phases/brainstorm/llm-adapter.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 
 function createContext(directory: string): OpenFlowContext {
@@ -203,11 +204,31 @@ describe('brainstorm command', () => {
 
     const changeDirs = await readdir(join(root, 'docs', 'changes'))
     const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
+    const sidecarFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.meta.json')
     await expect(access(generatedFile)).resolves.toBeNull()
+    await expect(access(sidecarFile)).resolves.toBeNull()
     const content = await readFile(generatedFile, 'utf-8')
+    const sidecar = JSON.parse(await readFile(sidecarFile, 'utf-8')) as {
+      feature: string
+      problemStatement?: string
+      targetUsers?: string
+      constraints: Array<{ description: string }>
+    }
+
+    expect(content).toContain('# user-login - Design')
+    expect(content).toContain('## Overview')
+    expect(content).toContain('## Problem')
+    expect(content).toContain('## Goals')
+    expect(content).toContain('## Design Constraints')
+    expect(content).toContain('## Success Criteria')
+    expect(content).toContain('## Proposed Design')
     expect(content).toContain('减少重复登录操作')
     expect(content).toContain('内部开发者')
     expect(content).toContain('必须兼容现有认证')
+    expect(sidecar.feature).toBe('user-login')
+    expect(sidecar.problemStatement).toBe('减少重复登录操作')
+    expect(sidecar.targetUsers).toBe('内部开发者')
+    expect(sidecar.constraints.some((constraint) => constraint.description === '必须兼容现有认证')).toBe(true)
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'brainstorm', 'user-login.json'), 'utf-8')) as {
       workflowState: string
@@ -271,5 +292,55 @@ describe('brainstorm command', () => {
     expect(session.generatedDocs).toHaveLength(1)
 
     await rm(root, { recursive: true, force: true })
+  })
+
+  test('marks brainstorm failed when requirement model validation fails', async () => {
+    const root = join(process.cwd(), '.test-brainstorm-validation-failure')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const originalSynthesize = defaultSynthesizer.synthesize.bind(defaultSynthesizer)
+
+    defaultSynthesizer.synthesize = async (model) => ({
+      ...model,
+      constraints: [
+        {
+          id: 'broken-constraint',
+          category: 'scope',
+          severity: 'must',
+          description: '',
+          rationale: 'Invalid for test',
+          verificationMethod: 'Observe validation failure',
+          sourceQuestionId: 'constraints',
+        },
+      ],
+    })
+
+    try {
+      const toolContext = createToolContext(root, 'session-invalid')
+      await handleBrainstorm(createContext(root), 'user-login', undefined, toolContext)
+      await handleBrainstorm(createContext(root), 'user-login', '减少重复登录操作', toolContext)
+      await handleBrainstorm(createContext(root), 'user-login', '内部开发者', toolContext)
+      await handleBrainstorm(createContext(root), 'user-login', 'new-feature', toolContext)
+      await handleBrainstorm(createContext(root), 'user-login', '快速上线', toolContext)
+
+      const result = await handleBrainstorm(createContext(root), 'user-login', '必须兼容现有认证', toolContext)
+
+      expect(result).toContain('Brainstorm Pending')
+      expect(result).toContain('String must contain at least 1 character')
+
+      const session = JSON.parse(await readFile(join(root, '.sisyphus', 'brainstorm', 'user-login.json'), 'utf-8')) as {
+        workflowState: string
+        lastError?: string
+        generatedDocs: string[]
+      }
+
+      expect(session.workflowState).toBe('failed')
+      expect(session.generatedDocs).toHaveLength(0)
+      expect(session.lastError).toContain('String must contain at least 1 character')
+    } finally {
+      defaultSynthesizer.synthesize = originalSynthesize
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
