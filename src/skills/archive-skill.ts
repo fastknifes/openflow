@@ -1,8 +1,8 @@
-import type { SkillInfo } from './types.js'
+﻿import type { SkillInfo } from './types.js'
 
 export function getArchiveSkill(): SkillInfo {
   return {
-    name: 'openflow/archive',
+    name: 'openflow-archive',
     description: 'Use when a feature is complete and ready to be archived. Generates an implementation mapper with traceability from Session API.',
     content: `# OpenFlow Archive Skill
 
@@ -56,28 +56,28 @@ Include:
 
 ### 5. Copy Documents
 Copy to archive (only if source files exist):
-- Design → \`docs/archive/{YYYY-MM-DD-feature}/design.md\`
-- Proposal → \`docs/archive/{YYYY-MM-DD-feature}/proposal.md\` (conditional)
-- Decisions → \`docs/archive/{YYYY-MM-DD-feature}/decisions.md\` (conditional)
-- Plan → \`docs/archive/{YYYY-MM-DD-feature}/plan.md\` (conditional)
-- Requirements / PRD → \`docs/archive/{YYYY-MM-DD-feature}/prd.md\` (conditional)
+- Design 鈫?\`docs/archive/{YYYY-MM-DD-feature}/design.md\`
+- Proposal 鈫?\`docs/archive/{YYYY-MM-DD-feature}/proposal.md\` (conditional)
+- Decisions 鈫?\`docs/archive/{YYYY-MM-DD-feature}/decisions.md\` (conditional)
+- Plan 鈫?\`docs/archive/{YYYY-MM-DD-feature}/plan.md\` (conditional)
+- Requirements / PRD 鈫?\`docs/archive/{YYYY-MM-DD-feature}/prd.md\` (conditional)
 - \`implementation-mapper.md\` is always generated.
 
 ## Example
 
 \`\`\`text
-/openflow/archive user-login
+/openflow-archive user-login
 \`\`\`
 
 This will create:
 \`\`\`
 docs/archive/2026-04-17-user-login/
-├── implementation-mapper.md  (always)
-├── design.md                 (if design exists)
-├── proposal.md               (conditional)
-├── decisions.md              (conditional)
-├── prd.md                    (conditional)
-└── plan.md                   (conditional)
+鈹溾攢鈹€ implementation-mapper.md  (always)
+鈹溾攢鈹€ design.md                 (if design exists)
+鈹溾攢鈹€ proposal.md               (conditional)
+鈹溾攢鈹€ decisions.md              (conditional)
+鈹溾攢鈹€ prd.md                    (conditional)
+鈹斺攢鈹€ plan.md                   (conditional)
 \`\`\`
 `,
   }

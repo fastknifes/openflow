@@ -28,8 +28,8 @@ describe('skill registration', () => {
 
     expect(content).toContain('name: brainstorm')
     expect(content).toContain('description: Use when starting or continuing feature design clarification')
-    expect(content).toContain('/openflow/brainstorm <feature>')
-    expect(content).toContain('internal OpenFlow `openflow/brainstorm` tool')
+    expect(content).toContain('/openflow-brainstorm <feature>')
+    expect(content).toContain('internal OpenFlow `openflow-brainstorm` tool')
   })
 
   test('registers init as a discovered SKILL.md entry', async () => {
@@ -43,7 +43,7 @@ describe('skill registration', () => {
 
     expect(content).toContain('name: init')
     expect(content).toContain('description: Use when initializing or refreshing the root AGENTS.md')
-    expect(content).toContain('/openflow/init')
-    expect(content).toContain('internal OpenFlow `openflow/init` tool')
+    expect(content).toContain('/openflow-init')
+    expect(content).toContain('internal OpenFlow `openflow-init` tool')
   })
 })

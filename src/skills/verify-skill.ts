@@ -1,9 +1,9 @@
-import type { SkillInfo } from './types.js'
+﻿import type { SkillInfo } from './types.js'
 
 export function getVerifySkill(): SkillInfo {
   return {
-    name: 'openflow/verify',
-    description: 'Use when about to claim work is complete, fixed, or passing - runs the /openflow/verify command to produce Evidence and Readiness before making any success claims.',
+    name: 'openflow-verify',
+    description: 'Use when about to claim work is complete, fixed, or passing - runs the /openflow-verify command to produce Evidence and Readiness before making any success claims.',
     content: `# OpenFlow Verify Command
 
 ## Overview
@@ -17,7 +17,7 @@ Verify is a command-driven workflow that produces **Evidence** and determines **
 Run the verify command explicitly:
 
 \`\`\`
-/openflow/verify <feature-name>
+/openflow-verify <feature-name>
 \`\`\`
 
 The command produces two outputs:
@@ -37,8 +37,8 @@ Classifies whether the feature can proceed:
 
 | Status | Meaning | Next Step |
 |--------|---------|-----------|
-| \`NotReady\` | Verification incomplete or checks failed | Fix failing checks, then rerun /openflow/verify |
-| \`NeedsDecision\` | Rule conflict, current conflict, or business decision required | Resolve the blocking decision, then rerun /openflow/verify |
+| \`NotReady\` | Verification incomplete or checks failed | Fix failing checks, then rerun /openflow-verify |
+| \`NeedsDecision\` | Rule conflict, current conflict, or business decision required | Resolve the blocking decision, then rerun /openflow-verify |
 | \`ReadyWithDocUpdates\` | All checks passed but document updates remain | Sync pending documentation before archiving |
 | \`Ready\` | Evidence complete, no blocking follow-up | Continue to acceptance or archive workflow |
 
@@ -58,14 +58,14 @@ Classifies whether the feature can proceed:
 NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
 \`\`\`
 
-If you haven't run /openflow/verify in this conversation, you cannot claim the feature passes.
+If you haven't run /openflow-verify in this conversation, you cannot claim the feature passes.
 
 ## The Gate Function
 
 \`\`\`
 BEFORE claiming any status:
 
-1. IDENTIFY: Run /openflow/verify <feature-name>
+1. IDENTIFY: Run /openflow-verify <feature-name>
 2. RUN: Execute the FULL command (fresh, complete)
 3. READ: Full Evidence and Readiness output
 4. CHECK: Does Readiness status confirm the claim?
@@ -77,7 +77,7 @@ Skip any step = claiming without evidence
 ## Red Flags - STOP
 
 - Using "should", "probably", "seems to"
-- Expressing satisfaction before running /openflow/verify
+- Expressing satisfaction before running /openflow-verify
 - About to commit/push/PR without verification
 - Trusting agent success reports instead of verify output
 - Relying on partial or stale verification
@@ -95,7 +95,7 @@ Skip any step = claiming without evidence
 ## After Verify
 
 When Readiness is Ready or ReadyWithDocUpdates:
-- Archive will accept the feature: \`/openflow/archive <feature-name>\`
+- Archive will accept the feature: \`/openflow-archive <feature-name>\`
 - Archive checks the acceptance state that Verify produced
 - Archive performs final canonicalization, not Verify
 

@@ -143,6 +143,11 @@ OpenFlow 已经建立了清晰的文档治理体系（`docs/current/`、`docs/ch
 - 识别通用文档结构（按文件名/目录名模式）
 - 输出源类型检测结果
 
+约束补充：
+- 目录结构命中仅作为**来源提示**，不是迁移成功信号
+- detect 阶段不得因为目录名相似就提前宣称“已迁移”或“可安全应用”
+- detect 输出必须明确区分“结构命中”“已发现真实文档文件”“已读取内容样本”三类证据
+
 ### Stage 2: Scan（扫描）
 
 建立完整清单：
@@ -151,6 +156,13 @@ OpenFlow 已经建立了清晰的文档治理体系（`docs/current/`、`docs/ch
 - 记录文件路径、大小、修改时间
 - 提取文件名、扩展名、目录上下文
 - 生成 inventory 数据结构
+
+扫描必须是**真实文件发现**，而不是目录形状推断：
+
+- 至少读取每个候选文件的文件名、相对路径、大小、修改时间
+- 至少读取每个候选 Markdown 文件的内容样本（如首个标题、首个非空段落、前 N 行摘要）
+- inventory 必须记录“文件已读取”状态与读取失败原因
+- 若只检测到目录结构、未发现任何可读取文档文件，流程必须停止并报告“未发现可迁移文档”，不得继续进入成功路径
 
 ### Stage 3: Classify（分类）
 
@@ -165,6 +177,13 @@ OpenFlow 已经建立了清晰的文档治理体系（`docs/current/`、`docs/ch
 分类优先级：
 
 > 已知来源适配器优先于通用 AI 分类：OpenSpec、Spec Kit、Kiro、Trae、Cursor、通用文档
+
+分类必须基于**多重证据**，避免“相似目录 = 已迁移”误判：
+
+- 已知来源适配器可提供初始结构提示，但不能只靠目录路径直接宣判最终目标位置
+- 最终分类至少组合以下两类证据中的两项：文件名、目录上下文、内容标题/摘要、现有 docs 目标结构、项目上下文
+- 分类结果必须保留 reasoning/evidence，说明为何该文件进入 current/archive/changes/decisions/references
+- 若内容未读取成功，则分类置信度上限必须下调，不得进入高置信度 current/decisions 自动路径
 
 ### Stage 4: Clarify（澄清）
 
@@ -187,6 +206,13 @@ OpenFlow 已经建立了清晰的文档治理体系（`docs/current/`、`docs/ch
 - 目录创建清单
 - 预期冲突与处理方式
 
+计划阶段必须输出“迁移证据预览”，而不只是操作数统计：
+
+- 显示已发现文件总数、成功读取内容的文件数、读取失败文件数
+- 显示每个目标文件对应的源文件列表（特别是 current 合并场景）
+- 明确标注哪些目标是 create / modify / merge / skip
+- dry-run 只能表示“计划生成成功”，不能表示“迁移完成”
+
 ### Stage 6: Apply（应用）
 
 执行实际迁移：
@@ -196,6 +222,13 @@ OpenFlow 已经建立了清晰的文档治理体系（`docs/current/`、`docs/ch
 - 内容转换（如需要）
 - 生成 index.md
 
+apply 完成的判定必须基于**真实落盘结果**：
+
+- 只有当至少一个文件创建、修改或合并成功时，才可宣称“已执行迁移”
+- applyResult 必须保留 created/modified/skipped/failed 的逐文件记录
+- 每条成功操作至少记录 sourcePath、targetPath、action、bytes 或等价写入证据
+- 若全部操作都是 skip，输出应为“无迁移变更被应用”，而不是泛化的成功完成
+
 ### Stage 7: Cleanup（清理）
 
 源文档处置与收尾：
@@ -204,6 +237,12 @@ OpenFlow 已经建立了清晰的文档治理体系（`docs/current/`、`docs/ch
 - 生成报告（如适用）
 - 更新状态文件
 - 输出完成摘要
+
+cleanup / completed 的用户可见消息必须与 apply 结果一致：
+
+- dry-run 结束时只能输出“预演完成 / 未执行文件写入”
+- 若存在 failedOps，完成摘要必须显式展示失败数量并降级状态
+- “Migration Complete” 只可用于已产生真实迁移结果的非 dry-run 流程
 
 ## 来源适配器
 
@@ -413,6 +452,11 @@ docs/
 - 按章节组织（如多个需求文档合并为 `current/requirements/index.md`）
 - 来源追溯信息仅在保留模式下保留
 
+实现约束：
+- current 合并前必须先读取全部候选源文档内容，不能只依据文件名推断合并
+- 合并计划中必须保留“目标文档 <- 源文档列表”的映射，用于报告与测试断言
+- 若无法安全合并，应回退到澄清或 references，而不是隐式覆盖
+
 ## 源文档处置策略
 
 ### 三选一模式
@@ -465,6 +509,7 @@ docs/
 - 映射表（源路径 -> 目标路径）
 - 待确认事项
 - 建议的后续步骤
+- 实际应用结果（created / modified / merged / skipped / failed）
 
 **JSON 清单 (`migration-manifest.json`)**:
 ```json
@@ -479,12 +524,20 @@ docs/
       "targetPath": "...",
       "classification": "current/requirements",
       "confidence": "high",
-      "action": "copied"
+      "action": "copied",
+      "contentRead": true,
+      "bytesWritten": 1234
     }
   ],
   "pendingConfirmations": [...]
 }
 ```
+
+报告必须能回答以下问题：
+- 实际发现了哪些源文档文件？
+- 哪些文件成功读取了内容？
+- 哪些目标文件真正被写入？
+- 哪些文件仅被识别但未迁移，以及原因是什么？
 
 ### 删除模式的零报告
 
@@ -536,6 +589,7 @@ docs/
 - 读取现有 `docs/` 结构
 - 分析代码目录结构（用于命名辅助）
 - 检测文档与代码的明显不一致（漂移检测）
+- 读取目标 docs 现有内容摘要，用于判断 merge / overwrite / conflict
 
 ### 禁止的推断行为
 

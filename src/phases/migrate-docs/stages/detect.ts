@@ -232,7 +232,7 @@ export async function runDetectStage(
       header: 'OpenFlow Initialization',
       question: 'No OpenFlow initialization detected in the target directory. Would you like to initialize OpenFlow before migrating?',
       options: [
-        { label: 'Yes, initialize OpenFlow', description: 'Run openflow/init to set up AGENTS.md and docs structure', value: 'yes' },
+        { label: 'Yes, initialize OpenFlow', description: 'Run openflow-init to set up AGENTS.md and docs structure', value: 'yes' },
         { label: 'No, continue without init', description: 'Proceed with migration without initializing OpenFlow', value: 'no' },
       ],
       batchTopic: 'openflow-init',

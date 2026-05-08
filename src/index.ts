@@ -50,7 +50,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
 
   return {
     tool: {
-      'openflow/brainstorm': tool({
+      'openflow-brainstorm': tool({
         description: 'OpenFlow brainstorm command for design clarification',
         args: {
           feature: tool.schema.string().max(64).optional(),
@@ -67,7 +67,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
-      'openflow/archive': tool({
+      'openflow-archive': tool({
         description: 'OpenFlow archive command for completed features',
         args: {
           feature: tool.schema.string().max(64),
@@ -84,7 +84,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
-      'openflow/init': tool({
+      'openflow-init': tool({
         description: 'OpenFlow init command for initializing AGENTS.md with docs guide',
         args: {},
         execute: async (_args: Record<string, never>, toolContext) => {
@@ -99,7 +99,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
-      'openflow/status': tool({
+      'openflow-status': tool({
         description: 'OpenFlow status command',
         args: {},
         execute: async (_args: Record<string, never>, toolContext) => {
@@ -114,7 +114,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
-      'openflow/config': tool({
+      'openflow-config': tool({
         description: 'OpenFlow config command',
         args: {},
         execute: async (_args: Record<string, never>, toolContext) => {
@@ -129,7 +129,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
-      'openflow/verify': tool({
+      'openflow-verify': tool({
         description: 'OpenFlow verify command for evidence and readiness checks',
         args: {
           feature: tool.schema.string().max(64).optional(),
@@ -146,7 +146,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
-      'openflow/migrate-docs': tool({
+      'openflow-migrate-docs': tool({
         description: 'Migrate documentation from other workflow tools into OpenFlow docs structure',
         args: {
           sourceDir: tool.schema.string().max(256).optional(),

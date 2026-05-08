@@ -7,7 +7,7 @@ import { buildImplementationContextPrompt } from './implementation-context.js'
 import { isImplementationTask, isVerificationTask } from './task-classification.js'
 
 function buildVerificationPrompt(ctx: OpenFlowContext, currentPrompt: string): string | undefined {
-  const verifySkillContent = getSkillContent('openflow/verify')
+  const verifySkillContent = getSkillContent('openflow-verify')
   if (!verifySkillContent) return undefined
 
   if (currentPrompt.includes('OpenFlow Verification') || currentPrompt.includes('NO COMPLETION CLAIMS')) {

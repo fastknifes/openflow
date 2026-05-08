@@ -54,7 +54,7 @@ describe('chat-message brainstorm guidance', () => {
 
     await hook(createInput('session-command'), output)
 
-    expect(firstOutputText(output)).toContain('/openflow/brainstorm feature-')
+    expect(firstOutputText(output)).toContain('/openflow-brainstorm feature-')
     expect(firstOutputText(output)).not.toContain('`/brainstorm ')
 
     await rm(root, { recursive: true, force: true })
@@ -270,7 +270,7 @@ describe('chat-message brainstorm guidance', () => {
     const output = createOutput('我想实现一个新的功能：支付功能')
     await hook(createInput('session-switch'), output)
 
-    expect(firstOutputText(output)).toContain('/openflow/brainstorm ')
+    expect(firstOutputText(output)).toContain('/openflow-brainstorm ')
     expect(firstOutputText(output)).not.toContain('这个功能的主要使用者是谁？')
 
     await rm(root, { recursive: true, force: true })

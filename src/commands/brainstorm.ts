@@ -1,8 +1,14 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import { ZodError } from 'zod'
 import type { OpenFlowContext } from '../types.js'
 import { ensureChangeWorkspacePath } from '../config.js'
 import { clearRecentBrainstormCompletion, markRecentBrainstormCompletion } from '../hooks/brainstorm-workflow.js'
+import { buildRequirementModel } from '../phases/brainstorm/constraint-derivation.js'
+import { renderDesignDocument } from '../phases/brainstorm/design-renderer.js'
+import { defaultSynthesizer } from '../phases/brainstorm/llm-adapter.js'
+import { RequirementModelSchema } from '../phases/brainstorm/requirement-model.js'
+import type { RequirementModel } from '../phases/brainstorm/requirement-model.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import {
@@ -56,7 +62,7 @@ export async function handleBrainstorm(
   if (!resolvedFeature) {
     throw new OpenFlowError(
       ErrorCode.INVALID_INPUT,
-      'Feature name is required. Start with /openflow/brainstorm <feature-name> or continue in the same session.'
+      'Feature name is required. Start with /openflow-brainstorm <feature-name> or continue in the same session.'
     )
   }
 
@@ -120,16 +126,26 @@ async function finalizeBrainstorm(
     return formatGenerationResult(session.feature, existingGenerated)
   }
 
-  const generatingSession = markGenerating(session)
+  const requirementModel = session.requirementModel ?? buildRequirementModel(session.feature, session.answers)
+  const generatingSession = markGenerating({
+    ...session,
+    requirementModel,
+  })
   await saveBrainstormSession(ctx.directory, generatingSession)
 
   try {
-    const generatedPath = await generateDesignDocument(ctx, generatingSession)
-    const completedSession = markCompleted(generatingSession, generatedPath)
+    const { designPath, requirementModel: validatedModel } = await generateDesignDocument(ctx, generatingSession)
+    const completedSession = markCompleted(
+      {
+        ...generatingSession,
+        requirementModel: validatedModel,
+      },
+      designPath
+    )
     await saveBrainstormSession(ctx.directory, completedSession)
     await markRecentBrainstormCompletion(ctx.directory, getToolSessionID(toolContext), completedSession.feature)
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, completedSession)
-    return formatGenerationResult(session.feature, generatedPath)
+    return formatGenerationResult(session.feature, designPath)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const failedSession = markGenerationFailed(generatingSession, message)
@@ -295,7 +311,7 @@ function looksLikeLowSignalAnswer(answer: string): boolean {
 }
 
 function looksLikeCommandEcho(answer: string): boolean {
-  return answer.startsWith('/openflow/') || answer.includes('skill(name="openflow/brainstorm"') || answer.includes("skill(name='openflow/brainstorm'")
+  return answer.startsWith('/openflow-') || answer.includes('skill(name="openflow-brainstorm"') || answer.includes("skill(name='openflow-brainstorm'")
 }
 
 function hasAskQuestion(value: unknown): value is BrainstormInteractiveToolContext {
@@ -306,15 +322,37 @@ function hasAskQuestion(value: unknown): value is BrainstormInteractiveToolConte
   return 'askQuestion' in value && typeof value.askQuestion === 'function'
 }
 
-async function generateDesignDocument(ctx: OpenFlowContext, session: BrainstormSession): Promise<string> {
+async function generateDesignDocument(
+  ctx: OpenFlowContext,
+  session: BrainstormSession,
+): Promise<{ designPath: string; requirementModel: RequirementModel }> {
   const existingGenerated = session.generatedDocs[0]
   if (existingGenerated) {
     try {
       await fs.access(existingGenerated)
-      return existingGenerated
+      const existingModel = RequirementModelSchema.parse(
+        session.requirementModel ?? buildRequirementModel(session.feature, session.answers)
+      )
+      return {
+        designPath: existingGenerated,
+        requirementModel: existingModel,
+      }
     } catch {
       void 0
     }
+  }
+
+  const baseModel = session.requirementModel ?? buildRequirementModel(session.feature, session.answers)
+
+  let validatedModel: RequirementModel
+  try {
+    const enrichedModel = await defaultSynthesizer.synthesize(baseModel)
+    validatedModel = RequirementModelSchema.parse(enrichedModel)
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new Error(error.message)
+    }
+    throw error
   }
 
   const workspaceDir = await ensureChangeWorkspacePath(ctx.directory, session.feature)
@@ -323,44 +361,14 @@ async function generateDesignDocument(ctx: OpenFlowContext, session: BrainstormS
   await fs.mkdir(safeWorkspaceDir, { recursive: true })
 
   const designPath = path.join(safeWorkspaceDir, 'design.md')
-  const content = renderDesignDocument(session)
+  const sidecarPath = path.join(safeWorkspaceDir, 'design.meta.json')
+  const content = renderDesignDocument(validatedModel)
   await fs.writeFile(designPath, content, 'utf-8')
-  return designPath
-}
-
-function renderDesignDocument(session: BrainstormSession): string {
-  const answers = session.answers
-  const today = new Date().toISOString().split('T')[0] ?? new Date().toISOString()
-
-  return `# ${session.feature} Design
-
-**Date**: ${today}
-**Status**: Draft
-
-## Background
-
-${answers.problem ?? ''}
-
-## Target Users
-
-${answers['target-users'] ?? ''}
-
-## Scope
-
-${answers.scope ?? ''}
-
-## Priority
-
-${answers.priority ?? ''}
-
-## Constraints
-
-${answers.constraints ?? ''}
-
-## Proposed Approach
-
-Build the solution for ${answers['target-users'] ?? 'target users'} with emphasis on ${answers.priority ?? 'delivery'} while respecting ${answers.constraints ?? 'known constraints'}.
-`
+  await fs.writeFile(sidecarPath, JSON.stringify(validatedModel, null, 2), 'utf-8')
+  return {
+    designPath,
+    requirementModel: validatedModel,
+  }
 }
 
 function formatQuestionPrompt(feature: string, session: BrainstormSession, question: BrainstormQuestion): string {
@@ -379,7 +387,7 @@ Options:
 ${options}
 
 Reply with your answer through the question picker when available.
-Otherwise continue with \`/openflow/brainstorm ${escapeMarkdown(feature)}\`
+Otherwise continue with \`/openflow-brainstorm ${escapeMarkdown(feature)}\`
 and provide the next answer in the same session.
 
 Progress:
@@ -406,5 +414,5 @@ All answers are collected, but design generation failed and can be retried.
 Error:
 - ${escapeMarkdown(message)}
 
-Continue with \`/openflow/brainstorm ${escapeMarkdown(feature)}\` to retry generation.`
+Continue with \`/openflow-brainstorm ${escapeMarkdown(feature)}\` to retry generation.`
 }

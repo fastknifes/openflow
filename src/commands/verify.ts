@@ -41,7 +41,7 @@ export async function handleVerify(ctx: OpenFlowContext, feature?: string): Prom
 ### Readiness
 - status: ${VerifyReadinessStatus.NotReady}
 - reason: active feature is required to build an evidence packet
-- next_step: run /openflow/verify <feature-name> or create an active plan under .sisyphus/plans/
+- next_step: run /openflow-verify <feature-name> or create an active plan under .sisyphus/plans/
 `
   }
 
@@ -205,7 +205,7 @@ export async function classifyReadiness(
       status: VerifyReadinessStatus.NeedsDecision,
       reasonCodes: [decisionType],
       reason: buildNeedsDecisionReason(decisionType, feature),
-      nextStep: 'Resolve the blocking decision, then rerun /openflow/verify.',
+      nextStep: 'Resolve the blocking decision, then rerun /openflow-verify.',
       decisionType,
     }
   }
@@ -239,7 +239,7 @@ export async function classifyReadiness(
       status: VerifyReadinessStatus.NotReady,
       reasonCodes,
       reason: `Verification is blocked for ${feature}: ${reasonCodes.join(', ')}.`,
-      nextStep: 'Fix the failing checks or missing evidence, then rerun /openflow/verify.',
+      nextStep: 'Fix the failing checks or missing evidence, then rerun /openflow-verify.',
     }
   }
 

@@ -4,7 +4,7 @@ import { updateAgentsFile } from './init-persistence.js'
 import { INIT_RESULT_MESSAGES } from './init-content.js'
 
 /**
- * Handle the `openflow/init` command.
+ * Handle the `openflow-init` command.
  *
  * This command initializes or updates the root `AGENTS.md` file with OpenFlow's
  * managed docs guide block. It supports four operation modes:

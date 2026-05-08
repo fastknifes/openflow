@@ -32,7 +32,7 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   }
 
   if (!feature) {
-    throw new OpenFlowError(ErrorCode.INVALID_INPUT, 'Feature name is required. Usage: /openflow/archive <feature-name>')
+    throw new OpenFlowError(ErrorCode.INVALID_INPUT, 'Feature name is required. Usage: /openflow-archive <feature-name>')
   }
 
   const sanitizedFeature = sanitizeFeatureName(feature)

@@ -103,7 +103,7 @@ Next step: continue the standalone brainstorm flow until design generation compl
 Recommended entrypoint:
 
 \`\`\`text
-/openflow/brainstorm ${featureHint}
+/openflow-brainstorm ${featureHint}
 \`\`\`
 
 Generation policy:
@@ -124,7 +124,7 @@ Feature \`${decision.feature}\` does not have design docs yet.
 Recommended next step before implementation:
 
 \`\`\`
-/openflow/brainstorm ${decision.feature}
+/openflow-brainstorm ${decision.feature}
 \`\`\`
 
 OpenFlow only suggests this step. It does not block research, reading, or implementation tools.`)
@@ -135,7 +135,7 @@ OpenFlow only suggests this step. It does not block research, reading, or implem
 
 function looksLikeDirectCommand(message: string): boolean {
   const trimmed = message.trim()
-  return trimmed.startsWith('/openflow/') || trimmed.includes('skill(name="openflow/brainstorm"') || trimmed.includes("skill(name='openflow/brainstorm'")
+  return trimmed.startsWith('/openflow-') || trimmed.includes('skill(name="openflow-brainstorm"') || trimmed.includes("skill(name='openflow-brainstorm'")
 }
 
 function looksLikeFeatureSwitch(message: string, activeFeature: string): boolean {
