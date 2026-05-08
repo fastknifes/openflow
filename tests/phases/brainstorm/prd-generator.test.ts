@@ -8,6 +8,7 @@ import {
   isPrdGenerationEnabled, 
   hasPrdDocument 
 } from '../../../src/phases/brainstorm/prd-generator.js'
+import { createMinimalRequirementModel } from '../../../src/phases/brainstorm/requirement-model.js'
 import { defaultConfig, type OpenFlowContext } from '../../../src/types.js'
 
 function createContext(configOverride?: Partial<typeof defaultConfig>): OpenFlowContext {
@@ -81,6 +82,47 @@ describe('prd-generator', () => {
       expect(decision.generateDesign).toBe(true)
       expect(decision.generatePrd).toBe(true)
       expect(decision.generateDecisions).toBe(false)
+    })
+
+    test('prefers requirement model metadata when sidecar exists', async () => {
+      const ctx = createContext()
+      const designDir = join(testDir, 'docs', 'changes', 'modeled-feature')
+      await mkdir(designDir, { recursive: true })
+      await writeFile(join(designDir, 'design.md'), '# Design', 'utf-8')
+
+      const model = createMinimalRequirementModel('modeled-feature')
+      model.constraints.push(
+        {
+          id: 'c-extra-1',
+          category: 'security',
+          severity: 'must',
+          description: 'Protect access to generated documents',
+          rationale: 'Generated content may include sensitive change context',
+          verificationMethod: 'Permission tests cover the protected flow',
+          sourceQuestionId: 'constraints',
+        },
+        {
+          id: 'c-extra-2',
+          category: 'maintainability',
+          severity: 'should',
+          description: 'Keep document generation logic easy to extend',
+          rationale: 'The brainstorm workflow continues to evolve',
+          verificationMethod: 'New sidecar-backed tests verify extension points',
+          sourceQuestionId: 'constraints',
+        },
+      )
+      model.expectedModules = [
+        { path: 'src/phases/brainstorm/prd-generator.ts', purpose: 'Generate PRDs' },
+        { path: 'src/phases/brainstorm/requirement-model.ts', purpose: 'Validate sidecar schema' },
+      ]
+
+      await writeFile(join(designDir, 'design.meta.json'), JSON.stringify(model, null, 2), 'utf-8')
+
+      const decision = await evaluateDocumentBundle(testDir, 'modeled-feature', ctx.config)
+      expect(decision.generateDesign).toBe(true)
+      expect(decision.generatePrd).toBe(true)
+      expect(decision.generateDecisions).toBe(true)
+      expect(decision.reason).toContain('structured bundle decision')
     })
   })
 
@@ -211,6 +253,102 @@ Purpose: Handles authentication
       expect(content).toContain('test-feature')
     })
 
+    test('generates PRD from sidecar requirement model when available', async () => {
+      const ctx = createContext()
+      const designDir = join(testDir, 'docs', 'changes', 'modeled-prd')
+      await mkdir(designDir, { recursive: true })
+      await writeFile(join(designDir, 'design.md'), '# Design', 'utf-8')
+
+      const model = createMinimalRequirementModel('modeled-prd')
+      model.problemStatement = 'Reduce manual PRD drafting for structured brainstorm output.'
+      model.goals = ['Generate a complete PRD from sidecar metadata', 'Preserve markdown fallback behavior']
+      model.scopeBoundary.inScope = ['Generate PRD from design.meta.json', 'Validate sidecar content before rendering']
+      model.scopeBoundary.outOfScope = ['Rewrite brainstorm prompts']
+      model.acceptanceCriteria = [
+        { id: 'ac-sidecar-1', description: 'PRD includes goals from the requirement model' },
+        { id: 'ac-sidecar-2', description: 'PRD includes acceptance criteria from the sidecar' },
+      ]
+      model.constraints = [
+        {
+          id: 'c-sidecar-1',
+          category: 'compatibility',
+          severity: 'must',
+          description: 'Keep legacy markdown extraction as a fallback path',
+          rationale: 'Older workspaces do not have sidecar files yet',
+          verificationMethod: 'Markdown-only tests still pass',
+          sourceQuestionId: 'constraints',
+        },
+      ]
+
+      await writeFile(join(designDir, 'design.meta.json'), JSON.stringify(model, null, 2), 'utf-8')
+
+      const prdPath = await generatePrd({
+        feature: 'modeled-prd',
+        projectDir: testDir,
+        config: ctx.config,
+      })
+
+      const content = await readFile(prdPath, 'utf-8')
+      expect(content).toContain('Reduce manual PRD drafting for structured brainstorm output.')
+      expect(content).toContain('Generate a complete PRD from sidecar metadata')
+      expect(content).toContain('Keep legacy markdown extraction as a fallback path')
+      expect(content).toContain('Generate PRD from design.meta.json')
+      expect(content).toContain('Rewrite brainstorm prompts')
+      expect(content).toContain('PRD includes acceptance criteria from the sidecar')
+    })
+
+    test('falls back to markdown extraction when no sidecar exists', async () => {
+      const ctx = createContext()
+      const designDir = join(testDir, 'docs', 'changes', 'fallback-prd')
+      await mkdir(designDir, { recursive: true })
+
+      await writeFile(
+        join(designDir, 'proposal.md'),
+        `# fallback-prd - Proposal
+
+## Problem Statement
+
+Markdown fallback problem statement.
+
+## Success Criteria
+
+- [ ] Legacy extraction still works
+- [ ] No sidecar required
+`,
+        'utf-8'
+      )
+
+      await writeFile(
+        join(designDir, 'design.md'),
+        `# fallback-prd - Design Document
+
+## Overview
+
+Markdown fallback overview.
+
+## Architecture
+
+### ParserComponent
+
+### WriterComponent
+`,
+        'utf-8'
+      )
+
+      const prdPath = await generatePrd({
+        feature: 'fallback-prd',
+        projectDir: testDir,
+        config: ctx.config,
+      })
+
+      const content = await readFile(prdPath, 'utf-8')
+      expect(content).toContain('Markdown fallback problem statement.')
+      expect(content).toContain('Markdown fallback overview.')
+      expect(content).toContain('Legacy extraction still works')
+      expect(content).toContain('ParserComponent')
+      expect(content).toContain('WriterComponent')
+    })
+
     test('does not overwrite existing PRD', async () => {
       const ctx = createContext()
       // Create design doc first so workspace detection picks change workspace
@@ -265,13 +403,28 @@ Purpose: Handles authentication
 
     test('creates decisions document when needed', async () => {
       const ctx = createContext()
-      const designDir = join(testDir, 'docs', 'current', 'design', 'decision-feature')
+      const designDir = join(testDir, 'docs', 'changes', 'decision-feature')
       await mkdir(designDir, { recursive: true })
+
+      const model = createMinimalRequirementModel('decision-feature')
+      model.constraints = [
+        {
+          id: 'c-decision-1',
+          category: 'scope',
+          severity: 'must',
+          description: 'Keep PRD generation limited to the brainstorm workspace',
+          rationale: 'Avoid leaking changes into unrelated docs',
+          verificationMethod: 'Workspace-path tests validate output location',
+          sourceQuestionId: 'constraints',
+        },
+      ]
+      await writeFile(join(designDir, 'design.meta.json'), JSON.stringify(model, null, 2), 'utf-8')
 
       const decisionsPath = await ensureDecisionsDocument(testDir, 'decision-feature', ctx.config)
       const content = await readFile(decisionsPath, 'utf-8')
       expect(content).toContain('decision-feature')
       expect(content).toContain('Key Decisions')
+      expect(content).toContain('Keep PRD generation limited to the brainstorm workspace')
     })
   })
 })

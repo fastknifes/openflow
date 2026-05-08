@@ -4,6 +4,7 @@ import { escapeMarkdown, findLatestDocument, createSafePath } from '../../utils/
 import { logger } from '../../utils/logger.js'
 import type { OpenFlowContext } from '../../types.js'
 import { getChangeWorkspacePath } from '../../config.js'
+import { RequirementModelSchema, type RequirementModel } from './requirement-model.js'
 
 export interface PrdGenerationOptions {
   feature: string
@@ -37,8 +38,11 @@ export async function generatePrd(options: PrdGenerationOptions): Promise<string
   // Read template
   const templateContent = await readPrdTemplate(projectDir)
   
-  // Extract information from design documents
-  const designInfo = await extractDesignInfo(designDir)
+  // Prefer structured sidecar model, fallback to legacy markdown extraction
+  const requirementModel = await readRequirementModelFromWorkspace(designDir)
+  const designInfo = requirementModel
+    ? designInfoFromRequirementModel(requirementModel)
+    : await extractDesignInfo(designDir)
   
   // Fill template
   const content = fillPrdTemplate(templateContent, {
@@ -74,6 +78,48 @@ interface DesignInfo {
   successCriteria: string[]
   overview: string
   components: string[]
+  goals: string[]
+  constraints: string[]
+  outOfScope: string[]
+}
+
+async function readRequirementModelFromWorkspace(designDir: string): Promise<RequirementModel | null> {
+  for (const fileName of ['design.meta.json', 'requirements.json']) {
+    const filePath = path.join(designDir, fileName)
+
+    try {
+      const content = await fs.readFile(filePath, 'utf-8')
+      return RequirementModelSchema.parse(JSON.parse(content) as unknown)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+        continue
+      }
+
+      logger.debug('Failed to read requirement model for PRD generation', {
+        designDir,
+        filePath,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return null
+}
+
+function designInfoFromRequirementModel(model: RequirementModel): DesignInfo {
+  const constraints = model.constraints.map((constraint) => (
+    `[${constraint.severity.toUpperCase()} / ${constraint.category}] ${constraint.description}`
+  ))
+
+  return {
+    problemStatement: model.problemStatement ?? model.feature,
+    successCriteria: model.acceptanceCriteria.map((criterion) => criterion.description),
+    overview: '',
+    components: model.scopeBoundary.inScope,
+    goals: model.goals,
+    constraints,
+    outOfScope: model.scopeBoundary.outOfScope,
+  }
 }
 
 async function extractDesignInfo(designDir: string): Promise<DesignInfo> {
@@ -82,6 +128,9 @@ async function extractDesignInfo(designDir: string): Promise<DesignInfo> {
     successCriteria: [],
     overview: '',
     components: [],
+    goals: [],
+    constraints: [],
+    outOfScope: [],
   }
   
   // Try to read proposal.md for problem statement and success criteria
@@ -191,12 +240,14 @@ function fillPrdTemplate(template: string, data: TemplateData): string {
   result = result.replace(/\{\{priority\}\}/g, 'P1') // Default priority
   
   // Fill in sections from design info
-  if (data.designInfo.problemStatement) {
-    result = fillSection(result, '1.1 背景与目标', data.designInfo.problemStatement)
+  const backgroundAndGoals = buildBackgroundAndGoalsSection(data.designInfo)
+  if (backgroundAndGoals) {
+    result = fillSection(result, '1.1 背景与目标', backgroundAndGoals)
   }
   
-  if (data.designInfo.overview) {
-    result = fillSection(result, '1.2 功能概述', data.designInfo.overview)
+  const overviewAndConstraints = buildOverviewAndConstraintsSection(data.designInfo)
+  if (overviewAndConstraints) {
+    result = fillSection(result, '1.2 功能概述', overviewAndConstraints)
   }
   
   if (data.designInfo.successCriteria.length > 0) {
@@ -212,20 +263,51 @@ function fillPrdTemplate(template: string, data: TemplateData): string {
       .join('\n')
     result = fillSection(result, '4.1 In Scope', componentList)
   }
+
+  if (data.designInfo.outOfScope.length > 0) {
+    const outOfScopeList = data.designInfo.outOfScope
+      .map(item => `- ${item}`)
+      .join('\n')
+    result = fillSection(result, '4.2 Out of Scope', outOfScopeList)
+  }
   
   return result
 }
 
+function buildBackgroundAndGoalsSection(designInfo: DesignInfo): string {
+  const sections: string[] = []
+
+  if (designInfo.problemStatement) {
+    sections.push(designInfo.problemStatement)
+  }
+
+  if (designInfo.goals.length > 0) {
+    sections.push(`Goals:\n${designInfo.goals.map((goal) => `- ${goal}`).join('\n')}`)
+  }
+
+  return sections.join('\n\n').trim()
+}
+
+function buildOverviewAndConstraintsSection(designInfo: DesignInfo): string {
+  const sections: string[] = []
+
+  if (designInfo.overview) {
+    sections.push(designInfo.overview)
+  }
+
+  if (designInfo.constraints.length > 0) {
+    sections.push(`Constraints:\n${designInfo.constraints.map((constraint) => `- ${constraint}`).join('\n')}`)
+  }
+
+  return sections.join('\n\n').trim()
+}
+
 function fillSection(content: string, sectionName: string, value: string): string {
   const sectionPattern = new RegExp(
-    `(###\\s+${escapeRegExp(sectionName)}[\\s\\S]*?\\*[^*]*\\*)`,
-    'g'
+    `(###\\s+${escapeRegExp(sectionName)}\\s*\\n\\n)([\\s\\S]*?)(?=\\n###\\s+|\\n##\\s+|$)`
   )
   
-  return content.replace(sectionPattern, (match) => {
-    // Find the italic text placeholder
-    return match.replace(/\*[^*]+\*/, value)
-  })
+  return content.replace(sectionPattern, (_match, prefix: string) => `${prefix}${value}\n`)
 }
 
 function escapeRegExp(string: string): string {
@@ -387,6 +469,34 @@ export async function evaluateDocumentBundle(
   }
 
   const { designDir } = await resolveWorkspacePaths(projectDir, feature, config)
+  const requirementModel = await readRequirementModelFromWorkspace(designDir)
+
+  if (requirementModel) {
+    const generatePrd =
+      requirementModel.constraints.length > 0 ||
+      requirementModel.acceptanceCriteria.length > 0
+
+    const generateDecisions =
+      requirementModel.constraints.length >= 3 ||
+      ((requirementModel.expectedModules?.length ?? 0) >= 2)
+
+    if (!generatePrd && !generateDecisions) {
+      return {
+        generateDesign: true,
+        generatePrd: true,
+        generateDecisions: true,
+        reason: 'uncertain complexity, generating full bundle',
+      }
+    }
+
+    return {
+      generateDesign: true,
+      generatePrd,
+      generateDecisions,
+      reason: 'structured bundle decision from requirement model metadata',
+    }
+  }
+
   const designInfo = await extractDesignInfo(designDir)
 
   const hasPrdSignal =
@@ -423,6 +533,12 @@ export async function ensureDecisionsDocument(
   const { designDir } = await resolveWorkspacePaths(projectDir, feature, config)
   await fs.mkdir(designDir, { recursive: true })
   const decisionsPath = path.join(designDir, 'decisions.md')
+  const requirementModel = await readRequirementModelFromWorkspace(designDir)
+  const keyDecisions = requirementModel && requirementModel.constraints.length > 0
+    ? requirementModel.constraints
+      .map((constraint) => `- [ ] ${constraint.description} (${constraint.severity}/${constraint.category})`)
+      .join('\n')
+    : '- [ ] Decision 1'
 
   const content = `# ${feature} - Decisions
 
@@ -436,7 +552,7 @@ export async function ensureDecisionsDocument(
 
 ## Key Decisions
 
-- [ ] Decision 1
+${keyDecisions}
 
 ## Trade-offs
 
