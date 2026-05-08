@@ -1,11 +1,14 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import { RequirementModelSchema, type RequirementModel } from '../brainstorm/requirement-model.js'
 
 export interface TraceabilityItem {
   sourceType: 'requirement' | 'proposal' | 'design'
   sourcePath: string
   sourceLabel: string
   item: string
+  source?: 'markdown' | 'requirement-model'
+  id?: string
 }
 
 export interface TraceabilityResult {
@@ -84,6 +87,13 @@ async function extractTraceabilityItems(
   filePath: string,
   sourceType: TraceabilityItem['sourceType']
 ): Promise<TraceabilityItem[]> {
+  if (sourceType !== 'proposal') {
+    const model = await readRequirementModelFromWorkspace(path.dirname(filePath))
+    if (model) {
+      return extractTraceabilityItemsFromModel(projectDir, filePath, sourceType, model)
+    }
+  }
+
   const content = await fs.readFile(filePath, 'utf-8')
   const relativePath = normalizePath(path.relative(projectDir, filePath))
   const lines = content.split(/\r?\n/)
@@ -112,10 +122,72 @@ async function extractTraceabilityItems(
       sourcePath: relativePath,
       sourceLabel,
       item,
+      source: 'markdown',
     })
   }
 
   return items
+}
+
+async function readRequirementModelFromWorkspace(dir: string): Promise<RequirementModel | null> {
+  const sidecarPath = path.join(dir, 'design.meta.json')
+
+  try {
+    const content = await fs.readFile(sidecarPath, 'utf-8')
+    return RequirementModelSchema.parse(JSON.parse(content) as unknown)
+  } catch {
+    return null
+  }
+}
+
+function extractTraceabilityItemsFromModel(
+  projectDir: string,
+  sourceFilePath: string,
+  sourceType: TraceabilityItem['sourceType'],
+  model: RequirementModel
+): TraceabilityItem[] {
+  const relativePath = normalizePath(path.relative(projectDir, sourceFilePath))
+
+  return [
+    ...model.goals.map((goal, index) => createModelTraceabilityItem({
+      sourceType,
+      sourcePath: relativePath,
+      section: 'Goals',
+      item: goal,
+      id: `goal-${index + 1}`,
+    })),
+    ...model.constraints.map(constraint => createModelTraceabilityItem({
+      sourceType,
+      sourcePath: relativePath,
+      section: 'Constraints',
+      item: constraint.description,
+      id: constraint.id,
+    })),
+    ...model.acceptanceCriteria.map(criterion => createModelTraceabilityItem({
+      sourceType,
+      sourcePath: relativePath,
+      section: 'Acceptance Criteria',
+      item: criterion.description,
+      id: criterion.id,
+    })),
+  ]
+}
+
+function createModelTraceabilityItem(input: {
+  sourceType: TraceabilityItem['sourceType']
+  sourcePath: string
+  section: string
+  item: string
+  id: string
+}): TraceabilityItem {
+  return {
+    sourceType: input.sourceType,
+    sourcePath: input.sourcePath,
+    sourceLabel: `${input.sourceType}: ${input.sourcePath} → ${input.section} (${input.id})`,
+    item: cleanMarkdown(input.item),
+    source: 'requirement-model',
+    id: input.id,
+  }
 }
 
 function cleanMarkdown(value: string): string {

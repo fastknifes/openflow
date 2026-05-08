@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import { RequirementModelSchema, type RequirementModel } from '../phases/brainstorm/requirement-model.js'
 import type { DriftItem, PhasedChanges } from '../types.js'
 import { logger } from './logger.js'
 
@@ -10,6 +11,11 @@ interface DesignDocContent {
 }
 
 async function readDesignDoc(designDir: string): Promise<DesignDocContent | null> {
+  const model = await readRequirementModelFromWorkspace(designDir)
+  if (model) {
+    return designDocContentFromModel(model)
+  }
+
   const result: DesignDocContent = {
     features: [],
     modules: [],
@@ -44,6 +50,29 @@ async function readDesignDoc(designDir: string): Promise<DesignDocContent | null
     return result
   } catch {
     return null
+  }
+}
+
+async function readRequirementModelFromWorkspace(designDir: string): Promise<RequirementModel | null> {
+  const sidecarPath = path.join(designDir, 'design.meta.json')
+
+  try {
+    const content = await fs.readFile(sidecarPath, 'utf-8')
+    return RequirementModelSchema.parse(JSON.parse(content) as unknown)
+  } catch {
+    return null
+  }
+}
+
+function designDocContentFromModel(model: RequirementModel): DesignDocContent {
+  return {
+    features: [
+      ...model.goals,
+      ...model.constraints.map(constraint => constraint.description),
+      ...model.acceptanceCriteria.map(criterion => criterion.description),
+    ],
+    modules: model.expectedModules?.map(module => module.path) ?? [],
+    keywords: model.expectedSymbols?.map(symbol => symbol.name) ?? [],
   }
 }
 
@@ -111,6 +140,23 @@ export async function detectDrift(
   }
   
   const codeKeywords = await analyzeAcceptanceChanges(baseDir, phasedChanges.acceptance)
+
+  for (const change of phasedChanges.acceptance) {
+    if (designContent.modules.length === 0) {
+      continue
+    }
+
+    const filePath = normalizePath(change.filePath)
+    const inDesignModule = designContent.modules.some(modulePath => filePath.includes(normalizePath(modulePath)))
+    if (!inDesignModule) {
+      drifts.push({
+        item: filePath,
+        designDoc: designContent.modules.join(', '),
+        actualCode: `Implemented in ${filePath}`,
+        reason: 'Acceptance-phase change touches a module not expected by the design document',
+      })
+    }
+  }
   
   for (const [filePath, keywords] of codeKeywords) {
     for (const keyword of keywords) {
@@ -130,6 +176,10 @@ export async function detectDrift(
   }
   
   return drifts
+}
+
+function normalizePath(filePath: string): string {
+  return filePath.split(path.sep).join('/')
 }
 
 export function formatDriftReport(drifts: DriftItem[]): string {

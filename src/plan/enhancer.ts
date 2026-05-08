@@ -1,9 +1,11 @@
 import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
 import type { OpenFlowConfig } from '../types.js'
 import type { ParsedTask } from './parser.js'
 import { parsePlanTasks, extractPlanName } from './parser.js'
 import { escapeMarkdown, findLatestDocument } from '../utils/index.js'
 import { getDesignCandidatePaths } from '../config.js'
+import { readDesignContextPacket } from '../commands/writing-plan.js'
 import { logger } from '../utils/logger.js'
 import { formatSecurityChecks, formatQualityChecks } from '../utils/verification-checks.js'
 import type { VerificationFailureCategory } from '../types.js'
@@ -103,39 +105,43 @@ async function readDesignDocuments(
   feature: string
 ): Promise<DesignDocSummary | null> {
   const candidatePaths = await getDesignCandidatePaths(baseDir, feature)
+  const workspacePaths = new Set<string>()
+  const designContext = await readDesignContextPacket(baseDir, feature)
+  const summary: DesignDocSummary = {}
+
+  if (designContext) {
+    summary.design = designContext
+  }
 
   for (const candidatePath of candidatePaths) {
-    const summary: DesignDocSummary = {}
-
     try {
       const stats = await fs.stat(candidatePath)
       if (stats.isFile()) {
-        summary.design = await extractKeySections(candidatePath)
-        return summary.design ? summary : null
+        workspacePaths.add(path.dirname(candidatePath))
+        continue
       }
-      if (!stats.isDirectory()) continue
+      if (stats.isDirectory()) {
+        workspacePaths.add(candidatePath)
+      }
     } catch {
       continue
     }
+  }
 
-    const proposalPath = await findLatestDocument(candidatePath, /^(?:proposal|\d{8}-proposal)\.md$/)
-    if (proposalPath) {
+  for (const workspacePath of workspacePaths) {
+    const proposalPath = await findLatestDocument(workspacePath, /^(?:proposal|\d{8}-proposal)\.md$/)
+    if (proposalPath && !summary.proposal) {
       summary.proposal = await extractKeySections(proposalPath)
     }
 
-    const designPath = await findLatestDocument(candidatePath, /^(?:design|\d{8}-design)\.md$/)
-    if (designPath) {
-      summary.design = await extractKeySections(designPath)
-    }
-
-    const decisionsPath = await findLatestDocument(candidatePath, /^(?:decisions|\d{8}-decisions)\.md$/)
-    if (decisionsPath) {
+    const decisionsPath = await findLatestDocument(workspacePath, /^(?:decisions|\d{8}-decisions)\.md$/)
+    if (decisionsPath && !summary.decisions) {
       summary.decisions = await extractKeySections(decisionsPath)
     }
+  }
 
-    if (summary.proposal || summary.design || summary.decisions) {
-      return summary
-    }
+  if (summary.proposal || summary.design || summary.decisions) {
+    return summary
   }
 
   return null
