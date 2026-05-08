@@ -1,3 +1,6 @@
+import { buildRequirementModel } from './constraint-derivation.js'
+import type { RequirementModel } from './requirement-model.js'
+
 export type BrainstormQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
 export type BrainstormWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
 
@@ -14,13 +17,14 @@ export interface BrainstormQuestion {
 }
 
 export interface BrainstormSession {
-  version: 2
+  version: 2 | 3
   feature: string
   workflowState: BrainstormWorkflowState
   pendingQuestionId: BrainstormQuestionId | null
   promptMode?: 'question' | 'discussion' | undefined
   askedQuestionIds: BrainstormQuestionId[]
   answers: Partial<Record<BrainstormQuestionId, string>>
+  requirementModel?: RequirementModel
   generatedDocs: string[]
   generationAttemptCount: number
   lastError?: string | undefined
@@ -100,7 +104,7 @@ export const QUESTIONS: BrainstormQuestion[] = [
 
 export function createInitialBrainstormSession(feature: string): BrainstormSession {
   return {
-    version: 2,
+    version: 3,
     feature,
     workflowState: 'collecting',
     pendingQuestionId: QUESTIONS[0]?.id ?? null,
@@ -120,18 +124,22 @@ export function normalizeBrainstormSession(feature: string, raw: unknown): Brain
 
   const parsed = raw as Partial<BrainstormSession> & LegacyBrainstormSession
   const answers = parsed.answers ?? {}
+  const requirementModel = parsed.version && parsed.version >= 3 && parsed.requirementModel
+    ? parsed.requirementModel
+    : buildRequirementModel(feature, answers)
   const generatedDocs = Array.isArray(parsed.generatedDocs) ? parsed.generatedDocs : []
   const pendingQuestionId = resolvePendingQuestionId(answers, parsed.pendingQuestionId ?? parsed.currentQuestionId ?? null)
   const workflowState = resolveWorkflowState(parsed.workflowState, generatedDocs, pendingQuestionId)
 
   return {
-    version: 2,
+    version: 3,
     feature,
     workflowState,
     pendingQuestionId: workflowState === 'collecting' ? pendingQuestionId : null,
     promptMode: parsed.promptMode === 'discussion' ? 'discussion' : 'question',
     askedQuestionIds: Array.isArray(parsed.askedQuestionIds) ? uniqueQuestionIds(parsed.askedQuestionIds) : deriveAskedQuestionIds(answers),
     answers,
+    requirementModel,
     generatedDocs,
     generationAttemptCount: typeof parsed.generationAttemptCount === 'number' ? parsed.generationAttemptCount : 0,
     lastError: typeof parsed.lastError === 'string' ? parsed.lastError : undefined,
