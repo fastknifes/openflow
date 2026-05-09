@@ -18,6 +18,7 @@ import {
   getMessageRole,
   hasDesignDoc,
 } from './brainstorm-workflow.js'
+import { findActiveFeature } from '../utils/feature-resolver.js'
 
 const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive']
 
@@ -81,11 +82,7 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
       // /openflow-archive <feature>
       const archiveMatch = trimmed.match(/^\/openflow-archive(?:\s+(.+))?$/)
       if (archiveMatch) {
-        const feature = archiveMatch[1]?.trim()
-        if (!feature) {
-          appendGuardMessage(output, 'Feature name is required. Usage: /openflow-archive <feature-name>')
-          return
-        }
+        const feature = archiveMatch[1]?.trim() || undefined
         try {
           const result = await handleArchive(ctx, feature)
           appendGuardMessage(output, result)
@@ -151,15 +148,16 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
       const writingPlanMatch = trimmed.match(/^\/openflow-writing-plan(?:\s+(.+))?$/)
       if (writingPlanMatch) {
         const feature = writingPlanMatch[1]?.trim()
-        if (!feature) {
-          appendGuardMessage(output, 'Feature name is required. Usage: /openflow-writing-plan <feature-name>')
-          return
-        }
         try {
-          const contextPacket = await readDesignContextPacket(ctx.directory, feature)
+          const resolvedFeature = feature || await findActiveFeature(ctx)
+          if (!resolvedFeature) {
+            appendGuardMessage(output, 'Feature name is required. Usage: /openflow-writing-plan <feature-name>')
+            return
+          }
+          const contextPacket = await readDesignContextPacket(ctx.directory, resolvedFeature)
           const result = contextPacket
-            ? `## Writing Plan Context\n\nFeature: \`${feature}\`\n\n${contextPacket}`
-            : `No design context found for feature \`${feature}\`. Run \`/openflow-brainstorm ${feature}\` first.`
+            ? `## Writing Plan Context\n\nFeature: \`${resolvedFeature}\`\n\n${contextPacket}`
+            : `No design context found for feature \`${resolvedFeature}\`. Run \`/openflow-brainstorm ${resolvedFeature}\` first.`
           appendGuardMessage(output, result)
         } catch (err) {
           appendGuardMessage(output, err instanceof Error ? err.message : String(err))

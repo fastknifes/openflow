@@ -1,4 +1,3 @@
-import * as fs from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import type {
   AcceptanceState,
@@ -18,8 +17,10 @@ import {
   detectMode,
   type IssueMode,
 } from '../utils/issue-utils.js'
+import { resolveChangeUnitDir } from '../utils/change-units.js'
 import { loadAcceptanceState, saveAcceptanceState, saveVerifyResult } from '../utils/acceptance-state.js'
 import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
+import { findActiveFeature } from '../utils/feature-resolver.js'
 
 export interface VerifyReadinessResult {
   status: VerifyReadinessStatus
@@ -124,33 +125,7 @@ export async function handleVerify(
   return formatVerifyResult(sanitizedFeature, evidence, readiness)
 }
 
-async function findActiveFeature(ctx: OpenFlowContext): Promise<string | null> {
-  const plansDir = createSafePath(ctx.directory, '.sisyphus', 'plans')
 
-  try {
-    const files = await fs.readdir(plansDir)
-    const mdFiles = files.filter(file => file.endsWith('.md'))
-    if (mdFiles.length === 0) return null
-
-    let latestFeature: { name: string; mtime: number } | null = null
-
-    for (const file of mdFiles) {
-      const filePath = createSafePath(ctx.directory, '.sisyphus', 'plans', file)
-      const stat = await fs.stat(filePath)
-
-      if (!latestFeature || stat.mtimeMs > latestFeature.mtime) {
-        latestFeature = {
-          name: file.replace('.md', ''),
-          mtime: stat.mtimeMs,
-        }
-      }
-    }
-
-    return latestFeature?.name ?? null
-  } catch {
-    return null
-  }
-}
 
 async function collectEvidence(
   ctx: OpenFlowContext,
@@ -158,13 +133,14 @@ async function collectEvidence(
   mode: IssueMode,
   acceptanceState?: AcceptanceState | null,
 ): Promise<VerifyEvidencePacket> {
+  const changeDir = await resolveChangeUnitDir(ctx.directory, feature)
   const planPath = createSafePath(ctx.directory, '.sisyphus', 'plans', `${feature}.md`)
-  const changesPath = createSafePath(ctx.directory, 'docs', 'changes', feature)
+  const changesPath = createSafePath(ctx.directory, 'docs', 'changes', changeDir)
   const currentPath = createSafePath(ctx.directory, 'docs', 'current')
   const decisionsPath = createSafePath(ctx.directory, 'docs', 'decisions')
   const issueClarificationPath = acceptanceState?.issueClarificationPath
     ? createSafePath(ctx.directory, acceptanceState.issueClarificationPath)
-    : createSafePath(ctx.directory, 'docs', 'changes', feature, ISSUE_CLARIFICATION_FILENAME)
+    : createSafePath(ctx.directory, 'docs', 'changes', changeDir, ISSUE_CLARIFICATION_FILENAME)
 
   const planExists = await fileExists(planPath)
   const changesExists = await fileExists(changesPath)
@@ -176,14 +152,14 @@ async function collectEvidence(
   const checksRun = [
     `active_feature_resolution ✅ (${feature})`,
     `plan_exists ${planExists ? '✅' : mode === 'issue' ? 'ℹ️' : '⚠️'} (${planExists ? 'found' : mode === 'issue' ? `not required in issue mode (.sisyphus/plans/${feature}.md)` : `missing .sisyphus/plans/${feature}.md`})`,
-    `changes_workspace ${changesExists ? '✅' : '⚠️'} (${changesExists ? 'found' : 'missing'} docs/changes/${feature})`,
+    `changes_workspace ${changesExists ? '✅' : '⚠️'} (${changesExists ? 'found' : 'missing'} docs/changes/${changeDir})`,
     `stable_constraints_current ${currentExists ? '✅' : '⚠️'} (${currentExists ? 'found' : 'missing'} docs/current)`,
     `stable_constraints_decisions ${decisionsExists ? '✅' : '⚠️'} (${decisionsExists ? 'found' : 'missing'} docs/decisions)`,
   ]
 
   if (mode !== 'feature') {
     checksRun.push(
-      `issue_clarification_exists ${issueClarificationExists ? '✅' : '⚠️'} (${issueClarificationExists ? 'found' : 'missing'} docs/changes/${feature}/${ISSUE_CLARIFICATION_FILENAME})`,
+      `issue_clarification_exists ${issueClarificationExists ? '✅' : '⚠️'} (${issueClarificationExists ? 'found' : 'missing'} docs/changes/${changeDir}/${ISSUE_CLARIFICATION_FILENAME})`,
       `root_cause_closure ${issueSignals.rootCauseClosed ? '✅' : '⚠️'} (${issueSignals.rootCauseDetail})`,
       `semantic_contract_integrity ${issueSignals.semanticContractIntact ? '✅' : '⚠️'} (${issueSignals.semanticContractDetail})`,
       `recommended_action_execution ${issueSignals.recommendedActionExecuted ? '✅' : '⚠️'} (${issueSignals.recommendedActionDetail})`,

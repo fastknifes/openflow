@@ -1,5 +1,7 @@
 # OpenFlow 使用教程
 
+[English Version](./openflow-usage-tutorial.en.md)
+
 ## 1. 这份教程是给谁的
 
 如果你已经装好了 OpenFlow，但还不确定：
@@ -40,7 +42,13 @@ OpenFlow 的核心理念是：
 
 ## 3. 安装与基础配置
 
-在 `opencode.json` 中启用插件：
+安装 OpenFlow 插件：
+
+```bash
+npm install @fastknife/openflow
+```
+
+然后在 `opencode.json` 中启用：
 
 ```json
 {

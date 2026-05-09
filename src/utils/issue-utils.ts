@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises'
+import { resolveChangeUnitDir } from './change-units.js'
 
 export const ISSUE_CLARIFICATION_FILENAME = 'issue-clarification.md'
 export const PROMOTION_CANDIDATE_FILENAME = 'promotion-candidate.md'
@@ -70,10 +71,11 @@ export async function detectMode(
   ctx: { directory: string },
   name: string,
 ): Promise<IssueMode> {
+  const changeDir = await resolveChangeUnitDir(ctx.directory, name)
   const basePath = `${ctx.directory}${ctx.directory.endsWith('/') || ctx.directory.endsWith('\\') ? '' : '/'}`
 
-  const designPath = `${basePath}docs/changes/${name}/design.md`
-  const clarificationPath = `${basePath}docs/changes/${name}/${ISSUE_CLARIFICATION_FILENAME}`
+  const designPath = `${basePath}docs/changes/${changeDir}/design.md`
+  const clarificationPath = `${basePath}docs/changes/${changeDir}/${ISSUE_CLARIFICATION_FILENAME}`
 
   const designExists = await pathExists(designPath)
   const clarificationExists = await pathExists(clarificationPath)

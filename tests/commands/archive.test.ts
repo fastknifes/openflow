@@ -95,7 +95,14 @@ describe('archive command', () => {
   })
 
   test('throws when feature is missing', async () => {
-    const ctx = createContext()
+    const testDir = join(process.cwd(), '.test-archive-no-feature')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(testDir, { recursive: true })
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+    }
     await expect(handleArchive(ctx, undefined)).rejects.toThrow('Feature name is required')
   })
 

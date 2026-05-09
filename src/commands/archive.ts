@@ -30,6 +30,7 @@ import {
   getDesignCandidatePaths,
   getRequirementsCandidatePaths,
 } from '../config.js'
+import { findActiveFeature } from '../utils/feature-resolver.js'
 
 const RECENT_BUILDS_WINDOW = 5
 
@@ -38,11 +39,12 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     return 'Archive phase is disabled in configuration'
   }
 
-  if (!feature) {
+  const resolvedFeature = feature?.trim() || await findActiveFeature(ctx)
+  if (!resolvedFeature) {
     throw new OpenFlowError(ErrorCode.INVALID_INPUT, 'Feature name is required. Usage: /openflow-archive <feature-name>')
   }
 
-  const sanitizedFeature = sanitizeFeatureName(feature)
+  const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
   const archiveMode = await detectMode(ctx, sanitizedFeature)
 
   const planPath = createSafePath(ctx.directory, '.sisyphus', 'plans', `${sanitizedFeature}.md`)
