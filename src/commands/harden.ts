@@ -10,7 +10,7 @@ import type {
   OpenFlowContext,
 } from '../types.js'
 import { classifyFindings, compressInput, gradeComplexity } from '../utils/harden-utils.js'
-import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
+import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 
 interface HardenArgs {
