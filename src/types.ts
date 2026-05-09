@@ -29,6 +29,7 @@ export interface VerificationConfig {
   quality: QualityCheckType[]
   auto_fix: boolean
   completion_prompt: boolean
+  allow_accept_failures?: boolean
 }
 
 export type SecurityCheckType = 'secret' | 'vuln' | 'dependency'
@@ -49,12 +50,57 @@ export interface AcceptanceConfig {
   drift_detection: boolean
 }
 
+export interface WritingPlanConfig {
+  enabled: boolean
+}
+
+export type HardenFindingLevel = 'blocking_bug' | 'spec_violation' | 'regression_risk' | 'test_gap' | 'design_ambiguity' | 'style_or_preference'
+
+export interface HardenFinding {
+  level: HardenFindingLevel
+  description: string
+  evidence: string
+  files: string[]
+  lines?: string
+}
+
+export interface HardenRoundResult {
+  round: number
+  findings: HardenFinding[]
+  fixReport?: string
+  fixDiff?: string
+}
+
+export type HardenStatus = 'pass' | 'pass_with_risks' | 'max_rounds_reached' | 'budget_exhausted' | 'needs_human' | 'rejected'
+
+export interface HardenResult {
+  status: HardenStatus
+  rounds: HardenRoundResult[]
+  budgetConsumed: number
+  summary: string
+}
+
+export type HardenMode = 'quick' | 'standard' | 'deep'
+
+export type ComplexityGrade = 'trivial' | 'simple' | 'complex'
+
+export interface HardenConfig {
+  enabled: boolean
+  maxRounds: number
+  tokenBudgetPerRound: number
+  tokenBudgetTotal: number
+  reviewerModel?: string
+  executorModel?: string
+}
+
 export interface OpenFlowConfig {
   brainstorming: BrainstormingConfig
   tdd: TddConfig
   verification: VerificationConfig
   acceptance: AcceptanceConfig
   archive: ArchiveConfig
+  writingPlan: WritingPlanConfig
+  harden: HardenConfig
 }
 
 export const defaultConfig: OpenFlowConfig = {
@@ -83,6 +129,7 @@ export const defaultConfig: OpenFlowConfig = {
     quality: ['lint', 'typecheck', 'test'],
     auto_fix: false,
     completion_prompt: true,
+    allow_accept_failures: true,
   },
   acceptance: {
     enabled: true,
@@ -96,6 +143,13 @@ export const defaultConfig: OpenFlowConfig = {
     output_dir: 'docs/archive',
     drift_check: true,
     auto_promote_current: true,
+  },
+  writingPlan: { enabled: true },
+  harden: {
+    enabled: true,
+    maxRounds: 5,
+    tokenBudgetPerRound: 10000,
+    tokenBudgetTotal: 60000,
   },
 }
 
@@ -236,6 +290,22 @@ export interface VerifyResult {
   verifiedAt: string
 }
 
+export type IssueClassification =
+  | 'bugfix'
+  | 'data_issue'
+  | 'config_issue'
+  | 'environment_issue'
+  | 'doc_ambiguity'
+  | 'behavior_change'
+  | 'cannot_determine'
+
+export type GovernancePromotionStatus =
+  | 'none'
+  | 'candidate_created'
+  | 'confirmed'
+  | 'needs_decision'
+  | 'blocked_unapproved'
+
 export interface AcceptanceState {
   feature: string
   phase: DevelopmentPhase
@@ -257,6 +327,16 @@ export interface AcceptanceState {
   promotionAppliedAt?: string
   readiness?: VerifyReadinessStatus
   verifyResult?: VerifyResult
+  acceptedFailures?: boolean
+  // Issue-mode fields
+  mode?: 'feature' | 'issue'
+  issueSlug?: string
+  rawIssue?: string
+  primaryClassification?: IssueClassification
+  classifications?: IssueClassification[]
+  governancePromotionStatus?: GovernancePromotionStatus
+  issueClarificationPath?: string
+  promotionCandidatePath?: string
 }
 
 // 按阶段分段的文件变更记录

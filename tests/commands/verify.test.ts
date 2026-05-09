@@ -65,6 +65,23 @@ function createAcceptanceState(feature: string, pendingDocUpdates: AcceptanceSta
   }
 }
 
+function createIssueAcceptanceState(
+  feature: string,
+  overrides: Partial<AcceptanceState> = {},
+): AcceptanceState {
+  return {
+    ...createAcceptanceState(feature, overrides.pendingDocUpdates ?? []),
+    mode: 'issue',
+    issueSlug: feature,
+    rawIssue: feature,
+    primaryClassification: 'bugfix',
+    classifications: ['bugfix'],
+    governancePromotionStatus: 'none',
+    issueClarificationPath: `docs/changes/${feature}/issue-clarification.md`,
+    ...overrides,
+  }
+}
+
 describe('verify command', () => {
   test('resolves active feature, persists verify result, and returns structured readiness output', async () => {
     const testDir = join(process.cwd(), '.test-verify-active-feature')
@@ -204,5 +221,198 @@ describe('verify command', () => {
 
     expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
     expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+  })
+
+  test('supports accepting current verification failures via flag and persists acceptance state', async () => {
+    const testDir = join(process.cwd(), '.test-verify-accept-failures')
+    await rm(testDir, { recursive: true, force: true })
+
+    const plansDir = join(testDir, '.sisyphus', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(join(plansDir, 'demo-feature.md'), '# demo', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    const result = await handleVerify(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      true,
+    )
+    const acceptanceState = await loadAcceptanceState(testDir)
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('- reason_codes: changes_workspace_missing')
+    expect(result).not.toContain('### 失败后的可选操作')
+    expect(acceptanceState?.acceptedFailures).toBe(true)
+    expect(acceptanceState?.verifyResult?.readiness).toBe(VerifyReadinessStatus.Ready)
+    expect(acceptanceState?.verifyResult?.reasonCodes).toContain('changes_workspace_missing')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('shows clear chinese options when verification remains not ready', async () => {
+    const testDir = join(process.cwd(), '.test-verify-failure-options')
+    await rm(testDir, { recursive: true, force: true })
+
+    const plansDir = join(testDir, '.sisyphus', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(join(plansDir, 'demo-feature.md'), '# demo', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    const result = await handleVerify(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+    )
+
+    expect(result).toContain('- status: not_ready')
+    expect(result).toContain('### 失败后的可选操作')
+    expect(result).toContain('**Option 1**: 修复失败的检查，然后重新运行 /openflow-verify')
+    expect(result).toContain('**Option 2**: 如果你确定这些失败是可接受的，运行 /openflow-verify --accept-failures 来标记成功')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('uses interactive toolContext to accept current verification failures and returns ready', async () => {
+    const testDir = join(process.cwd(), '.test-verify-interactive-accept')
+    await rm(testDir, { recursive: true, force: true })
+
+    const plansDir = join(testDir, '.sisyphus', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(join(plansDir, 'demo-feature.md'), '# demo', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    const mockToolContext = {
+      askQuestion: async () => [['标记成功']],
+    }
+
+    const result = await handleVerify(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      undefined,
+      mockToolContext,
+    )
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('- reason_codes: changes_workspace_missing')
+    expect(result).not.toContain('### 失败后的可选操作')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('uses interactive toolContext to keep failed verification as not_ready when user chooses fix', async () => {
+    const testDir = join(process.cwd(), '.test-verify-interactive-fix')
+    await rm(testDir, { recursive: true, force: true })
+
+    const plansDir = join(testDir, '.sisyphus', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(join(plansDir, 'demo-feature.md'), '# demo', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    const mockToolContext = {
+      askQuestion: async () => [['修复问题']],
+    }
+
+    const result = await handleVerify(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      undefined,
+      mockToolContext,
+    )
+
+    expect(result).toContain('- status: not_ready')
+    expect(result).toContain('### 失败后的可选操作')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('verifies issue-only workspace without requiring a feature plan', async () => {
+    const testDir = join(process.cwd(), '.test-verify-issue-mode')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-issue'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-issue', 'issue-clarification.md'), '# clarification', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createIssueAcceptanceState('demo-issue'))
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-issue')
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('- reason_codes: all_checks_passed')
+    expect(result).toContain('plan_exists ℹ️')
+    expect(result).toContain('issue_clarification_exists ✅')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('returns not_ready when issue clarification is missing in issue mode', async () => {
+    const testDir = join(process.cwd(), '.test-verify-issue-missing-clarification')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-issue'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createIssueAcceptanceState('demo-issue'))
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-issue')
+
+    expect(result).toContain('- status: not_ready')
+    expect(result).toContain('issue_clarification_missing')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('maps governance needs_decision to readiness needs_decision in issue mode', async () => {
+    const testDir = join(process.cwd(), '.test-verify-issue-governance-needs-decision')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-issue'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-issue', 'issue-clarification.md'), '# clarification', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createIssueAcceptanceState('demo-issue', {
+      governancePromotionStatus: 'needs_decision',
+    }))
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-issue')
+
+    expect(result).toContain('- status: needs_decision')
+    expect(result).toContain('- reason_codes: governance_needs_decision')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('prevents ready when issue governance is blocked by unapproved decision promotion', async () => {
+    const testDir = join(process.cwd(), '.test-verify-issue-blocked-unapproved')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-issue'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-issue', 'issue-clarification.md'), '# clarification', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createIssueAcceptanceState('demo-issue', {
+      governancePromotionStatus: 'blocked_unapproved',
+      promotionSuggestions: [{
+        type: 'ADD',
+        targetArea: 'design',
+        targetPath: 'docs/decisions/ADR-demo.md',
+        reason: 'needs approval',
+      }],
+    }))
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-issue')
+
+    expect(result).toContain('- status: not_ready')
+    expect(result).toContain('governance_blocked_unapproved')
+    expect(result).not.toContain('- status: ready')
+
+    await rm(testDir, { recursive: true, force: true })
   })
 })

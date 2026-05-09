@@ -10,6 +10,8 @@ import {
   clearWaitingForDocUpdateConfirm,
   enterAcceptancePhase,
   saveVerifyResult,
+  saveIssueClarificationState,
+  type IssueClarificationState,
 } from '../../src/utils/acceptance-state.js'
 import { VerifyDecisionType, VerifyReadinessStatus, type AcceptanceState, type VerifyResult } from '../../src/types.js'
 
@@ -227,6 +229,138 @@ describe('acceptance-state', () => {
     expect(loaded?.promotionApplied).toBe(true)
     expect(loaded?.promotionAppliedAt).toBe('2026-04-21T11:50:00.000Z')
     expect(loaded?.promotionDecidedAt).toBe('2026-04-21T11:48:00.000Z')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('issue-mode fields round-trip correctly', async () => {
+    const root = join(TEST_ROOT, 'issue-mode-round-trip')
+    await rm(root, { recursive: true, force: true })
+
+    const state: AcceptanceState = {
+      feature: 'issue-demo',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-09T10:00:00.000Z',
+      pendingDocUpdates: [],
+      mode: 'issue',
+      issueSlug: 'login-crash-on-mobile',
+      rawIssue: 'App crashes when user taps login on mobile Safari',
+      primaryClassification: 'bugfix',
+      classifications: ['bugfix', 'data_issue'],
+      governancePromotionStatus: 'candidate_created',
+      issueClarificationPath: 'docs/changes/2026-05-09-login-crash-on-mobile/issue-clarification.md',
+      promotionCandidatePath: 'docs/decisions/login-crash-fix.md',
+    }
+
+    await saveAcceptanceState(root, state)
+    const loaded = await loadAcceptanceState(root)
+
+    expect(loaded).not.toBeNull()
+    expect(loaded?.mode).toBe('issue')
+    expect(loaded?.issueSlug).toBe('login-crash-on-mobile')
+    expect(loaded?.rawIssue).toBe('App crashes when user taps login on mobile Safari')
+    expect(loaded?.primaryClassification).toBe('bugfix')
+    expect(loaded?.classifications).toEqual(['bugfix', 'data_issue'])
+    expect(loaded?.governancePromotionStatus).toBe('candidate_created')
+    expect(loaded?.issueClarificationPath).toBe('docs/changes/2026-05-09-login-crash-on-mobile/issue-clarification.md')
+    expect(loaded?.promotionCandidatePath).toBe('docs/decisions/login-crash-fix.md')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('legacy files without mode field default to feature mode', async () => {
+    const root = join(TEST_ROOT, 'legacy-default-feature-mode')
+    await rm(root, { recursive: true, force: true })
+
+    const state: AcceptanceState = {
+      feature: 'legacy-no-mode',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-09T11:00:00.000Z',
+      pendingDocUpdates: [],
+      promotionApplied: false,
+    }
+
+    await saveAcceptanceState(root, state)
+    const loaded = await loadAcceptanceState(root)
+
+    expect(loaded).not.toBeNull()
+    expect(loaded?.feature).toBe('legacy-no-mode')
+    expect(loaded?.mode).toBe('feature')
+    expect(loaded?.issueSlug).toBeUndefined()
+    expect(loaded?.rawIssue).toBeUndefined()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('saveVerifyResult preserves issue-mode fields', async () => {
+    const root = join(TEST_ROOT, 'verify-preserves-issue-fields')
+    await rm(root, { recursive: true, force: true })
+
+    const state: AcceptanceState = {
+      feature: 'issue-verify-demo',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-09T12:00:00.000Z',
+      pendingDocUpdates: [],
+      mode: 'issue',
+      issueSlug: 'data-loss-bug',
+      rawIssue: 'User data is lost after logout',
+      primaryClassification: 'data_issue',
+      classifications: ['data_issue'],
+      governancePromotionStatus: 'needs_decision',
+    }
+
+    const verifyResult: VerifyResult = {
+      readiness: VerifyReadinessStatus.NotReady,
+      reasonCodes: ['fix_incomplete'],
+      evidenceSummary: 'Data still lost in edge cases.',
+      constraintsChecked: ['tests', 'typecheck'],
+      verifiedAt: '2026-05-09T13:00:00.000Z',
+    }
+
+    await saveAcceptanceState(root, state)
+    await saveVerifyResult(root, verifyResult)
+    const loaded = await loadAcceptanceState(root)
+
+    expect(loaded).not.toBeNull()
+    expect(loaded?.mode).toBe('issue')
+    expect(loaded?.issueSlug).toBe('data-loss-bug')
+    expect(loaded?.rawIssue).toBe('User data is lost after logout')
+    expect(loaded?.primaryClassification).toBe('data_issue')
+    expect(loaded?.classifications).toEqual(['data_issue'])
+    expect(loaded?.governancePromotionStatus).toBe('needs_decision')
+    expect(loaded?.readiness).toBe(VerifyReadinessStatus.NotReady)
+    expect(loaded?.verifyResult).toEqual(verifyResult)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('saveIssueClarificationState updates existing state with issue fields', async () => {
+    const root = join(TEST_ROOT, 'save-issue-clarification')
+    await rm(root, { recursive: true, force: true })
+
+    await enterAcceptancePhase(root, 'clarify-demo')
+
+    const issueState: IssueClarificationState = {
+      issueSlug: 'slow-query-perf',
+      rawIssue: 'Dashboard queries take 30+ seconds',
+      primaryClassification: 'config_issue',
+      classifications: ['config_issue', 'data_issue'],
+      governancePromotionStatus: 'candidate_created',
+      issueClarificationPath: 'docs/changes/2026-05-09-slow-query-perf/issue-clarification.md',
+    }
+
+    await saveIssueClarificationState(root, issueState)
+    const loaded = await loadAcceptanceState(root)
+
+    expect(loaded).not.toBeNull()
+    expect(loaded?.feature).toBe('clarify-demo')
+    expect(loaded?.mode).toBe('issue')
+    expect(loaded?.issueSlug).toBe('slow-query-perf')
+    expect(loaded?.rawIssue).toBe('Dashboard queries take 30+ seconds')
+    expect(loaded?.primaryClassification).toBe('config_issue')
+    expect(loaded?.classifications).toEqual(['config_issue', 'data_issue'])
+    expect(loaded?.governancePromotionStatus).toBe('candidate_created')
+    expect(loaded?.issueClarificationPath).toBe('docs/changes/2026-05-09-slow-query-perf/issue-clarification.md')
 
     await rm(root, { recursive: true, force: true })
   })

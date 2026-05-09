@@ -1,15 +1,95 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { RequirementModel } from '../phases/brainstorm/requirement-model.js'
+import type { OpenFlowContext } from '../types.js'
 import { RequirementModelSchema } from '../phases/brainstorm/requirement-model.js'
-import { getDesignCandidatePaths } from '../config.js'
+import { getDesignCandidatePaths, getPlanPath } from '../config.js'
 import { findLatestDocument } from '../utils/index.js'
 import { logger } from '../utils/logger.js'
+import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 
 const DESIGN_SIDECAR_FILENAMES = ['design.meta.json', 'requirements.json'] as const
 
+export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): Promise<string> {
+  if (!feature) throw new Error('Feature name is required')
+
+  const sanitizedFeature = sanitizeFeatureName(feature)
+
+  if (!ctx.config.writingPlan.enabled) {
+    return '## Writing Plan Disabled\n\nWriting plan feature is disabled in OpenFlow configuration.'
+  }
+
+  const designContext = await readDesignContextPacket(ctx.directory, sanitizedFeature)
+  const planPath = getPlanPath(ctx.directory, sanitizedFeature)
+
+  return `## OpenFlow Writing Plan Packet
+
+**Feature**: \`${escapeMarkdown(sanitizedFeature)}\`
+
+### Design Context
+${designContext || `> No design documents found for feature \`${escapeMarkdown(sanitizedFeature)}\`. Consider running \`/openflow-brainstorm ${escapeMarkdown(sanitizedFeature)}\` first.`}
+
+### Plan Output Path
+
+\`${escapeMarkdown(planPath)}\`
+
+### Plan Format Rules
+
+The plan file MUST follow this exact structure:
+
+\`\`\`markdown
+# Plan: ${escapeMarkdown(sanitizedFeature)}
+
+## Overview
+Brief description of what this feature accomplishes.
+
+## Design Context
+Reference to the design workspace and relevant constraints.
+
+## Execution Strategy
+
+### Parallel Execution Waves
+Tasks grouped by dependency level. Wave 1 has no dependencies; later waves depend on earlier results.
+Waves execute in order; tasks within a wave run in parallel via subagents.
+
+### Dependency Matrix
+| Task | Blocked By | Blocks |
+
+## Tasks
+
+- [ ] 1. Task with concrete file paths, verification commands, and subagent profile
+- [ ] 2. Another task
+\`\`\`
+
+- Use \`- [ ]\` for checkbox tasks or \`1.\` for numbered tasks.
+- **Parallel execution**: Group independent tasks into waves. Dispatch each same-wave task as a subagent. Same-wave tasks run in parallel.
+- **Subagent guidance**: Assign each task a recommended agent category such as \`quick\`, \`writing\`, or \`unspecified-high\`, plus required skills.
+- Each task must include: Agent Profile, Parallelization status, QA Scenarios, and Acceptance Criteria.
+
+### Self-Check Checklist
+
+Before writing the plan file, verify:
+
+- [ ] **No placeholders**: No TBD, TODO, or "implement later" in any task.
+- [ ] **Concrete file paths**: Every task specifies exact file paths to create or modify.
+- [ ] **Verification commands**: Every task includes a runnable command and expected output.
+- [ ] **Task granularity**: No single task describes more than one meaningful file or module.
+
+### Overwrite Warning
+
+> If a plan file already exists at the output path, review it carefully before overwriting. Existing task progress may be lost.
+
+### Execution Handoff Note
+
+**This packet is for plan writing only. Do NOT execute any tasks.** Write the final plan file to the output path above using your normal file write tool, not inside this handler. This ensures existing tool-after hooks can enhance the plan. Execution is handled separately after the plan is reviewed and approved.
+`
+}
+
 export async function readDesignContextPacket(baseDir: string, feature: string): Promise<string | null> {
-  const candidatePaths = await getDesignCandidatePaths(baseDir, feature)
+  const candidatePaths = [
+    ...await getDesignCandidatePaths(baseDir, feature),
+    ...await findDatedChangeCandidatePaths(baseDir, feature),
+  ]
 
   for (const candidatePath of candidatePaths) {
     const candidate = await resolveDesignCandidate(candidatePath)
@@ -27,11 +107,25 @@ export async function readDesignContextPacket(baseDir: string, feature: string):
 
     const markdownContext = await extractKeySections(designPath)
     if (markdownContext) {
-      return markdownContext
+      return `### ${path.basename(designPath)}\n\n${markdownContext}`
     }
   }
 
   return null
+}
+
+async function findDatedChangeCandidatePaths(baseDir: string, feature: string): Promise<string[]> {
+  const changesDir = path.join(baseDir, 'docs', 'changes')
+  const suffix = `-${feature}`
+
+  try {
+    const entries = await fs.readdir(changesDir, { withFileTypes: true })
+    return entries
+      .filter((entry) => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}-/.test(entry.name) && entry.name.endsWith(suffix))
+      .map((entry) => path.join(changesDir, entry.name))
+  } catch {
+    return []
+  }
 }
 
 async function resolveDesignCandidate(candidatePath: string): Promise<{ workspacePath: string; isFile: boolean } | null> {

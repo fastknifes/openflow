@@ -1,0 +1,82 @@
+{
+  "feature": "openflow-harden",
+  "constraints": [
+    {
+      "id": "d-0001",
+      "category": "scope",
+      "severity": "should",
+      "description": "兼容现有系统: 不嵌入 verify/archive/implement 流程",
+      "rationale": "This free-text constraint was provided directly during brainstorming and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "d-0002",
+      "category": "scope",
+      "severity": "should",
+      "description": "作为独立可选命令存在。所有修复必须锚定设计文档",
+      "rationale": "This free-text constraint was provided directly during brainstorming and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "d-0003",
+      "category": "scope",
+      "severity": "should",
+      "description": "不得超出 plan 范围。与现有命令语义边界清晰不重叠。",
+      "rationale": "This free-text constraint was provided directly during brainstorming and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    }
+  ],
+  "scopeBoundary": {
+    "inScope": [
+      "openflow-harden new-feature: 全新独立命令 /openflow-harden，补充现有工作流中 implement → verify → archive 之间缺失的对抗式质量加固环节。",
+      "Address the stated problem: 支持新场景: 在 implement 和 verify 之间增加一个对抗式加固阶段，用 reviewer 和 executor 的多轮对抗发现并修复 verify 覆盖不到的隐藏 bug、spec 偏离和回归风险。"
+    ],
+    "outOfScope": []
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "ac-0001",
+      "description": "openflow-harden addresses the stated problem: 支持新场景: 在 implement 和 verify 之间增加一个对抗式加固阶段，用 reviewer 和 executor 的多轮对抗发现并修复 verify 覆盖不到的隐藏 bug、spec 偏离和回归风险。",
+      "category": "problem"
+    },
+    {
+      "id": "ac-0002",
+      "description": "openflow-harden works for the target users: 内部开发者: 使用 OpenFlow 工作流的开发者，在重要变更、复杂实现、archive 前信心不足时主动选择运行。",
+      "category": "target-users"
+    },
+    {
+      "id": "ac-0003",
+      "description": "openflow-harden implementation reflects the selected priority: 风险最小: 优先保证命令不会破坏现有工作流、不会 scope drift、不会无限烧 token。收敛规则和预算控制是第一优先级，修复质量是第二优先级。",
+      "category": "priority"
+    },
+    {
+      "id": "ac-0004",
+      "description": "openflow-harden respects the stated constraint: 兼容现有系统: 不嵌入 verify/archive/implement 流程",
+      "category": "constraints"
+    },
+    {
+      "id": "ac-0005",
+      "description": "openflow-harden respects the stated constraint: 作为独立可选命令存在。所有修复必须锚定设计文档",
+      "category": "constraints"
+    },
+    {
+      "id": "ac-0006",
+      "description": "openflow-harden respects the stated constraint: 不得超出 plan 范围。与现有命令语义边界清晰不重叠。",
+      "category": "constraints"
+    }
+  ],
+  "goals": [
+    "Solve: 支持新场景: 在 implement 和 verify 之间增加一个对抗式加固阶段，用 reviewer 和 executor 的多轮对抗发现并修复 verify 覆盖不到的隐藏 bug、spec 偏离和回归风险。",
+    "Serve target users: 内部开发者: 使用 OpenFlow 工作流的开发者，在重要变更、复杂实现、archive 前信心不足时主动选择运行。",
+    "Honor priority: 风险最小: 优先保证命令不会破坏现有工作流、不会 scope drift、不会无限烧 token。收敛规则和预算控制是第一优先级，修复质量是第二优先级。"
+  ],
+  "nonGoals": [
+    "Unrelated modules or workflows"
+  ],
+  "problemStatement": "支持新场景: 在 implement 和 verify 之间增加一个对抗式加固阶段，用 reviewer 和 executor 的多轮对抗发现并修复 verify 覆盖不到的隐藏 bug、spec 偏离和回归风险。",
+  "targetUsers": "内部开发者: 使用 OpenFlow 工作流的开发者，在重要变更、复杂实现、archive 前信心不足时主动选择运行。",
+  "testingStrategy": "Use targeted tests and review to verify: 风险最小: 优先保证命令不会破坏现有工作流、不会 scope drift、不会无限烧 token。收敛规则和预算控制是第一优先级，修复质量是第二优先级。, 兼容现有系统: 不嵌入 verify/archive/implement 流程, 作为独立可选命令存在。所有修复必须锚定设计文档, 不得超出 plan 范围。与现有命令语义边界清晰不重叠。"
+}

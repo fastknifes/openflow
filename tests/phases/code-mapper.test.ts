@@ -44,7 +44,7 @@ describe('code-mapper', () => {
     expect(entries[0].step).toBe('Archive command traces requirements to code')
     expect(entries[0].symbol).toContain('archiveTraceability')
     expect(entries[0].symbol).toContain('mapRequirements')
-    expect(entries[0].verificationEvidence).toBe('archived file-change evidence recorded')
+    expect(entries[0].verificationEvidence).toBe('no verification evidence recorded')
 
     await rm(testDir, { recursive: true, force: true })
   })

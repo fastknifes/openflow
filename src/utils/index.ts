@@ -42,3 +42,13 @@ export {
   type CleanBuildOptions,
   type CleanAllBuildsOptions,
 } from './build-cleaner.js'
+export { gradeComplexity, classifyFindings, compressInput } from './harden-utils.js'
+export {
+  ISSUE_CLARIFICATION_FILENAME,
+  PROMOTION_CANDIDATE_FILENAME,
+  ISSUE_RESOLUTION_FILENAME,
+  issueSlug,
+  resolveIssueWorkspace,
+  detectMode,
+  type IssueMode,
+} from './issue-utils.js'

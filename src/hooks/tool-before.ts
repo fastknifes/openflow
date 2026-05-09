@@ -1,13 +1,14 @@
 import type { Hooks } from '@opencode-ai/plugin'
 import type { OpenFlowContext } from '../types.js'
 import { getSkillContent } from '../skills/index.js'
+import { getVerifySkill } from '../skills/verify-skill.js'
 import { logger } from '../utils/logger.js'
 import { formatSecurityChecks, formatQualityChecks } from '../utils/verification-checks.js'
 import { buildImplementationContextPrompt } from './implementation-context.js'
 import { isImplementationTask, isVerificationTask } from './task-classification.js'
 
 function buildVerificationPrompt(ctx: OpenFlowContext, currentPrompt: string): string | undefined {
-  const verifySkillContent = getSkillContent('openflow-verify')
+  const verifySkillContent = getSkillContent('openflow-verify') ?? getVerifySkill().content
   if (!verifySkillContent) return undefined
 
   if (currentPrompt.includes('OpenFlow Verification') || currentPrompt.includes('NO COMPLETION CLAIMS')) {

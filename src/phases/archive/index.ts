@@ -14,8 +14,7 @@ export {
   generateCodeMappingTable, 
   generateApiEndpointsTable,
   generateDependenciesTable,
-  generateCodeMappingMarkdown,
-  saveCodeMapping,
+
   type CodeMappingEntry,
   type GenerateCodeMappingOptions,
   type ApiEndpoint,

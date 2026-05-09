@@ -1,0 +1,35 @@
+# implementation-mapper-traceability - Implementation Mapper
+
+**Date**: 2026-05-09
+**Status**: Archived
+
+## 1. 概述
+
+本次变更解决了与 `implementation-mapper-traceability` 相关的实现追溯需求。
+
+**归档时间**: 2026-05-09
+**追溯范围**: 本次变更覆盖需求到实现的完整追溯链。
+
+## 2. 需求到实现映射
+
+| 追溯来源 | 需求/决策 | 代码文件 | 关键符号 | 关联说明 | 验证证据 |
+|----------|-----------|----------|----------|----------|----------|
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 3.1 功能验收 | \[ \] 验收标准 1 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 3.1 功能验收 | \[ \] 验收标准 2 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 3.1 功能验收 | \[ \] 验收标准 3 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 3.2 非功能验收 | \[ \] 性能要求 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 3.2 非功能验收 | \[ \] 安全要求 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 3.2 非功能验收 | \[ \] 兼容性要求 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 4.1 In Scope | 功能点 1 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 4.1 In Scope | 功能点 2 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 4.1 In Scope | 功能点 3 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 4.2 Out of Scope | 非功能点 1 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 4.2 Out of Scope | 非功能点 2 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 6. 相关文档 | 设计文档 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+| requirement: docs/changes/implementation-mapper-traceability/prd.md → 6. 相关文档 | 执行计划 | F:/ai-code/openflow/tests/harden/complexity.test.ts; F:/ai-code/openflow/tests/harden/findings.test.ts; F:/ai-code/openflow/tests/harden/command.test.ts | file-level fallback | F:/ai-code/openflow/tests/harden/complexity.test.ts \(modified\); F:/ai-code/openflow/tests/harden/findings.test.ts \(created\); F:/ai-code/openflow/tests/harden/command.test.ts \(created\) | pending acceptance/doc updates recorded \(166\) |
+
+
+## 3. 验证与结论
+
+**验证证据**: pending acceptance/doc updates recorded (166)
+

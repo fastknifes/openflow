@@ -1,8 +1,12 @@
 import type { Hooks } from '@opencode-ai/plugin'
 import type { OpenFlowContext } from '../types.js'
 import { handleBrainstorm } from '../commands/brainstorm.js'
+import { handleArchive, handleInit, handleStatus, handleConfig, handleVerify, handleMigrateDocs, handleHarden, handleIssue } from '../commands/index.js'
+import { handleChange } from '../commands/change.js'
+import { readDesignContextPacket } from '../commands/writing-plan.js'
 import { normalizeBrainstormSession, isAwaitingFormalAnswer } from '../phases/brainstorm/state-machine.js'
 import { createAcceptanceHook } from './acceptance.js'
+import { getHardenSuggestion } from './acceptance-prompt.js'
 import {
   appendGuardMessage,
   clearRecentBrainstormCompletion,
@@ -34,7 +38,176 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     const message = extractMessageText(rawOutput)
     if (!message) return
 
+    // OpenFlow slash-command dispatch — intercept BEFORE continuation/suggestion logic
+    if (message.trim().startsWith('/openflow-')) {
+      const trimmed = message.trim()
+
+      // /openflow-brainstorm <feature>
+      const brainstormMatch = trimmed.match(/^\/openflow-brainstorm(?:\s+(.+))?$/)
+      if (brainstormMatch) {
+        const feature = brainstormMatch[1]?.trim()
+        try {
+          const result = await handleBrainstorm(ctx, feature || undefined, undefined, input)
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // /openflow-change <feature> "<description>"
+      const changeMatch = trimmed.match(/^\/openflow-change\s+(\S+)(?:\s+("[^"]*"|'[^']*'))?$/)
+      if (changeMatch) {
+        const feature = changeMatch[1]?.trim()
+        const desc = changeMatch[2]?.replace(/^["']|["']$/g, '').trim()
+        try {
+          const result = await handleChange(ctx, feature!, desc || undefined)
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // /openflow-verify <feature>
+      const verifyMatch = trimmed.match(/^\/openflow-verify(?:\s+(.+))?$/)
+      if (verifyMatch) {
+        const feature = verifyMatch[1]?.trim()
+        const result = await handleVerify(ctx, feature || undefined)
+        appendGuardMessage(output, result)
+        return
+      }
+
+      // /openflow-archive <feature>
+      const archiveMatch = trimmed.match(/^\/openflow-archive(?:\s+(.+))?$/)
+      if (archiveMatch) {
+        const feature = archiveMatch[1]?.trim()
+        if (!feature) {
+          appendGuardMessage(output, 'Feature name is required. Usage: /openflow-archive <feature-name>')
+          return
+        }
+        try {
+          const result = await handleArchive(ctx, feature)
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // /openflow-init
+      if (trimmed === '/openflow-init') {
+        try {
+          const result = await handleInit(ctx)
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // /openflow-status
+      if (trimmed === '/openflow-status') {
+        const result = handleStatus(ctx)
+        appendGuardMessage(output, result)
+        return
+      }
+
+      // /openflow-config
+      if (trimmed === '/openflow-config') {
+        const result = handleConfig(ctx)
+        appendGuardMessage(output, result)
+        return
+      }
+
+      // /openflow-migrate-docs [--sourceDir <path>] [--targetDir <path>] [--dryRun] [--answer <text>]
+      if (trimmed.startsWith('/openflow-migrate-docs')) {
+        const migrateArgs: Record<string, string | boolean> = {}
+        let migrateKey: string | null = null
+        for (const token of trimmed.slice('/openflow-migrate-docs'.length).trim().split(/\s+/).filter(Boolean)) {
+          if (token.startsWith('--')) {
+            migrateKey = token.slice(2)
+            migrateArgs[migrateKey] = true
+          } else if (migrateKey) {
+            migrateArgs[migrateKey] = token
+            migrateKey = null
+          }
+        }
+        try {
+          const parsedMigrateArgs: { sourceDir?: string; targetDir?: string; dryRun?: boolean; answer?: string } = {}
+          if (typeof migrateArgs.sourceDir === 'string') parsedMigrateArgs.sourceDir = migrateArgs.sourceDir
+          if (typeof migrateArgs.targetDir === 'string') parsedMigrateArgs.targetDir = migrateArgs.targetDir
+          parsedMigrateArgs.dryRun = migrateArgs.dryRun === true || migrateArgs.dryRun === 'true'
+          if (typeof migrateArgs.answer === 'string') parsedMigrateArgs.answer = migrateArgs.answer
+          const result = await handleMigrateDocs(ctx, parsedMigrateArgs)
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // /openflow-writing-plan <feature>
+      const writingPlanMatch = trimmed.match(/^\/openflow-writing-plan(?:\s+(.+))?$/)
+      if (writingPlanMatch) {
+        const feature = writingPlanMatch[1]?.trim()
+        if (!feature) {
+          appendGuardMessage(output, 'Feature name is required. Usage: /openflow-writing-plan <feature-name>')
+          return
+        }
+        try {
+          const contextPacket = await readDesignContextPacket(ctx.directory, feature)
+          const result = contextPacket
+            ? `## Writing Plan Context\n\nFeature: \`${feature}\`\n\n${contextPacket}`
+            : `No design context found for feature \`${feature}\`. Run \`/openflow-brainstorm ${feature}\` first.`
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // /openflow-harden <feature> [--full] [--mode <mode>]
+      const hardenMatch = trimmed.match(/^\/openflow-harden(?:\s+(.+))?$/)
+      if (hardenMatch) {
+        const hardenArgs = hardenMatch[1]?.trim() ?? ''
+        const hardenFeature = hardenArgs.split(/\s+--/)[0]?.trim()
+        const full = hardenArgs.includes('--full')
+        try {
+          const result = await handleHarden(ctx, hardenFeature || undefined, { full })
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // /openflow-issue <feature-or-description>
+      const issueMatch = trimmed.match(/^\/openflow-issue(?:\s+(.+))?$/)
+      if (issueMatch) {
+        const feature = issueMatch[1]?.trim()
+        try {
+          const result = await handleIssue(ctx, feature || undefined)
+          appendGuardMessage(output, result)
+        } catch (err) {
+          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
+        }
+        return
+      }
+
+      // Unknown /openflow-* command — pass through
+    }
+
     await acceptanceHook({ sessionID: input.sessionID, message })
+
+    // Suggest /openflow-harden for complex features after implementation
+    const acceptanceState = await import('../utils/acceptance-state.js').then(m => m.loadAcceptanceState(ctx.directory))
+    if (acceptanceState?.phase === 'acceptance' && acceptanceState.feature) {
+      const hardenSuggestion = await getHardenSuggestion(ctx, acceptanceState.feature)
+      if (hardenSuggestion) {
+        appendGuardMessage(output, hardenSuggestion)
+      }
+    }
 
     if (!ctx.config.brainstorming.enabled) {
       return

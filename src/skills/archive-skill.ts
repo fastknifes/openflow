@@ -3,8 +3,8 @@
 export function getArchiveSkill(): SkillInfo {
   return {
     name: 'openflow-archive',
-    description: 'Use when a feature is complete and ready to be archived. Generates an implementation mapper with traceability from Session API.',
-    content: `# OpenFlow Archive Skill
+    description: 'Manual command reference for /openflow-archive when a verified feature is ready to be archived and mapped for traceability.',
+    content: `# OpenFlow Archive Command Reference
 
 ## Overview
 Archive completed features with a frozen implementation mapper and copied source artifacts.

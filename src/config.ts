@@ -152,6 +152,11 @@ function validateConfigValue(config: unknown): boolean {
     if (ac.drift_detection !== undefined && typeof ac.drift_detection !== 'boolean') return false
   }
 
+  if (c.writingPlan !== undefined) {
+    const wp = c.writingPlan as Record<string, unknown>
+    if (wp.enabled !== undefined && typeof wp.enabled !== 'boolean') return false
+  }
+
   return true
 }
 

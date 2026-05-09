@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { type CurrentPromotionSuggestion, type OpenFlowContext, type PhasedChanges, VerifyReadinessStatus } from '../types.js'
+import { type AcceptanceState, type CurrentPromotionSuggestion, type OpenFlowContext, type PhasedChanges, VerifyReadinessStatus } from '../types.js'
 import { sanitizeFeatureName, createSafePath, escapeMarkdown } from '../utils/security.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { fileExists } from '../hooks/file-utils.js'
@@ -16,6 +16,13 @@ import { cleanBuild } from '../utils/build-cleaner.js'
 import { getSessionFileChanges, getPhasedFileChanges } from '../utils/session.js'
 import { detectDrift } from '../utils/drift-detector.js'
 import { logger } from '../utils/logger.js'
+import {
+  detectMode,
+  ISSUE_CLARIFICATION_FILENAME,
+  ISSUE_RESOLUTION_FILENAME,
+  PROMOTION_CANDIDATE_FILENAME,
+  type IssueMode,
+} from '../utils/issue-utils.js'
 import {
   ensureArchivePath,
   getChangeWorkspacePath,
@@ -36,6 +43,7 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   }
 
   const sanitizedFeature = sanitizeFeatureName(feature)
+  const archiveMode = await detectMode(ctx, sanitizedFeature)
 
   const planPath = createSafePath(ctx.directory, '.sisyphus', 'plans', `${sanitizedFeature}.md`)
   const sourceChangePlanPath = await getChangePlansPath(ctx.directory, sanitizedFeature)
@@ -53,6 +61,16 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const requirementsExists = Boolean(sourceRequirementsPath)
 
   const acceptanceState = await loadAcceptanceState(ctx.directory)
+  const issueClarificationSourcePath = await resolvePreferredExistingPath(ctx.directory, [
+    acceptanceState?.issueClarificationPath,
+    path.join(sourceChangeWorkspacePath, ISSUE_CLARIFICATION_FILENAME),
+  ])
+  const promotionCandidateSourcePath = await resolvePreferredExistingPath(ctx.directory, [
+    acceptanceState?.promotionCandidatePath,
+    path.join(sourceChangeWorkspacePath, PROMOTION_CANDIDATE_FILENAME),
+  ])
+  const issueClarificationExists = issueClarificationSourcePath !== null
+  const promotionCandidateExists = promotionCandidateSourcePath !== null
   const hasAcceptanceChanges = acceptanceState !== null && acceptanceState.pendingDocUpdates.length > 0
   const readiness = acceptanceState?.readiness
   const useLegacyReadinessFallback = acceptanceState !== null && readiness === undefined
@@ -115,11 +133,22 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceRequirementsPath)
   }
 
+  if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
+    await fs.copyFile(issueClarificationSourcePath, path.join(archiveDir, ISSUE_CLARIFICATION_FILENAME))
+    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, issueClarificationSourcePath)
+  }
+
+  if ((archiveMode === 'issue' || archiveMode === 'mixed') && promotionCandidateSourcePath) {
+    await fs.copyFile(promotionCandidateSourcePath, path.join(archiveDir, PROMOTION_CANDIDATE_FILENAME))
+    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, promotionCandidateSourcePath)
+  }
+
   if (await fileExists(sourceArtifactRoot)) {
     const entries = await fs.readdir(sourceArtifactRoot, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isFile()) continue
       if (!['proposal.md', 'decisions.md'].includes(entry.name)) continue
+      if (entry.name === PROMOTION_CANDIDATE_FILENAME) continue
       const artifactSourcePath = path.join(sourceArtifactRoot, entry.name)
       await fs.copyFile(artifactSourcePath, path.join(archiveDir, entry.name))
       trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, artifactSourcePath)
@@ -138,9 +167,35 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     acceptanceState,
     ...(phasedChanges ? { phasedChanges } : {}),
     ...(driftItems.length > 0 ? { driftItems } : {}),
+    ...(issueClarificationSourcePath ? { issueClarificationPath: issueClarificationSourcePath } : {}),
+    ...(promotionCandidateSourcePath ? { promotionCandidatePath: promotionCandidateSourcePath } : {}),
   }
   
   await generateAndSaveImplementationMapper(implementationMapperOptions)
+
+  let issueResolutionGenerated = false
+  let governanceDecisionTargetPath: string | null = null
+
+  if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
+    await writeIssueResolution({
+      projectDir: ctx.directory,
+      archiveDir,
+      feature: sanitizedFeature,
+      mode: archiveMode,
+      issueClarificationPath: issueClarificationSourcePath,
+      promotionCandidatePath: promotionCandidateSourcePath,
+      acceptanceState,
+      changes,
+    })
+    issueResolutionGenerated = true
+
+    governanceDecisionTargetPath = await applyGovernancePromotionIfConfirmed(
+      ctx.directory,
+      sanitizedFeature,
+      acceptanceState,
+      promotionCandidateSourcePath,
+    )
+  }
 
   const promotionSuggestions = await buildPromotionSuggestions({
     projectDir: ctx.directory,
@@ -171,7 +226,12 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     autoPromoteCurrent,
     acceptanceState?.phase === 'verification_pending' && !acceptanceState.verificationCompletedAt,
     useLegacyReadinessFallback,
-    acceptanceState?.archiveUsedDocUpdateConfirmPath === true
+    acceptanceState?.archiveUsedDocUpdateConfirmPath === true,
+    archiveMode,
+    issueClarificationExists,
+    promotionCandidateExists,
+    issueResolutionGenerated,
+    governanceDecisionTargetPath,
   )
 }
 
@@ -458,6 +518,204 @@ async function cleanupBuildData(projectDir: string) {
   }
 }
 
+async function resolvePreferredExistingPath(projectDir: string, candidatePaths: Array<string | undefined | null>): Promise<string | null> {
+  for (const candidatePath of candidatePaths) {
+    if (!candidatePath) continue
+
+    const normalizedPath = path.isAbsolute(candidatePath)
+      ? candidatePath
+      : createSafePath(projectDir, ...candidatePath.split(/[\\/]+/).filter(Boolean))
+
+    if (await fileExists(normalizedPath)) {
+      return normalizedPath
+    }
+  }
+
+  return null
+}
+
+async function applyGovernancePromotionIfConfirmed(
+  projectDir: string,
+  feature: string,
+  acceptanceState: AcceptanceState | null,
+  promotionCandidatePath: string | null,
+): Promise<string | null> {
+  if (!promotionCandidatePath) return null
+  if (acceptanceState?.governancePromotionStatus !== 'confirmed') return null
+
+  const decisionsDir = createSafePath(projectDir, 'docs', 'decisions')
+  const targetPath = createSafePath(projectDir, 'docs', 'decisions', `${feature}.md`)
+  await fs.mkdir(decisionsDir, { recursive: true })
+  await fs.copyFile(promotionCandidatePath, targetPath)
+  return targetPath
+}
+
+async function writeIssueResolution(options: {
+  projectDir: string
+  archiveDir: string
+  feature: string
+  mode: IssueMode
+  issueClarificationPath: string
+  promotionCandidatePath: string | null
+  acceptanceState: AcceptanceState | null
+  changes: Array<{ filePath: string; tool: 'write' | 'edit'; timestamp?: number }>
+}): Promise<void> {
+  const {
+    projectDir,
+    archiveDir,
+    feature,
+    mode,
+    issueClarificationPath,
+    promotionCandidatePath,
+    acceptanceState,
+    changes,
+  } = options
+
+  const issueClarification = await fs.readFile(issueClarificationPath, 'utf-8')
+  const clarificationSections = parseMarkdownSections(issueClarification)
+  const promotionCandidate = promotionCandidatePath && await fileExists(promotionCandidatePath)
+    ? await fs.readFile(promotionCandidatePath, 'utf-8')
+    : null
+  const promotionSections = promotionCandidate ? parseMarkdownSections(promotionCandidate) : new Map<string, string>()
+  const verifyResult = acceptanceState?.verifyResult
+  const currentPromotions = acceptanceState?.pendingDocUpdates ?? []
+  const changedFiles = changes.length > 0
+    ? changes.map(change => `- \`${escapeMarkdown(change.filePath)}\` (${change.tool})`).join('\n')
+    : '- No tracked file changes were recorded.'
+  const semanticContractParts = [
+    findSectionContent(clarificationSections, 'Requirement Clarification'),
+    findSectionContent(clarificationSections, 'Constraint Clarification'),
+    findSectionContent(clarificationSections, 'Semantic Alignment'),
+  ].filter(Boolean)
+
+  const governanceLines: string[] = []
+  if (currentPromotions.length > 0) {
+    governanceLines.push('### Confirmed Current Facts')
+    governanceLines.push(currentPromotions.map((update: { file: string; reason?: string }) => `- \`${escapeMarkdown(update.file)}\`${update.reason ? ` — ${escapeMarkdown(update.reason)}` : ''}`).join('\n'))
+    governanceLines.push('')
+  }
+
+  governanceLines.push('### Global Rule Promotion')
+  governanceLines.push(`- status: ${escapeMarkdown(acceptanceState?.governancePromotionStatus ?? 'none')}`)
+  if (promotionCandidatePath) {
+    governanceLines.push(`- candidate archived at: \`${escapeMarkdown(path.join(archiveDir, PROMOTION_CANDIDATE_FILENAME))}\``)
+  }
+  if (acceptanceState?.governancePromotionStatus === 'confirmed' && promotionCandidatePath) {
+    governanceLines.push(`- promoted decision path: \`${escapeMarkdown(path.relative(projectDir, createSafePath(projectDir, 'docs', 'decisions', `${feature}.md`)) || `docs/decisions/${feature}.md`)}\``)
+  } else if (promotionCandidatePath) {
+    governanceLines.push('- candidate remains pending and was not written to `docs/decisions/*`')
+  } else {
+    governanceLines.push('- no governance candidate was recorded for this issue')
+  }
+  const proposedDecision = findSectionContent(promotionSections, 'Proposed Decision')
+  if (proposedDecision) {
+    governanceLines.push('')
+    governanceLines.push('### Proposed Decision Snapshot')
+    governanceLines.push(proposedDecision)
+  }
+
+  const residualRiskLines: string[] = []
+  if (verifyResult?.reasonCodes && verifyResult.reasonCodes.length > 0) {
+    residualRiskLines.push(verifyResult.reasonCodes.map((code: string) => `- ${escapeMarkdown(code)}`).join('\n'))
+  }
+  if (acceptanceState?.readiness === VerifyReadinessStatus.ReadyWithDocUpdates && currentPromotions.length > 0) {
+    residualRiskLines.push('- Archive completed through the doc-update confirmation path; ensure promoted current docs stay aligned.')
+  }
+  if (residualRiskLines.length === 0) {
+    residualRiskLines.push('- No additional residual risk was recorded in the archive inputs.')
+  }
+
+  const rootCauseLines: string[] = []
+  if (acceptanceState?.primaryClassification) {
+    rootCauseLines.push(`- primary classification: ${escapeMarkdown(acceptanceState.primaryClassification)}`)
+  }
+  if (acceptanceState?.classifications && acceptanceState.classifications.length > 0) {
+    rootCauseLines.push(`- classifications considered: ${escapeMarkdown(acceptanceState.classifications.join(', '))}`)
+  }
+  rootCauseLines.push(changes.length > 0
+    ? '- Root cause was addressed in the tracked implementation changes listed below.'
+    : '- Root cause was resolved without tracked code changes or the change tracker did not capture file edits.')
+
+  const verificationLines: string[] = []
+  verificationLines.push(`- readiness: ${escapeMarkdown(acceptanceState?.readiness ?? 'unknown')}`)
+  if (verifyResult?.verifiedAt) {
+    verificationLines.push(`- verified_at: ${escapeMarkdown(verifyResult.verifiedAt)}`)
+  }
+  if (verifyResult?.constraintsChecked && verifyResult.constraintsChecked.length > 0) {
+    verificationLines.push(`- checks: ${verifyResult.constraintsChecked.map((check: string) => `\`${escapeMarkdown(check)}\``).join(', ')}`)
+  }
+  verificationLines.push(verifyResult?.evidenceSummary
+    ? `- summary: ${escapeMarkdown(verifyResult.evidenceSummary)}`
+    : '- summary: No persisted verify evidence summary was found in acceptance state.')
+
+  const out = `# Issue Resolution
+
+## Symptom
+${findSectionContent(clarificationSections, 'Issue Intake') ?? `- Archived issue: \`${escapeMarkdown(feature)}\``}
+
+## Evidence
+${findSectionContent(clarificationSections, 'Evidence Investigation') ?? (verifyResult?.evidenceSummary ? escapeMarkdown(verifyResult.evidenceSummary) : '- No evidence notes were captured in issue clarification.')}
+
+## Semantic Contract
+${semanticContractParts.length > 0 ? semanticContractParts.join('\n\n') : '- No explicit semantic contract section was found in issue clarification.'}
+
+## Root Cause
+${rootCauseLines.join('\n')}
+
+## Fix Decision
+${findSectionContent(clarificationSections, 'Next Action Gate') ?? '- No explicit fix decision was captured in the issue clarification output.'}
+
+## Implementation Summary
+- archive mode: ${escapeMarkdown(mode)}
+- changed files:
+${changedFiles}
+
+## Verification Evidence
+${verificationLines.join('\n')}
+
+## Governance Promotion
+${governanceLines.join('\n')}
+
+## Residual Risk
+${residualRiskLines.join('\n')}
+`
+
+  await fs.writeFile(path.join(archiveDir, ISSUE_RESOLUTION_FILENAME), out, 'utf-8')
+}
+
+function parseMarkdownSections(markdown: string): Map<string, string> {
+  const sectionRegex = /^(#{2,3})\s+(.+)$/gm
+  const matches = [...markdown.matchAll(sectionRegex)]
+  const sections = new Map<string, string>()
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index]
+    if (!match || match.index === undefined) continue
+
+    const heading = match[2]?.trim()
+    if (!heading) continue
+
+    const start = match.index + match[0].length
+    const end = index + 1 < matches.length && matches[index + 1]?.index !== undefined
+      ? matches[index + 1]!.index
+      : markdown.length
+    const content = markdown.slice(start, end).trim()
+    sections.set(heading, content)
+  }
+
+  return sections
+}
+
+function findSectionContent(sections: Map<string, string>, label: string): string | null {
+  for (const [heading, content] of sections.entries()) {
+    if (heading.includes(label)) {
+      return content || null
+    }
+  }
+
+  return null
+}
+
 function formatArchiveResult(
   feature: string,
   archiveDir: string,
@@ -471,7 +729,12 @@ function formatArchiveResult(
   autoPromoteCurrent: boolean,
   verificationPending: boolean,
   legacyReadinessWarning: boolean,
-  docUpdateConfirmUsed: boolean
+  docUpdateConfirmUsed: boolean,
+  archiveMode: IssueMode,
+  issueClarificationExists: boolean,
+  promotionCandidateExists: boolean,
+  issueResolutionGenerated: boolean,
+  governanceDecisionTargetPath: string | null,
 ): string {
   const safePath = escapeMarkdown(archiveDir)
   const readinessWarningBlock = legacyReadinessWarning
@@ -479,6 +742,12 @@ function formatArchiveResult(
     : ''
   const docUpdateConfirmBlock = docUpdateConfirmUsed
     ? `\n### Doc Update Confirmation\n- ✅ archive completed through the confirmed doc-update reconciliation path\n`
+    : ''
+  const issueArtifactsBlock = archiveMode === 'issue' || archiveMode === 'mixed'
+    ? `- \`${safePath}/${ISSUE_CLARIFICATION_FILENAME}\` - Issue clarification snapshot${issueClarificationExists ? '' : ' (not found)'}\n- \`${safePath}/${ISSUE_RESOLUTION_FILENAME}\` - Issue resolution archive${issueResolutionGenerated ? '' : ' (not generated)'}\n${promotionCandidateExists ? `- \`${safePath}/${PROMOTION_CANDIDATE_FILENAME}\` - Governance promotion candidate snapshot\n` : ''}`
+    : ''
+  const governanceBlock = archiveMode === 'issue' || archiveMode === 'mixed'
+    ? `\n### Governance Promotion\n- decision applied: ${governanceDecisionTargetPath ? `✅ ${escapeMarkdown(governanceDecisionTargetPath)}` : '❌ none'}\n`
     : ''
   
 
@@ -494,6 +763,7 @@ function formatArchiveResult(
 - Plan: ${planExists ? '✅' : '❌'}
 - Implementation mapper: ✅
 - Acceptance changes: ${hasAcceptanceChanges ? '✅' : '❌'}
+- Archive mode: ${escapeMarkdown(archiveMode)}
 
 ### Location
 ${safePath}
@@ -503,11 +773,13 @@ ${safePath}
 - \`${safePath}/design.md\` - Design document (if exists)
 - \`${safePath}/prd.md\` - Requirements / PRD document (if exists)
 - \`${safePath}/plan.md\` - Execution plan snapshot (if exists)
+${issueArtifactsBlock}
 
 ### Verification
 - completion verification pending: ${verificationPending ? '⚠️ yes (non-blocking)' : '✅ no'}
 ${readinessWarningBlock}
 ${docUpdateConfirmBlock}
+${governanceBlock}
 
 ### Current Promotion
 - suggestions: ${promotionSuggestions.length}

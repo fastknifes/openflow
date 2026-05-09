@@ -210,6 +210,29 @@ describe('chat-message hook', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('dispatches /openflow-issue command and returns early', async () => {
+    const root = join(process.cwd(), '.test-chat-issue-dispatch')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const ctx = createContext(root)
+    const hook = createChatMessageHook(ctx)
+    const output = createHookOutput('/openflow-issue some-problem')
+
+    await hook(createInput('session-issue'), output)
+
+    // Should dispatch to handleIssue and return clarification report
+    expect((output.parts[0] as { text?: string }).text).toContain('## OpenFlow Issue Clarification')
+    expect((output.parts[0] as { text?: string }).text).toContain('some-problem')
+    expect((output.parts[0] as { text?: string }).text).toContain('### 1. Issue Intake')
+    // Should not contain brainstorm suggestion
+    expect((output.parts[0] as { text?: string }).text).not.toContain('Brainstorm Suggested')
+    // Should not contain the old placeholder
+    expect((output.parts[0] as { text?: string }).text).not.toContain('not yet implemented')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('runs acceptance detection even when brainstorming is disabled', async () => {
     const root = join(process.cwd(), '.test-chat-acceptance-detection')
     await rm(root, { recursive: true, force: true })
@@ -228,7 +251,8 @@ describe('chat-message hook', () => {
     expect(state?.phase).toBe('acceptance')
     expect(state?.feature).toBe('demo-feature')
     expect(state?.sessionID).toBe('session-acceptance')
-    expect(output.parts).toHaveLength(1)
+    // Harden suggestion may append an additional guard message part
+    expect(output.parts.length).toBeGreaterThanOrEqual(1)
 
     await rm(root, { recursive: true, force: true })
   })

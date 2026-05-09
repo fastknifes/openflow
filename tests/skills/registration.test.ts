@@ -17,33 +17,22 @@ function createContext(directory: string): OpenFlowContext {
 }
 
 describe('skill registration', () => {
-  test('registers brainstorm as a discovered SKILL.md entry', async () => {
+  test('registers writing-plan as the only discovered OpenFlow SKILL.md entry', async () => {
     const root = join(process.cwd(), '.test-skill-registration')
     await rm(root, { recursive: true, force: true })
 
     await registerSkills(createContext(root))
 
-    const globalSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow', 'brainstorm', 'SKILL.md')
+    const globalSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-writing-plan', 'SKILL.md')
     const content = await readFile(globalSkillPath, 'utf-8')
 
-    expect(content).toContain('name: brainstorm')
-    expect(content).toContain('description: Use when starting or continuing feature design clarification')
-    expect(content).toContain('/openflow-brainstorm <feature>')
-    expect(content).toContain('internal OpenFlow `openflow-brainstorm` tool')
-  })
+    expect(content).toContain('name: openflow-writing-plan')
+    expect(content).toContain('description:')
+    expect(content).toContain('development plan')
+    expect(content).toContain('/openflow-writing-plan <feature>')
+    expect(content).toContain('openflow-writing-plan <feature>')
 
-  test('registers init as a discovered SKILL.md entry', async () => {
-    const root = join(process.cwd(), '.test-skill-registration-init')
-    await rm(root, { recursive: true, force: true })
-
-    await registerSkills(createContext(root))
-
-    const globalSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow', 'init', 'SKILL.md')
-    const content = await readFile(globalSkillPath, 'utf-8')
-
-    expect(content).toContain('name: init')
-    expect(content).toContain('description: Use when initializing or refreshing the root AGENTS.md')
-    expect(content).toContain('/openflow-init')
-    expect(content).toContain('internal OpenFlow `openflow-init` tool')
+    const brainstormSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-brainstorm', 'SKILL.md')
+    await expect(readFile(brainstormSkillPath, 'utf-8')).rejects.toBeDefined()
   })
 })

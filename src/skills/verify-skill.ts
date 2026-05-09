@@ -3,8 +3,8 @@
 export function getVerifySkill(): SkillInfo {
   return {
     name: 'openflow-verify',
-    description: 'Use when about to claim work is complete, fixed, or passing - runs the /openflow-verify command to produce Evidence and Readiness before making any success claims.',
-    content: `# OpenFlow Verify Command
+    description: 'Manual command reference for /openflow-verify when the user wants Evidence and Readiness before any completion claim.',
+    content: `# OpenFlow Verify Command Reference
 
 ## Overview
 

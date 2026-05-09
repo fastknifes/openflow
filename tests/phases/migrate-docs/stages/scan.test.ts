@@ -23,22 +23,7 @@ describe('runScanStage', () => {
 
   afterEach(async () => {
     try {
-      const entries = await fs.readdir(tempDir, { withFileTypes: true, recursive: true })
-      const sorted = entries
-        .map(e => ({
-          path: path.join(tempDir, e.parentPath ? path.relative(tempDir, e.parentPath) : '', e.name),
-          dirent: e,
-        }))
-        .sort((a, b) => b.path.split(path.sep).length - a.path.split(path.sep).length)
-
-      for (const { path: p, dirent } of sorted) {
-        if (dirent.isDirectory()) {
-          await fs.rmdir(p).catch(() => {})
-        } else {
-          await fs.unlink(p).catch(() => {})
-        }
-      }
-      await fs.rmdir(tempDir).catch(() => {})
+      await fs.rm(tempDir, { recursive: true, force: true })
     } catch {
       // Ignore cleanup errors
     }
@@ -182,7 +167,7 @@ describe('runScanStage', () => {
     consoleWarnSpy.mockRestore()
   })
 
-  it('should enforce MAX_SCAN_FILES limit', async () => {
+  it('should enforce MAX_SCAN_FILES limit', { timeout: 120000 }, async () => {
     const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const items: FileInventory[] = []

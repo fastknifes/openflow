@@ -3,13 +3,13 @@ import type { SkillInfo } from './types.js'
 export function getInitSkill(): SkillInfo {
   return {
     name: 'openflow-init',
-    description: 'Use when initializing or refreshing the root AGENTS.md with OpenFlow docs navigation guidance.',
-    content: `# OpenFlow Init Skill
+    description: 'Manual command reference for /openflow-init when the user wants to initialize or refresh the root AGENTS.md with OpenFlow docs navigation guidance.',
+    content: `# OpenFlow Init Command Reference
 
 ## Overview
 
-Use this as the public entrypoint when you need to initialize or refresh the root \`AGENTS.md\` file with OpenFlow's managed docs guide.
-This skill should execute the internal OpenFlow \`openflow-init\` tool immediately when invoked.
+This help text documents the manual \`/openflow-init\` command for initializing or refreshing the root \`AGENTS.md\` file with OpenFlow's managed docs guide.
+When the user runs that command, OpenFlow should execute the internal \`openflow-init\` tool immediately.
 
 ## Public Entry
 

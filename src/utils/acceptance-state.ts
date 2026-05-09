@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { VerifyReadinessStatus, type AcceptanceState, type ArchiveDocUpdateConfirmationStatus, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type ArchiveDocUpdateConfirmationStatus, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus } from '../types.js'
 import { getAcceptanceStatePath } from '../config.js'
 import { logger } from './logger.js'
 
@@ -26,6 +26,7 @@ const FIELD_PREFIXES = {
   archiveUsedDocUpdateConfirmPath: 'archiveUsedDocUpdateConfirmPath:',
   archiveDocUpdateConfirmationStatus: 'archiveDocUpdateConfirmationStatus:',
   archiveDocUpdateConfirmedAt: 'archiveDocUpdateConfirmedAt:',
+  acceptedFailures: 'acceptedFailures:',
   promotionApplied: 'promotionApplied:',
   promotionDecidedAt: 'promotionDecidedAt:',
   promotionAppliedAt: 'promotionAppliedAt:',
@@ -35,6 +36,14 @@ const FIELD_PREFIXES = {
   readinessEvidenceSummary: 'readinessEvidenceSummary:',
   readinessConstraintsChecked: 'readinessConstraintsChecked:',
   readinessVerifiedAt: 'readinessVerifiedAt:',
+  mode: 'mode:',
+  issueSlug: 'issueSlug:',
+  rawIssue: 'rawIssue:',
+  primaryClassification: 'primaryClassification:',
+  classifications: 'classifications:',
+  governancePromotionStatus: 'governancePromotionStatus:',
+  issueClarificationPath: 'issueClarificationPath:',
+  promotionCandidatePath: 'promotionCandidatePath:',
 } as const
 
 const PROMOTION_SUGGESTIONS_HEADER = '## Current Promotion Suggestions'
@@ -101,6 +110,10 @@ function parseStateFile(content: string): AcceptanceState | null {
     } else if (trimmed.startsWith(FIELD_PREFIXES.archiveDocUpdateConfirmedAt)) {
       result.archiveDocUpdateConfirmedAt = extractFieldValue(trimmed, FIELD_PREFIXES.archiveDocUpdateConfirmedAt)
       inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.acceptedFailures)) {
+      const value = extractFieldValue(trimmed, FIELD_PREFIXES.acceptedFailures)
+      result.acceptedFailures = value === 'true'
+      inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.promotionApplied)) {
       const value = extractFieldValue(trimmed, FIELD_PREFIXES.promotionApplied)
       result.promotionApplied = value === 'true'
@@ -134,6 +147,30 @@ function parseStateFile(content: string): AcceptanceState | null {
     } else if (trimmed.startsWith(FIELD_PREFIXES.readinessVerifiedAt)) {
       readinessVerifiedAt = extractFieldValue(trimmed, FIELD_PREFIXES.readinessVerifiedAt)
       hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.mode)) {
+      result.mode = extractFieldValue(trimmed, FIELD_PREFIXES.mode) as 'feature' | 'issue'
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.issueSlug)) {
+      result.issueSlug = extractFieldValue(trimmed, FIELD_PREFIXES.issueSlug)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.rawIssue)) {
+      result.rawIssue = extractFieldValue(trimmed, FIELD_PREFIXES.rawIssue)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.primaryClassification)) {
+      result.primaryClassification = extractFieldValue(trimmed, FIELD_PREFIXES.primaryClassification) as IssueClassification
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.classifications)) {
+      result.classifications = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.classifications)) as IssueClassification[]
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.governancePromotionStatus)) {
+      result.governancePromotionStatus = extractFieldValue(trimmed, FIELD_PREFIXES.governancePromotionStatus) as GovernancePromotionStatus
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.issueClarificationPath)) {
+      result.issueClarificationPath = extractFieldValue(trimmed, FIELD_PREFIXES.issueClarificationPath)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.promotionCandidatePath)) {
+      result.promotionCandidatePath = extractFieldValue(trimmed, FIELD_PREFIXES.promotionCandidatePath)
       inPendingUpdates = false
     } else if (trimmed === PENDING_UPDATES_HEADER) {
       inPendingUpdates = true
@@ -213,6 +250,9 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.archiveDocUpdateConfirmedAt) {
     state.archiveDocUpdateConfirmedAt = result.archiveDocUpdateConfirmedAt
   }
+  if (result.acceptedFailures !== undefined) {
+    state.acceptedFailures = result.acceptedFailures
+  }
   if (result.promotionSuggestions && result.promotionSuggestions.length > 0) {
     state.promotionSuggestions = result.promotionSuggestions
   }
@@ -245,6 +285,30 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (state.phase === 'verification_failed' && !state.readiness) {
     state.readiness = VerifyReadinessStatus.NotReady
   }
+
+  // Issue-mode fields (legacy files without mode default to 'feature')
+  state.mode = result.mode || 'feature'
+  if (result.issueSlug) {
+    state.issueSlug = result.issueSlug
+  }
+  if (result.rawIssue) {
+    state.rawIssue = result.rawIssue
+  }
+  if (result.primaryClassification) {
+    state.primaryClassification = result.primaryClassification
+  }
+  if (result.classifications && result.classifications.length > 0) {
+    state.classifications = result.classifications
+  }
+  if (result.governancePromotionStatus) {
+    state.governancePromotionStatus = result.governancePromotionStatus
+  }
+  if (result.issueClarificationPath) {
+    state.issueClarificationPath = result.issueClarificationPath
+  }
+  if (result.promotionCandidatePath) {
+    state.promotionCandidatePath = result.promotionCandidatePath
+  }
   
   return state
 }
@@ -271,6 +335,9 @@ function serializeState(state: AcceptanceState): string {
   }
   pushOptionalLine(lines, FIELD_PREFIXES.archiveDocUpdateConfirmationStatus, state.archiveDocUpdateConfirmationStatus)
   pushOptionalLine(lines, FIELD_PREFIXES.archiveDocUpdateConfirmedAt, state.archiveDocUpdateConfirmedAt)
+  if (state.acceptedFailures !== undefined) {
+    lines.push(`${FIELD_PREFIXES.acceptedFailures} ${state.acceptedFailures}`)
+  }
   if (state.promotionApplied !== undefined) {
     lines.push(`${FIELD_PREFIXES.promotionApplied} ${state.promotionApplied}`)
   }
@@ -284,6 +351,16 @@ function serializeState(state: AcceptanceState): string {
     pushOptionalLine(lines, FIELD_PREFIXES.readinessConstraintsChecked, state.verifyResult.constraintsChecked.join(', '))
     pushOptionalLine(lines, FIELD_PREFIXES.readinessVerifiedAt, state.verifyResult.verifiedAt)
   }
+  pushOptionalLine(lines, FIELD_PREFIXES.mode, state.mode)
+  pushOptionalLine(lines, FIELD_PREFIXES.issueSlug, state.issueSlug)
+  pushOptionalLine(lines, FIELD_PREFIXES.rawIssue, state.rawIssue)
+  pushOptionalLine(lines, FIELD_PREFIXES.primaryClassification, state.primaryClassification)
+  if (state.classifications && state.classifications.length > 0) {
+    pushOptionalLine(lines, FIELD_PREFIXES.classifications, state.classifications.join(', '))
+  }
+  pushOptionalLine(lines, FIELD_PREFIXES.governancePromotionStatus, state.governancePromotionStatus)
+  pushOptionalLine(lines, FIELD_PREFIXES.issueClarificationPath, state.issueClarificationPath)
+  pushOptionalLine(lines, FIELD_PREFIXES.promotionCandidatePath, state.promotionCandidatePath)
   lines.push('')
   
   lines.push(PENDING_UPDATES_HEADER)
@@ -470,4 +547,45 @@ export async function saveVerifyResult(
   state.verifyResult = verifyResult
   await saveAcceptanceState(projectDir, state)
   logger.info('Saved verify result', { feature: state.feature, readiness: verifyResult.readiness })
+}
+
+export interface IssueClarificationState {
+  issueSlug: string
+  rawIssue: string
+  primaryClassification?: IssueClassification
+  classifications?: IssueClassification[]
+  governancePromotionStatus?: GovernancePromotionStatus
+  issueClarificationPath?: string
+  promotionCandidatePath?: string
+}
+
+export async function saveIssueClarificationState(
+  projectDir: string,
+  issueState: IssueClarificationState
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot save issue clarification state: no active acceptance state')
+    return
+  }
+  state.mode = 'issue'
+  state.issueSlug = issueState.issueSlug
+  state.rawIssue = issueState.rawIssue
+  if (issueState.primaryClassification) {
+    state.primaryClassification = issueState.primaryClassification
+  }
+  if (issueState.classifications) {
+    state.classifications = issueState.classifications
+  }
+  if (issueState.governancePromotionStatus) {
+    state.governancePromotionStatus = issueState.governancePromotionStatus
+  }
+  if (issueState.issueClarificationPath) {
+    state.issueClarificationPath = issueState.issueClarificationPath
+  }
+  if (issueState.promotionCandidatePath) {
+    state.promotionCandidatePath = issueState.promotionCandidatePath
+  }
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Saved issue clarification state', { feature: state.feature, issueSlug: issueState.issueSlug })
 }

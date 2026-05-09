@@ -22,6 +22,7 @@ export function handleStatus(ctx: OpenFlowContext): string {
 | TDD Expansion | ${config.tdd.enabled ? '✅' : '❌'} |
 | Verification | ${config.verification.in_plan ? '✅' : '❌'} |
 | Archive | ${config.archive.enabled ? '✅' : '❌'} |
+| Writing Plan | ${config.writingPlan.enabled ? '✅' : '❌'} |
 
 ### Brainstorm Trigger
 - mode: ${escapeMarkdown(config.brainstorming.trigger_mode)}

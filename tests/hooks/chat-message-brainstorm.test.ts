@@ -275,4 +275,103 @@ describe('chat-message brainstorm guidance', () => {
 
     await rm(root, { recursive: true, force: true })
   })
+
+  test('slash-command dispatch: /openflow-brainstorm routes to handler', async () => {
+    const root = join(process.cwd(), '.test-chat-brainstorm-slash-dispatch')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('/openflow-brainstorm my-feature')
+
+    await hook(createInput('session-slash-brainstorm'), output)
+
+    // Dispatch should inject handler result — not the suggestion template
+    expect(firstOutputText(output)).not.toContain('Brainstorm Suggested')
+    // Handler should have produced brainstorm content (first question or session info)
+    expect(firstOutputText(output)).toContain('my-feature')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('slash-command dispatch: /openflow-status routes to handler', async () => {
+    const root = join(process.cwd(), '.test-chat-brainstorm-slash-status')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('/openflow-status')
+
+    await hook(createInput('session-slash-status'), output)
+
+    expect(firstOutputText(output)).toContain('OpenFlow Status')
+    expect(firstOutputText(output)).not.toContain('Brainstorm Suggested')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('slash-command dispatch: /openflow-verify without feature returns help text', async () => {
+    const root = join(process.cwd(), '.test-chat-brainstorm-slash-verify-noarg')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('/openflow-verify')
+
+    await hook(createInput('session-slash-verify-noarg'), output)
+
+    // Should contain the help/error about missing feature, not crash
+    expect(firstOutputText(output)).toContain('active feature is required')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('slash-command dispatch: non-user role with slash text does not dispatch', async () => {
+    const root = join(process.cwd(), '.test-chat-brainstorm-slash-nonuser')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+
+    // Create output with role='system' — dispatch should NOT trigger
+    const output = {
+      message: {
+        id: 'm1',
+        sessionID: 's1',
+        role: 'system' as const,
+        time: { created: Date.now() },
+        agent: 'test',
+        model: { providerID: 'p', modelID: 'm' },
+      },
+      parts: [{ id: 'p1', sessionID: 's1', messageID: 'm1', type: 'text' as const, text: '## OpenFlow: Brainstorm Suggested\n\nRecommended next step before implementation:\n\n```\n/openflow-brainstorm feature-xxx\n```' }],
+    } as Parameters<ReturnType<typeof createChatMessageHook>>[1]
+
+    await hook(createInput('session-nonuser'), output)
+
+    // System-role message should be left untouched — no dispatch, no guard message injected
+    const parts = output.parts as Array<{ text?: string }>
+    expect(parts.length).toBe(1)
+    expect(parts[0].text).toContain('/openflow-brainstorm feature-xxx')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('non-OpenFlow slash command passes through without dispatch', async () => {
+    const root = join(process.cwd(), '.test-chat-brainstorm-slash-passthrough')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('/refactor main')
+
+    await hook(createInput('session-passthrough'), output)
+
+    // Non-openflow slash should not trigger slash-command dispatch.
+    // The original message should remain in output parts (dispatch does not consume it).
+    const parts = output.parts as Array<{ text?: string }>
+    const allText = parts.map(p => p.text ?? '').join('\n')
+    expect(allText).toContain('/refactor main')
+
+    await rm(root, { recursive: true, force: true })
+  })
 })

@@ -3,13 +3,13 @@ import type { SkillInfo } from './types.js'
 export function getMigrateDocsSkill(): SkillInfo {
   return {
     name: 'openflow-migrate-docs',
-    description: 'Use when migrating documentation from other workflow projects (OpenSpec, Spec Kit, Kiro, Cursor, Trae) or non-standard doc directories into OpenFlow\'s standard docs structure. Examples: \'Migrate my OpenSpec docs\', \'Import docs from .kiro directory\', \'Migrate docs from another project\'',
-    content: `# OpenFlow Migrate-Docs Skill
+    description: 'Manual command reference for /openflow-migrate-docs when the user wants to migrate documentation from another workflow project or a non-standard docs directory into OpenFlow\'s standard docs structure.',
+    content: `# OpenFlow Migrate-Docs Command Reference
 
 ## Overview
 
-Use this as the public entrypoint when you need to migrate documentation from another workflow tool or non-standard directory into OpenFlow's standard \`docs/\` structure.
-This skill should drive the internal OpenFlow \`openflow-migrate-docs\` tool through the full migration lifecycle.
+This help text documents the manual \`/openflow-migrate-docs\` command for migrating documentation from another workflow tool or non-standard directory into OpenFlow's standard \`docs/\` structure.
+When the user runs that command, OpenFlow should drive the internal \`openflow-migrate-docs\` tool through the full migration lifecycle.
 
 ## Public Entry
 

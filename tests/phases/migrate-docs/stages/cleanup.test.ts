@@ -167,7 +167,7 @@ describe('runCleanupStage', () => {
 
     it('does NOT generate report in delete mode', async () => {
       await createSourceFile('docs/design.md', '# Design')
-      const state = makeCleanupState('delete')
+      const state = makeCleanupState('delete', { inventory: [makeInventory(sourceDir, 'docs/design.md')] })
 
       await runCleanupStage(state, DELETE_CONFIRMATION_PHRASE, projectDir)
 
@@ -190,7 +190,7 @@ describe('runCleanupStage', () => {
 
     it('returns state advanced to completed', async () => {
       await createSourceFile('docs/design.md', '# Design')
-      const state = makeCleanupState('delete')
+      const state = makeCleanupState('delete', { inventory: [makeInventory(sourceDir, 'docs/design.md')] })
 
       const result = await runCleanupStage(state, DELETE_CONFIRMATION_PHRASE, projectDir)
 
@@ -233,7 +233,7 @@ describe('runCleanupStage', () => {
 
     it('removes source files after move', async () => {
       await createSourceFile('docs/design.md', '# Design')
-      const state = makeCleanupState('move-to-references')
+      const state = makeCleanupState('move-to-references', { inventory: [makeInventory(sourceDir, 'docs/design.md')] })
 
       await runCleanupStage(state, '', projectDir)
 
@@ -242,7 +242,7 @@ describe('runCleanupStage', () => {
 
     it('generates report and manifest', async () => {
       await createSourceFile('docs/design.md', '# Design')
-      const state = makeCleanupState('move-to-references')
+      const state = makeCleanupState('move-to-references', { inventory: [makeInventory(sourceDir, 'docs/design.md')] })
 
       await runCleanupStage(state, '', projectDir)
 
@@ -252,7 +252,7 @@ describe('runCleanupStage', () => {
 
     it('returns state advanced to completed', async () => {
       await createSourceFile('docs/design.md', '# Design')
-      const state = makeCleanupState('move-to-references')
+      const state = makeCleanupState('move-to-references', { inventory: [makeInventory(sourceDir, 'docs/design.md')] })
 
       const result = await runCleanupStage(state, '', projectDir)
 

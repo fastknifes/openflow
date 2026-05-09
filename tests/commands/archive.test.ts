@@ -717,6 +717,205 @@ describe('archive command', () => {
     await rm(testDir, { recursive: true, force: true })
   })
 
+  test('archives issue-only workspace with issue-resolution and keeps unconfirmed governance candidate pending', async () => {
+    const testDir = join(process.cwd(), '.test-archive-issue-mode')
+    await rm(testDir, { recursive: true, force: true })
+
+    const feature = 'issue-only-fix'
+    const changeDir = join(testDir, 'docs', 'changes', feature)
+    await mkdir(changeDir, { recursive: true })
+    await writeFile(
+      join(changeDir, 'issue-clarification.md'),
+      `# Issue Clarification
+
+### 1. Issue Intake
+Invited users fail login after a stale state restore.
+
+### 2. Requirement Clarification
+Invited users must complete login using the latest invite state.
+
+### 3. Constraint Clarification
+Do not change the visible login flow for existing users.
+
+### 4. Evidence Investigation
+Reproduced with a stale invite token cached in memory.
+
+### 5. Semantic Alignment
+The semantic contract requires invite validation before session restore.
+
+### 6. Classification
+bugfix
+
+### 7. Next Action Gate
+Invalidate stale invite state before restoring a session.
+
+### 8. Governance Promotion
+Capture the invite-validation rule as a pending governance candidate.
+`,
+      'utf-8'
+    )
+    await writeFile(
+      join(changeDir, 'promotion-candidate.md'),
+      `# Promotion Candidate
+
+## Source Issue
+invite-state
+
+## Clarified Requirement
+Invite validation must happen before restoring session state.
+
+## Clarified Constraints
+Preserve current user-visible login behavior.
+
+## Proposed Current Update
+docs/current/spec/invite.md
+
+## Proposed Decision
+Always validate invite state freshness before session restore.
+
+## Approval Needed
+User approval required before global adoption.
+
+## Rationale
+Prevents stale state from bypassing semantic checks.
+`,
+      'utf-8'
+    )
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', `${feature}.md`), '# plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260509-000001'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260509-000001', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/invite-session.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-09T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.Ready,
+      pendingDocUpdates: [{ file: 'docs/current/spec/invite.md', timestamp: '2026-05-09T00:00:00.000Z', reason: 'invite semantic rule confirmed' }],
+      mode: 'issue',
+      issueSlug: feature,
+      rawIssue: 'Invited users fail login after stale session restore',
+      primaryClassification: 'bugfix',
+      classifications: ['bugfix'],
+      governancePromotionStatus: 'candidate_created',
+      issueClarificationPath: join(changeDir, 'issue-clarification.md'),
+      promotionCandidatePath: join(changeDir, 'promotion-candidate.md'),
+      verifyResult: {
+        readiness: VerifyReadinessStatus.Ready,
+        reasonCodes: [],
+        evidenceSummary: 'test, lint, and semantic verification all passed for the invite fix.',
+        constraintsChecked: ['test', 'lint', 'semantic-contract'],
+        verifiedAt: '2026-05-09T01:00:00.000Z',
+      },
+    })
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+    expect(result).toContain('Archive mode: issue')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'issue-clarification.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'promotion-candidate.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'issue-resolution.md'))).resolves.toBeNull()
+
+    const resolution = await readFile(join(archiveDir, 'issue-resolution.md'), 'utf-8')
+    expect(resolution).toContain('## Symptom')
+    expect(resolution).toContain('## Evidence')
+    expect(resolution).toContain('## Semantic Contract')
+    expect(resolution).toContain('## Root Cause')
+    expect(resolution).toContain('## Fix Decision')
+    expect(resolution).toContain('## Implementation Summary')
+    expect(resolution).toContain('## Verification Evidence')
+    expect(resolution).toContain('## Governance Promotion')
+    expect(resolution).toContain('## Residual Risk')
+    expect(resolution).toContain('candidate remains pending and was not written to `docs/decisions/*`')
+
+    await expect(access(join(testDir, 'docs', 'decisions', `${feature}.md`))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('promotes confirmed issue governance candidate into docs/decisions', async () => {
+    const testDir = join(process.cwd(), '.test-archive-issue-governance-confirmed')
+    await rm(testDir, { recursive: true, force: true })
+
+    const feature = 'issue-governance-confirmed'
+    const changeDir = join(testDir, 'docs', 'changes', feature)
+    await mkdir(changeDir, { recursive: true })
+    await writeFile(
+      join(changeDir, 'issue-clarification.md'),
+      '# Issue Clarification\n\n### 1. Issue Intake\nSemantic drift in invite validation.\n\n### 7. Next Action Gate\nRestore invite freshness checks.\n',
+      'utf-8'
+    )
+    await writeFile(
+      join(changeDir, 'promotion-candidate.md'),
+      '# Promotion Candidate\n\n## Proposed Decision\nInvite freshness must be validated before session restore.\n',
+      'utf-8'
+    )
+
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260509-000002'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260509-000002', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/invite-validation.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-09T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.Ready,
+      pendingDocUpdates: [],
+      mode: 'issue',
+      issueSlug: feature,
+      rawIssue: 'Semantic drift in invite validation',
+      primaryClassification: 'bugfix',
+      classifications: ['bugfix'],
+      governancePromotionStatus: 'confirmed',
+      issueClarificationPath: join(changeDir, 'issue-clarification.md'),
+      promotionCandidatePath: join(changeDir, 'promotion-candidate.md'),
+      verifyResult: {
+        readiness: VerifyReadinessStatus.Ready,
+        reasonCodes: [],
+        evidenceSummary: 'verification passed',
+        constraintsChecked: ['test'],
+        verifiedAt: '2026-05-09T01:00:00.000Z',
+      },
+    })
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    await handleArchive(ctx, feature)
+
+    const promotedDecision = await readFile(join(testDir, 'docs', 'decisions', `${feature}.md`), 'utf-8')
+    expect(promotedDecision).toContain('Invite freshness must be validated before session restore.')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
   test('pauses archive when drift is detected and drift_check is enabled', async () => {
     const testDir = join(process.cwd(), '.test-archive-drift-pause')
     await rm(testDir, { recursive: true, force: true })
