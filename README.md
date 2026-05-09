@@ -1,13 +1,22 @@
 # OpenFlow: The Governance Layer for AI-Driven Development
 
-[中文文档](./README_CN.md) | [Architecture](./docs/changes/openflow-init/design.md)
+[中文文档](./README_CN.md) | [Architecture](./docs/decisions/ADR-001-docs-governance-and-workflow.md)
 
-## Quick Links
+## 📍 Document Portal
 
-- **Start here:** [OpenFlow Usage Tutorial](./docs/current/workflow/openflow-usage-tutorial.md)
-- **Want the command overview first?** [User Manual](#-user-manual)
-- **Want the project positioning first?** [Why OpenFlow?](#-why-openflow)
-- **Want the design background?** [Architecture Design Doc](./docs/changes/openflow-init/design.md)
+| You want to… | Go here |
+|---|---|
+| 🚀 **Get started now** — 10-minute hands-on tutorial | [English Tutorial](./docs/current/workflow/openflow-usage-tutorial.en.md) · [中文教程](./docs/current/workflow/openflow-usage-tutorial.md) |
+| 📋 **Look up a command** — syntax, parameters, examples | [User Manual ↓](#-user-manual) |
+| 🏗️ **Understand the architecture** — docs model, governance, workflow design | [ADR-001: Docs Governance](./docs/decisions/ADR-001-docs-governance-and-workflow.md) · [Config reference](#%EF%B8%8F-configuration) |
+| ❓ **Avoid mistakes** — common pitfalls and FAQ | [Tutorial §10 (Mistakes)](./docs/current/workflow/openflow-usage-tutorial.en.md#10-common-mistakes) · [Tutorial §15 (FAQ)](./docs/current/workflow/openflow-usage-tutorial.en.md#15-faq) |
+
+> **The 3 commands you will use most often:**
+> ```text
+> /openflow-brainstorm <feature>       # design a feature
+> /openflow-issue <problem>            # investigate a problem
+> /openflow-verify <feature>           # produce evidence & readiness
+> ```
 
 OpenFlow is an industrial-grade development workflow engine for **OpenCode**. It can work well with **oh-my-openagent (omo)**, but its core value does not depend on omo: **document programming is constraint programming**. Design docs, current facts, decisions, verification evidence, and archive records are not passive notes; they are executable governance constraints that force AI coding to stay inside the approved engineering boundary.
 
@@ -101,13 +110,28 @@ Use this when you need to migrate an existing docs tree from another workflow or
 
 ---
 
-## ⚙️ Configuration
+## 📦 Installation
 
-Add this to your `opencode.json`:
+```bash
+npm install @fastknife/openflow
+```
+
+Then enable the plugin in your `opencode.json`:
 
 ```json
 {
-  "plugins": ["@fastknife/openflow"],
+  "plugins": ["@fastknife/openflow"]
+}
+```
+
+---
+
+## ⚙️ Configuration
+
+Customize the behavior further in your `opencode.json`:
+
+```json
+{
   "openflow": {
     "brainstorming": {
       "enabled": true,

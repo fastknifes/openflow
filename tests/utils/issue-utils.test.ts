@@ -120,6 +120,23 @@ describe('detectMode', () => {
     }
   }
 
+  async function setupDatedWorkspace(name: string, files: string[]): Promise<void> {
+    const datePrefix = '2026-05-09'
+    const changeDir = `${datePrefix}-${name}`
+    const wsDir = path.join(tmpDir, 'docs', 'changes', changeDir)
+    await fs.mkdir(wsDir, { recursive: true })
+    for (const file of files) {
+      await fs.writeFile(path.join(wsDir, file), '# test')
+    }
+    const indexPath = path.join(tmpDir, '.sisyphus', 'change-units.json')
+    await fs.mkdir(path.dirname(indexPath), { recursive: true })
+    const index = {
+      version: 1,
+      byFeature: { [name]: { changeDir } },
+    }
+    await fs.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8')
+  }
+
   test('should return "feature" when neither design nor clarification exists', async () => {
     await setupWorkspace('my-feature', ['requirements.md'])
     const mode = await detectMode({ directory: tmpDir }, 'my-feature')
@@ -147,5 +164,29 @@ describe('detectMode', () => {
     await setupWorkspace('mixed-workspace', ['design.md', ISSUE_CLARIFICATION_FILENAME])
     const mode = await detectMode({ directory: tmpDir }, 'mixed-workspace')
     expect(mode).toBe('mixed')
+  })
+
+  test('should resolve date-prefixed workspace for feature mode', async () => {
+    await setupDatedWorkspace('dated-feature', ['design.md'])
+    const mode = await detectMode({ directory: tmpDir }, 'dated-feature')
+    expect(mode).toBe('feature')
+  })
+
+  test('should resolve date-prefixed workspace for issue mode', async () => {
+    await setupDatedWorkspace('dated-issue', [ISSUE_CLARIFICATION_FILENAME])
+    const mode = await detectMode({ directory: tmpDir }, 'dated-issue')
+    expect(mode).toBe('issue')
+  })
+
+  test('should resolve date-prefixed workspace for mixed mode', async () => {
+    await setupDatedWorkspace('dated-mixed', ['design.md', ISSUE_CLARIFICATION_FILENAME])
+    const mode = await detectMode({ directory: tmpDir }, 'dated-mixed')
+    expect(mode).toBe('mixed')
+  })
+
+  test('should fallback to raw name when no index entry exists', async () => {
+    await setupWorkspace('fallback-feature', ['design.md'])
+    const mode = await detectMode({ directory: tmpDir }, 'fallback-feature')
+    expect(mode).toBe('feature')
   })
 })

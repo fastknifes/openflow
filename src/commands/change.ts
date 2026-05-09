@@ -5,16 +5,18 @@ import { getChangeWorkspacePath, getDesignCandidatePaths } from '../config.js'
 import { loadAcceptanceState, saveAcceptanceState } from '../utils/acceptance-state.js'
 import { ErrorCode, OpenFlowError } from '../utils/errors.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
+import { findActiveFeature } from '../utils/feature-resolver.js'
 
-export async function handleChange(ctx: OpenFlowContext, feature: string, description?: string): Promise<string> {
-  if (!feature?.trim()) {
+export async function handleChange(ctx: OpenFlowContext, feature?: string, description?: string): Promise<string> {
+  const resolvedFeature = feature?.trim() || await findActiveFeature(ctx)
+  if (!resolvedFeature) {
     throw new OpenFlowError(
       ErrorCode.INVALID_INPUT,
       'Feature name is required. Use /openflow-change <feature> "<change description>"'
     )
   }
 
-  const sanitizedFeature = sanitizeFeatureName(feature)
+  const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
   const changeDescription = description?.trim() || 'No description provided'
   let workspacePath: string
 
