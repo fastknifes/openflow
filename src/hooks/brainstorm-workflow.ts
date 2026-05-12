@@ -229,7 +229,7 @@ export function decideTrigger(
 
 export function appendGuardMessage(output: Record<string, unknown>, text: string): void {
   const message = output.message as Record<string, unknown> | undefined
-  const messageID = typeof message?.id === 'string' ? message.id : `openflow-${randomUUID()}`
+  const messageID = typeof message?.id === 'string' ? message.id : `msg_openflow-${randomUUID().replace(/-/g, '')}`
   const sessionID = typeof message?.sessionID === 'string' ? message.sessionID : 'openflow-session'
 
   if (!Array.isArray(output.parts)) {
@@ -238,7 +238,7 @@ export function appendGuardMessage(output: Record<string, unknown>, text: string
 
   const parts = output.parts as Part[]
   parts.unshift({
-    id: `openflow-${randomUUID()}`,
+    id: `prt_openflow-${randomUUID().replace(/-/g, '')}`,
     sessionID,
     messageID,
     type: 'text',

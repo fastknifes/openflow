@@ -30,6 +30,11 @@ import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/se
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { loadExecutionPolicy } from '../utils/execution-policy.js'
 import { detectOmoExecutionFlow } from '../utils/omo-detection.js'
+import {
+  readFeatureGuardianState,
+  readGuardianRepairs,
+  readSessionPending,
+} from '../drift/state-store.js'
 
 export interface VerifyReadinessResult {
   status: VerifyReadinessStatus
@@ -188,7 +193,7 @@ async function collectEvidence(
 
   const qualityResults = await runQualityChecks(ctx)
   const securityResults = await runSecurityChecks(ctx, cache)
-  const consistencyResults = await runConsistencyChecks(ctx, cache, feature, contract)
+  const consistencyResults = await runConsistencyChecks(ctx, cache, feature, contract, acceptanceState)
   const checkResults = [...qualityResults, ...securityResults, ...consistencyResults]
   const failedChecks = checkResults.filter(result => !result.passed)
 
@@ -358,6 +363,7 @@ async function runConsistencyChecks(
   cache: AdapterCache,
   feature: string,
   contract?: import('../contracts/openflow-contract.js').OpenFlowContract | null,
+  acceptanceState?: AcceptanceState | null,
 ): Promise<VerifyEvidenceCheckResult[]> {
   const adaptersConfig = ctx.config.verification.adapters
   if (!adaptersConfig?.consistency) {
@@ -370,6 +376,7 @@ async function runConsistencyChecks(
   }
 
   const results: VerifyEvidenceCheckResult[] = []
+  const guardianEvidence = await loadGuardianEvidence(ctx.directory, feature, acceptanceState?.sessionID)
   const adapterCtx: AdapterContext = {
     projectDir: ctx.directory,
     feature,
@@ -377,6 +384,7 @@ async function runConsistencyChecks(
     cache,
     // Pass contract to adapters via context extension
     ...(contract ? { contract } : {}),
+    ...(guardianEvidence ? { guardianEvidence } : {}),
   } as AdapterContext & { contract?: import('../contracts/openflow-contract.js').OpenFlowContract | null }
 
   const adapterImports: Array<{ name: string; importModule: () => Promise<{ new(): EvidenceAdapter }> }> = [
@@ -428,6 +436,33 @@ async function runConsistencyChecks(
   }
 
   return results
+}
+
+async function loadGuardianEvidence(
+  projectDir: string,
+  feature: string,
+  sessionId?: string,
+): Promise<import('../types.js').GuardianEvidence | undefined> {
+  const state = await readFeatureGuardianState(projectDir, feature)
+  if (!state) return undefined
+
+  const repairs = await readGuardianRepairs(projectDir)
+  const featureRepairs = repairs.filter(r => r.feature === feature)
+
+  let pendingItems: import('../types.js').GuardianPendingItem[] = []
+  if (sessionId) {
+    const allPending = await readSessionPending(projectDir, sessionId)
+    pendingItems = allPending.filter(p => p.feature === feature)
+  }
+
+  return {
+    autoRepairs: state.repairsCount,
+    pendingAmbiguities: pendingItems.filter(p => p.disposition === 'ambiguous_needs_confirmation').length,
+    unresolvedViolations: pendingItems.filter(p => p.disposition === 'violation_needs_fix').length,
+    contractSource: `docs/changes/*-${feature}`,
+    repairRecords: featureRepairs,
+    pendingItems,
+  }
 }
 
 export async function classifyReadiness(

@@ -19,6 +19,7 @@ import {
   hasDesignDoc,
 } from './brainstorm-workflow.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
+import { getContractRuntime } from '../contracts/runtime.js'
 import { detectOmoExecutionFlow } from '../utils/omo-detection.js'
 import { loadExecutionPolicy, saveExecutionPolicy, createDefaultPolicy } from '../utils/execution-policy.js'
 import { assessChangeRisk, isHighRisk } from '../utils/risk-assessment.js'
@@ -203,8 +204,9 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     }
 
     // --- Quality Policy Lifecycle (OMO Execution) ---
+    let omoFlow: 'omo' | 'non-omo' = 'non-omo'
     try {
-      const omoFlow = await detectOmoExecutionFlow(ctx, message)
+      omoFlow = await detectOmoExecutionFlow(ctx, message)
       if (omoFlow === 'omo') {
         const feature = await findActiveFeature(ctx)
         if (feature) {
@@ -281,15 +283,30 @@ Reply with: \`fast\`, \`balanced\`, or \`strict\`. (Default: balanced)`)
 
     await acceptanceHook({ sessionID: input.sessionID, message })
 
-    // Suggest /openflow-harden for complex features — gated behind quality policy absence
-    const acceptanceState = await import('../utils/acceptance-state.js').then(m => m.loadAcceptanceState(ctx.directory))
-    if (acceptanceState?.phase === 'acceptance' && acceptanceState.feature) {
-      // Phase C: gate existing harden suggestion if quality policy exists for this feature
-      const policyForFeature = await loadExecutionPolicy(ctx.directory, acceptanceState.feature)
-      if (!policyForFeature) {
-        const hardenSuggestion = await getHardenSuggestion(ctx, acceptanceState.feature)
-        if (hardenSuggestion) {
-          appendGuardMessage(output, hardenSuggestion)
+    // Dispatch session events to Guardian
+    if (ctx.config.guardian?.enabled) {
+      try {
+        const runtime = getContractRuntime()
+        if (runtime.isStarted && isCompletionMessage(message)) {
+          await runtime.dispatchSessionEvent({ type: 'session_end', sessionId: input.sessionID })
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
+    // Suggest /openflow-harden for complex features — OMO execution only
+    // Non-OMO users should never see harden suggestions (design doc §4)
+    if (omoFlow === 'omo') {
+      const acceptanceState = await import('../utils/acceptance-state.js').then(m => m.loadAcceptanceState(ctx.directory))
+      if (acceptanceState?.phase === 'acceptance' && acceptanceState.feature) {
+        // Gate harden suggestion if quality policy already exists for this feature
+        const policyForFeature = await loadExecutionPolicy(ctx.directory, acceptanceState.feature)
+        if (!policyForFeature) {
+          const hardenSuggestion = await getHardenSuggestion(ctx, acceptanceState.feature)
+          if (hardenSuggestion) {
+            appendGuardMessage(output, hardenSuggestion)
+          }
         }
       }
     }

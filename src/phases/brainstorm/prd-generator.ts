@@ -1,9 +1,9 @@
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
-import { escapeMarkdown, findLatestDocument, createSafePath } from '../../utils/security.js'
+import { escapeMarkdown, findLatestDocument, createSafePath, sanitizeFeatureName } from '../../utils/security.js'
 import { logger } from '../../utils/logger.js'
 import type { OpenFlowContext } from '../../types.js'
-import { getChangeWorkspacePath } from '../../config.js'
+import { CHANGE_WORKSPACE_DIR, getChangeWorkspacePath } from '../../config.js'
 import { RequirementModelSchema, type RequirementModel } from './requirement-model.js'
 
 export interface PrdGenerationOptions {
@@ -43,6 +43,8 @@ export async function generatePrd(options: PrdGenerationOptions): Promise<string
   const designInfo = requirementModel
     ? designInfoFromRequirementModel(requirementModel)
     : await extractDesignInfo(designDir)
+
+  assertPrdHasSubstantiveSource(feature, designDir, designInfo)
   
   // Fill template
   const content = fillPrdTemplate(templateContent, {
@@ -302,6 +304,23 @@ function buildOverviewAndConstraintsSection(designInfo: DesignInfo): string {
   return sections.join('\n\n').trim()
 }
 
+function assertPrdHasSubstantiveSource(feature: string, designDir: string, designInfo: DesignInfo): void {
+  const hasSubstantiveSource =
+    designInfo.problemStatement.trim().length > 0 ||
+    designInfo.overview.trim().length > 0 ||
+    designInfo.goals.length > 0 ||
+    designInfo.successCriteria.length > 0 ||
+    designInfo.components.length > 0 ||
+    designInfo.constraints.length > 0 ||
+    designInfo.outOfScope.length > 0
+
+  if (!hasSubstantiveSource) {
+    throw new Error(
+      `Cannot generate PRD for '${feature}' because no substantive design or requirement model was found in ${designDir}.`
+    )
+  }
+}
+
 function fillSection(content: string, sectionName: string, value: string): string {
   const sectionPattern = new RegExp(
     `(###\\s+${escapeRegExp(sectionName)}\\s*\\n\\n)([\\s\\S]*?)(?=\\n###\\s+|\\n##\\s+|$)`
@@ -483,9 +502,9 @@ export async function evaluateDocumentBundle(
     if (!generatePrd && !generateDecisions) {
       return {
         generateDesign: true,
-        generatePrd: true,
-        generateDecisions: true,
-        reason: 'uncertain complexity, generating full bundle',
+        generatePrd: false,
+        generateDecisions: false,
+        reason: 'insufficient requirement model signals, generating design only',
       }
     }
 
@@ -504,23 +523,19 @@ export async function evaluateDocumentBundle(
     designInfo.successCriteria.length > 0 ||
     /(user|用户|value|价值|验收|acceptance|goal|目标)/i.test(designInfo.overview)
 
-  const hasDecisionsSignal =
-    designInfo.components.length >= 3 ||
-    /(architecture|决策|trade[- ]?off|constraint|约束|风险)/i.test(designInfo.overview)
-
-  if (!hasPrdSignal && !hasDecisionsSignal) {
+  if (!hasPrdSignal) {
     return {
       generateDesign: true,
-      generatePrd: true,
-      generateDecisions: true,
-      reason: 'uncertain complexity, generating full bundle',
+      generatePrd: false,
+      generateDecisions: false,
+      reason: 'insufficient semantic signals, generating design only',
     }
   }
 
   return {
     generateDesign: true,
     generatePrd: hasPrdSignal,
-    generateDecisions: hasDecisionsSignal,
+    generateDecisions: false,
     reason: 'semantic bundle decision from design context',
   }
 }
@@ -534,11 +549,15 @@ export async function ensureDecisionsDocument(
   await fs.mkdir(designDir, { recursive: true })
   const decisionsPath = path.join(designDir, 'decisions.md')
   const requirementModel = await readRequirementModelFromWorkspace(designDir)
-  const keyDecisions = requirementModel && requirementModel.constraints.length > 0
-    ? requirementModel.constraints
-      .map((constraint) => `- [ ] ${constraint.description} (${constraint.severity}/${constraint.category})`)
-      .join('\n')
-    : '- [ ] Decision 1'
+  const keyDecisions = requirementModel?.constraints
+    .map((constraint) => `- [ ] ${constraint.description} (${constraint.severity}/${constraint.category})`)
+    .join('\n')
+
+  if (!keyDecisions) {
+    throw new Error(
+      `Cannot generate decisions document for '${feature}' because no concrete constraints or decisions were found in ${designDir}.`
+    )
+  }
 
   const content = `# ${feature} - Decisions
 
@@ -571,9 +590,9 @@ async function resolveWorkspacePaths(
   feature: string,
   config: OpenFlowContext['config']
 ): Promise<{ designDir: string; requirementsDir: string }> {
-  const changeWorkspaceDir = await getChangeWorkspacePath(projectDir, feature)
+  const changeWorkspaceDir = await findExistingChangeWorkspacePath(projectDir, feature)
 
-  if (await hasAnyDesignDoc(changeWorkspaceDir)) {
+  if (changeWorkspaceDir && await hasAnyDesignDoc(changeWorkspaceDir)) {
     return {
       designDir: changeWorkspaceDir,
       requirementsDir: changeWorkspaceDir,
@@ -584,6 +603,36 @@ async function resolveWorkspacePaths(
     designDir: createSafePath(projectDir, config.brainstorming.output_dir, feature),
     requirementsDir: createSafePath(projectDir, config.brainstorming.prd_output_dir, feature),
   }
+}
+
+async function findExistingChangeWorkspacePath(projectDir: string, feature: string): Promise<string | null> {
+  const sanitizedFeature = sanitizeFeatureName(feature)
+  const candidates = [await getChangeWorkspacePath(projectDir, sanitizedFeature)]
+  const changesDir = createSafePath(projectDir, CHANGE_WORKSPACE_DIR)
+
+  try {
+    const entries = await fs.readdir(changesDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue
+      }
+
+      if (entry.name === sanitizedFeature || entry.name.endsWith(`-${sanitizedFeature}`)) {
+        candidates.push(path.join(changesDir, entry.name))
+      }
+    }
+  } catch {
+    void 0
+  }
+
+  const uniqueCandidates = [...new Set(candidates)].sort((left, right) => right.localeCompare(left))
+  for (const candidate of uniqueCandidates) {
+    if (await hasAnyDesignDoc(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
 }
 
 async function hasAnyDesignDoc(designDir: string): Promise<boolean> {

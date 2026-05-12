@@ -16,14 +16,15 @@ const COMMANDS: Record<string, string> = {
   'openflow-issue': 'OpenFlow issue clarification and triage command for uncertain problems',
 }
 
+// Skills that are INTENTIONALLY registered by registerSkills() are excluded
+// from cleanup to prevent a race: registerCommands() deletes them, then
+// registerSkills() immediately recreates them.
 const LEGACY_SKILL_DIRS = [
-  'openflow-brainstorm',
   'openflow-change',
   'openflow-init',
   'openflow-verify',
   'openflow-archive',
   'openflow-migrate-docs',
-  'openflow-writing-plan',
   'openflow-harden',
 ]
 

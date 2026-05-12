@@ -43,7 +43,7 @@ describe('tool-after hook', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('generates PRD and decisions by semantic bundle decision', async () => {
+  test('generates PRD without placeholder decisions by semantic bundle decision', async () => {
     const root = join(process.cwd(), '.test-tool-after-bundle')
     await rm(root, { recursive: true, force: true })
 
@@ -68,8 +68,7 @@ describe('tool-after hook', () => {
     const requirementContent = await readFile(join(root, 'docs', 'changes', feature, 'prd.md'), 'utf-8')
     expect(requirementContent).toContain('Product Requirements Document')
 
-    const decisionsContent = await readFile(join(root, 'docs', 'changes', feature, 'decisions.md'), 'utf-8')
-    expect(decisionsContent).toContain('Decision Summary')
+    await expect(readFile(join(root, 'docs', 'changes', feature, 'decisions.md'), 'utf-8')).rejects.toThrow()
 
     await rm(root, { recursive: true, force: true })
   })

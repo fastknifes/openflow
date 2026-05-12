@@ -42,7 +42,13 @@ describe('OpenFlowPlugin', () => {
       throw new Error('Expected plugin.tool to be defined')
     }
 
-    expect(Object.keys(plugin.tool)).toEqual(['openflow-writing-plan'])
+    expect(Object.keys(plugin.tool).sort()).toEqual([
+          'openflow-archive',
+          'openflow-brainstorm',
+          'openflow-init',
+          'openflow-issue',
+          'openflow-writing-plan',
+        ].sort())
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()
@@ -88,6 +94,19 @@ describe('OpenFlowPlugin', () => {
     const statusAfter = createChatOutput('/openflow-status')
     await plugin['chat.message']?.({ sessionID: 'session-status-after' } as never, statusAfter)
     expect(firstOutputText(statusAfter)).toContain('mode: always')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('dispatches command-file expanded openflow slash commands through chat.message', async () => {
+    const root = join(process.cwd(), '.test-plugin-command-file-dispatch')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+
+    const brainstormOutput = createChatOutput('OpenFlow command: /openflow-brainstorm user-login', 'session-command-file')
+    await plugin['chat.message']?.({ sessionID: 'session-command-file' } as never, brainstormOutput)
+    expect(firstOutputText(brainstormOutput)).toContain('Brainstorm Question')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -153,7 +172,13 @@ describe('OpenFlowPlugin', () => {
       throw new Error('Expected plugin.tool to be defined')
     }
 
-    expect(Object.keys(plugin.tool)).toEqual(['openflow-writing-plan'])
+    expect(Object.keys(plugin.tool).sort()).toEqual([
+          'openflow-archive',
+          'openflow-brainstorm',
+          'openflow-init',
+          'openflow-issue',
+          'openflow-writing-plan',
+        ].sort())
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()

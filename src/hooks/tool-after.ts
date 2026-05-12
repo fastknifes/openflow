@@ -5,6 +5,7 @@ import { enhancePlan } from '../plan/enhancer.js'
 import { trackFileChange } from '../utils/file-tracker.js'
 import { generateBuildId } from '../utils/security.js'
 import { logger } from '../utils/logger.js'
+import { getContractRuntime } from '../contracts/runtime.js'
 import { createAcceptancePromptHook } from './acceptance-prompt.js'
 import {
   evaluateDocumentBundle,
@@ -172,6 +173,26 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
         logger.debug('Tracked file change', { filePath, buildId })
       } catch (error) {
         logger.error('Failed to track file change', error instanceof Error ? error : undefined)
+      }
+
+      // Dispatch file change event to ContractRuntime for Guardian
+      if (ctx.config.guardian?.enabled) {
+        try {
+          const runtime = getContractRuntime()
+          if (runtime.isStarted) {
+            await runtime.processFileChange({
+              type: 'file_changed',
+              filePath,
+              tool: input.tool as 'write' | 'edit',
+              timestamp: Date.now(),
+              sessionId: input.sessionID,
+            })
+          }
+        } catch (error) {
+          logger.debug('Guardian event dispatch failed', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
       }
 
       if (shouldPromptForAcceptanceDocSync(normalizedPath)) {

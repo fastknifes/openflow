@@ -1,6 +1,6 @@
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
-import type { AcceptanceState, FileChangeRecord, DriftItem, PhasedChanges, IssueClassification } from '../../types.js'
+import type { AcceptanceState, FileChangeRecord, DriftItem, GuardianEvidence, PhasedChanges, IssueClassification } from '../../types.js'
 import { escapeMarkdown } from '../../utils/security.js'
 import { logger } from '../../utils/logger.js'
 import { generateCodeMappingTable } from './code-mapper.js'
@@ -22,6 +22,7 @@ export interface ImplementationMapperOptions {
   issueClarificationPath?: string | null
   promotionCandidatePath?: string | null
   behaviorPath?: string | null
+  guardianEvidence?: GuardianEvidence
 }
 
 export async function generateImplementationMapper(options: ImplementationMapperOptions): Promise<string> {
@@ -57,6 +58,7 @@ export async function generateImplementationMapper(options: ImplementationMapper
     : null
   const globalDepsSection = formatGlobalDepsSection(driftItems)
   const verificationSection = formatVerificationSection(acceptanceState, phasedChanges, driftItems)
+  const guardianSection = formatGuardianEvidenceSection(options.guardianEvidence)
 
   let out = `# ${safeFeature} - Implementation Mapper
 
@@ -96,6 +98,7 @@ ${behaviorMappingSection}
 ## ${verifyNum}. 验证与结论
 
 ${verificationSection}
+${guardianSection}
 `
 
   // --- Issue-specific sections (only when mode is "issue" or "mixed") ---
@@ -202,6 +205,19 @@ function formatVerificationEvidence(
   }
 
   return 'no verification evidence recorded'
+}
+
+function formatGuardianEvidenceSection(evidence?: GuardianEvidence): string {
+  if (!evidence) return ''
+  return [
+    '### Drift Guardian Evidence',
+    '',
+    `- Auto-repairs: ${evidence.autoRepairs}`,
+    `- Pending ambiguities: ${evidence.pendingAmbiguities}`,
+    `- Unresolved violations: ${evidence.unresolvedViolations}`,
+    `- Contract source: ${evidence.contractSource}`,
+    '',
+  ].join('\n')
 }
 
 async function generateBehaviorMappingSection(behaviorPath: string): Promise<string> {

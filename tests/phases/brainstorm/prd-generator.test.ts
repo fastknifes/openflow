@@ -64,7 +64,7 @@ describe('prd-generator', () => {
       await rm(testDir, { recursive: true, force: true })
     })
 
-    test('returns full bundle when semantic signals are uncertain', async () => {
+    test('returns design only when semantic signals are uncertain', async () => {
       const ctx = createContext()
       const designDir = join(testDir, 'docs', 'current', 'design', 'uncertain-feature')
       await mkdir(designDir, { recursive: true })
@@ -72,8 +72,8 @@ describe('prd-generator', () => {
 
       const decision = await evaluateDocumentBundle(testDir, 'uncertain-feature', ctx.config)
       expect(decision.generateDesign).toBe(true)
-      expect(decision.generatePrd).toBe(true)
-      expect(decision.generateDecisions).toBe(true)
+      expect(decision.generatePrd).toBe(false)
+      expect(decision.generateDecisions).toBe(false)
     })
 
     test('respects explicit scope when provided', async () => {
@@ -175,31 +175,21 @@ describe('prd-generator', () => {
       await rm(testDir, { recursive: true, force: true })
     })
 
-    test('generates PRD document with default template', async () => {
+    test('does not generate empty PRD from default template without design context', async () => {
       const ctx = createContext()
-      
-      const prdPath = await generatePrd({
+
+      await expect(generatePrd({
         feature: 'test-feature',
         projectDir: testDir,
         config: ctx.config,
-      })
-
-      expect(prdPath).toContain('test-feature')
-      expect(prdPath).toContain(join('docs', 'changes', 'test-feature', 'prd.md'))
-
-      const content = await readFile(prdPath, 'utf-8')
-      expect(content).toContain('test-feature')
-      expect(content).toContain('Product Requirements Document')
-      expect(content).toContain('功能描述')
-      expect(content).toContain('用户故事')
-      expect(content).toContain('验收标准')
+      })).rejects.toThrow('Cannot generate PRD')
     })
 
     test('generates PRD with design info when design documents exist', async () => {
       const ctx = createContext()
       
       // Create design documents
-      const designDir = join(testDir, 'docs', 'current', 'design', 'test-feature')
+      const designDir = join(testDir, 'docs', 'changes', 'test-feature')
       await mkdir(designDir, { recursive: true })
       
       await writeFile(
@@ -362,7 +352,7 @@ Markdown fallback overview.
       expect(exists).toBe(true)
     })
 
-    test('uses custom template if available', async () => {
+    test('uses custom template if available and design context exists', async () => {
       const ctx = createContext()
       
       // Create custom template
@@ -373,6 +363,9 @@ Markdown fallback overview.
         '# {{feature}} Custom PRD\n\nDate: {{date}}',
         'utf-8'
       )
+      const designDir = join(testDir, 'docs', 'changes', 'custom-template')
+      await mkdir(designDir, { recursive: true })
+      await writeFile(join(designDir, 'design.md'), '# Design\n\n## Overview\n\nCustom template has real design context.', 'utf-8')
 
       const prdPath = await generatePrd({
         feature: 'custom-template',
@@ -383,6 +376,22 @@ Markdown fallback overview.
       const content = await readFile(prdPath, 'utf-8')
       expect(content).toContain('Custom PRD')
       expect(content).toContain('custom-template')
+    })
+
+    test('prefers existing dated change workspace over creating bare feature directory', async () => {
+      const ctx = createContext()
+      const datedDesignDir = join(testDir, 'docs', 'changes', '2026-05-11-dated-feature')
+      await mkdir(datedDesignDir, { recursive: true })
+      await writeFile(join(datedDesignDir, 'design.md'), '# Design\n\n## Overview\n\nUser value and acceptance', 'utf-8')
+
+      const prdPath = await generatePrd({
+        feature: 'dated-feature',
+        projectDir: testDir,
+        config: ctx.config,
+      })
+
+      expect(prdPath).toBe(join(datedDesignDir, 'prd.md'))
+      await expect(access(join(testDir, 'docs', 'changes', 'dated-feature', 'prd.md'))).rejects.toThrow()
     })
 
     test('prefers change workspace paths when design exists in docs/changes', async () => {
@@ -425,6 +434,17 @@ Markdown fallback overview.
       expect(content).toContain('decision-feature')
       expect(content).toContain('Key Decisions')
       expect(content).toContain('Keep PRD generation limited to the brainstorm workspace')
+    })
+
+    test('does not create placeholder decisions document without concrete constraints', async () => {
+      const ctx = createContext()
+      const designDir = join(testDir, 'docs', 'changes', 'empty-decision-feature')
+      await mkdir(designDir, { recursive: true })
+      await writeFile(join(designDir, 'design.md'), '# Design\n\n## Overview\n\nNo concrete decision source.', 'utf-8')
+
+      await expect(ensureDecisionsDocument(testDir, 'empty-decision-feature', ctx.config)).rejects.toThrow(
+        'Cannot generate decisions document'
+      )
     })
   })
 })
