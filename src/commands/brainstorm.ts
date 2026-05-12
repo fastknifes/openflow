@@ -6,6 +6,7 @@ import { ensureChangeWorkspacePath } from '../config.js'
 import { clearRecentBrainstormCompletion, markRecentBrainstormCompletion } from '../hooks/brainstorm-workflow.js'
 import { buildRequirementModel } from '../phases/brainstorm/constraint-derivation.js'
 import { renderDesignDocument } from '../phases/brainstorm/design-renderer.js'
+import { renderBehaviorDocument } from '../phases/brainstorm/behavior-renderer.js'
 import { defaultSynthesizer } from '../phases/brainstorm/llm-adapter.js'
 import { RequirementModelSchema } from '../phases/brainstorm/requirement-model.js'
 import type { RequirementModel } from '../phases/brainstorm/requirement-model.js'
@@ -73,7 +74,7 @@ export async function handleBrainstorm(
 
   if (session.workflowState === 'completed' && session.generatedDocs.length > 0) {
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, session)
-    return formatGenerationResult(sanitizedFeature, session.generatedDocs[0] ?? '')
+    return formatGenerationResultAll(sanitizedFeature, session.generatedDocs)
   }
 
   if (answer?.trim()) {
@@ -123,7 +124,7 @@ async function finalizeBrainstorm(
   const existingGenerated = session.generatedDocs[0]
   if (session.workflowState === 'completed' && existingGenerated) {
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, session)
-    return formatGenerationResult(session.feature, existingGenerated)
+    return formatGenerationResultAll(session.feature, session.generatedDocs)
   }
 
   try {
@@ -138,18 +139,23 @@ async function finalizeBrainstorm(
     })
     await saveBrainstormSession(ctx.directory, generatingSession)
 
-    const { designPath, requirementModel: validatedModel } = await generateDesignDocument(ctx, generatingSession)
+    const { designPath, behaviorPath, requirementModel: validatedModel } = await generateDesignDocument(ctx, generatingSession)
+    const allGeneratedDocs = [designPath]
+    if (behaviorPath) {
+      allGeneratedDocs.push(behaviorPath)
+    }
     const completedSession = markCompleted(
       {
         ...generatingSession,
         requirementModel: validatedModel,
+        generatedDocs: allGeneratedDocs,
       },
       designPath
     )
     await saveBrainstormSession(ctx.directory, completedSession)
     await markRecentBrainstormCompletion(ctx.directory, getToolSessionID(toolContext), completedSession.feature)
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, completedSession)
-    return formatGenerationResult(session.feature, designPath)
+    return formatGenerationResultAll(session.feature, completedSession.generatedDocs)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const failedSession = markGenerationFailed(markGenerating(session), message)
@@ -348,14 +354,15 @@ function hasAskQuestion(value: unknown): value is BrainstormInteractiveToolConte
 async function generateDesignDocument(
   ctx: OpenFlowContext,
   session: BrainstormSession,
-): Promise<{ designPath: string; requirementModel: RequirementModel }> {
+): Promise<{ designPath: string; behaviorPath: string | null; requirementModel: RequirementModel }> {
   const existingGenerated = session.generatedDocs[0]
-  if (existingGenerated) {
+    if (existingGenerated) {
     try {
       await fs.access(existingGenerated)
       const existingModel = await prepareRequirementModel(session.feature, session.answers, session.requirementModel)
       return {
         designPath: existingGenerated,
+        behaviorPath: null,
         requirementModel: existingModel,
       }
     } catch {
@@ -375,8 +382,22 @@ async function generateDesignDocument(
   const content = renderDesignDocument(validatedModel)
   await fs.writeFile(designPath, content, 'utf-8')
   await fs.writeFile(sidecarPath, JSON.stringify(validatedModel, null, 2), 'utf-8')
+
+  const behaviorPath = path.join(safeWorkspaceDir, 'behavior.md')
+  const behaviorSidecarPath = path.join(safeWorkspaceDir, 'behavior.meta.json')
+  let behaviorPathResult: string | null = null
+  try {
+    const behaviorContent = renderBehaviorDocument(validatedModel)
+    await fs.writeFile(behaviorPath, behaviorContent, 'utf-8')
+    await fs.writeFile(behaviorSidecarPath, JSON.stringify(validatedModel, null, 2), 'utf-8')
+    behaviorPathResult = behaviorPath
+  } catch {
+    // Non-blocking: behavior.md generation failure does not block design.md
+  }
+
   return {
     designPath,
+    behaviorPath: behaviorPathResult,
     requirementModel: validatedModel,
   }
 }
@@ -405,13 +426,17 @@ Progress:
 - next question id: \`${escapeMarkdown(question.id)}\``
 }
 
-function formatGenerationResult(feature: string, generatedPath: string): string {
+function formatGenerationResultAll(feature: string, generatedPaths: string[]): string {
+  const paths = generatedPaths.length > 0
+    ? generatedPaths.map((p) => `- \`${escapeMarkdown(p)}\``).join('\n')
+    : '- (no documents generated)'
+
   return `## Brainstorm Complete
 
 Feature: ${escapeMarkdown(feature)}
 
-Design document generated:
-- \`${escapeMarkdown(generatedPath)}\``
+Generated documents:
+${paths}`
 }
 
 function formatGenerationFailure(feature: string, message: string): string {

@@ -11,6 +11,7 @@ export function renderDesignDocument(model: RequirementModel): string {
     renderGoals(model),
     renderNonGoals(model),
     renderArchitecture(model),
+    renderBehaviorAlignment(model),
     renderDesignConstraints(model),
     renderSuccessCriteria(model),
     renderProposedDesign(model),
@@ -118,6 +119,33 @@ function renderSuccessCriteria(model: RequirementModel): string {
 
   for (const criterion of model.acceptanceCriteria) {
     lines.push(`- [ ] ${escapeInline(criterion.description)}`)
+  }
+
+  return lines.join('\n')
+}
+
+function renderBehaviorAlignment(model: RequirementModel): string {
+  const lines = ['## Behavior Alignment', '']
+
+  if (model.acceptanceCriteria.length === 0) {
+    lines.push(NOT_SPECIFIED)
+    return lines.join('\n')
+  }
+
+  lines.push('| Behavior Scenario | Design Response | Files / Modules | Risk |')
+  lines.push('|------------------|-----------------|-----------------|------|')
+
+  const modules = (model.expectedModules ?? []).map((m) => m.path).join(', ')
+  const riskMap: Record<string, string> = { must: 'High', should: 'Medium', may: 'Low' }
+
+  for (const criterion of model.acceptanceCriteria) {
+    const relatedConstraint = model.constraints.find(
+      (c) => criterion.description.toLowerCase().includes(c.description.toLowerCase()),
+    )
+    const risk = relatedConstraint ? (riskMap[relatedConstraint.severity] ?? 'Medium') : 'Medium'
+    lines.push(
+      `| ${escapeInline(criterion.description)} | See constraints (${String(model.constraints.length)} total) | ${modules || 'Not specified.'} | ${risk} |`,
+    )
   }
 
   return lines.join('\n')

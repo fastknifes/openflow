@@ -200,7 +200,9 @@ describe('brainstorm command', () => {
     await handleBrainstorm(createContext(root), 'user-login', '快速上线', toolContext)
     const result = await handleBrainstorm(createContext(root), 'user-login', '必须兼容现有认证', toolContext)
 
-    expect(result).toContain('Design document generated')
+    expect(result).toContain('Generated documents:')
+    expect(result).toContain('design.md')
+    expect(result).toContain('behavior.md')
 
     const changeDirs = await readdir(join(root, 'docs', 'changes'))
     const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
@@ -237,7 +239,7 @@ describe('brainstorm command', () => {
     }
     expect(session.workflowState).toBe('completed')
     expect(session.pendingQuestionId).toBeNull()
-    expect(session.generatedDocs).toHaveLength(1)
+    expect(session.generatedDocs).toHaveLength(2)
 
     const active = JSON.parse(await readFile(join(root, '.sisyphus', 'brainstorm', 'active.json'), 'utf-8')) as {
       bySessionID: Record<string, unknown>
@@ -280,7 +282,9 @@ describe('brainstorm command', () => {
     )
 
     const result = await handleBrainstorm(createContext(root), 'user-login', undefined, createToolContext(root, 'session-retry'))
-    expect(result).toContain('Design document generated')
+    expect(result).toContain('Generated documents:')
+    expect(result).toContain('design.md')
+    expect(result).toContain('behavior.md')
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'brainstorm', 'user-login.json'), 'utf-8')) as {
       workflowState: string
@@ -289,7 +293,7 @@ describe('brainstorm command', () => {
     }
     expect(session.workflowState).toBe('completed')
     expect(session.generationAttemptCount).toBe(2)
-    expect(session.generatedDocs).toHaveLength(1)
+    expect(session.generatedDocs).toHaveLength(2)
 
     await rm(root, { recursive: true, force: true })
   })

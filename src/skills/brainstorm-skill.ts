@@ -3,7 +3,7 @@ import type { SkillInfo } from './types.js'
 export function getBrainstormSkill(): SkillInfo {
   return {
     name: 'openflow-brainstorm',
-    description: 'Manual command reference for /openflow-brainstorm when the user wants to start or continue feature design clarification. The command advances one brainstorm question at a time and generates design docs in docs/changes when answers are complete.',
+    description: 'Manual command reference for /openflow-brainstorm when the user wants to start or continue feature design clarification. The command advances one brainstorm question at a time and generates design.md and behavior.md in docs/changes when answers are complete.',
     content: `# OpenFlow Brainstorm Command Reference
 
 ## Overview
