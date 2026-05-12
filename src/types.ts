@@ -23,6 +23,27 @@ export interface TddConfig {
   expand_threshold: number
 }
 
+export interface AdapterConfig {
+  command?: string
+  args?: string[]
+  timeout?: number
+  onMissing?: 'skip' | 'fail'
+}
+
+export interface ConsistencyAdapterConfig {
+  drift_check?: boolean
+  current_constraints?: boolean
+  decisions_constraints?: boolean
+  symbol_level?: boolean
+}
+
+export interface VerificationAdapterConfig {
+  secret?: AdapterConfig
+  vuln?: AdapterConfig
+  dependency?: AdapterConfig
+  consistency?: ConsistencyAdapterConfig
+}
+
 export interface VerificationConfig {
   in_plan: boolean
   security: SecurityCheckType[]
@@ -30,6 +51,7 @@ export interface VerificationConfig {
   auto_fix: boolean
   completion_prompt: boolean
   allow_accept_failures?: boolean
+  adapters?: VerificationAdapterConfig
 }
 
 export type SecurityCheckType = 'secret' | 'vuln' | 'dependency'
@@ -52,6 +74,15 @@ export interface AcceptanceConfig {
 
 export interface WritingPlanConfig {
   enabled: boolean
+}
+
+export interface GuardianConfig {
+  enabled: boolean
+  auto_start: boolean
+  auto_fix: boolean
+  max_retries: number
+  state_dir: string
+  contract_cache: boolean
 }
 
 export type HardenFindingLevel = 'blocking_bug' | 'spec_violation' | 'regression_risk' | 'test_gap' | 'design_ambiguity' | 'style_or_preference'
@@ -93,6 +124,75 @@ export interface HardenConfig {
   executorModel?: string
 }
 
+export type DriftDisposition = 'auto_repaired' | 'ambiguous_needs_confirmation' | 'violation_needs_fix' | 'no_drift'
+
+export interface DriftGuardianConfig {
+  enabled: boolean
+  auto_start: boolean
+  auto_fix: boolean
+  max_retries: number
+  state_dir: string
+  contract_cache: boolean
+}
+
+export interface GuardianRepairRecord {
+  timestamp: string
+  feature: string
+  filePath: string
+  disposition: 'auto_repaired'
+  originalSegment: string
+  repairedSegment: string
+  reason: string
+}
+
+export interface GuardianPendingItem {
+  timestamp: string
+  feature: string
+  filePath: string
+  item: string
+  disposition: 'ambiguous_needs_confirmation' | 'violation_needs_fix'
+  reason: string
+  suggestedFix?: string
+}
+
+export interface GuardianEvidence {
+  autoRepairs: number
+  pendingAmbiguities: number
+  unresolvedViolations: number
+  contractSource: string
+  repairRecords: GuardianRepairRecord[]
+  pendingItems: GuardianPendingItem[]
+}
+
+export interface GuardianJobState {
+  feature: string
+  sessionId: string
+  startedAt: string
+  lastCheckedAt?: string
+  repairsCount: number
+  pendingCount: number
+}
+
+export interface FileChangedEvent {
+  type: 'file_changed'
+  filePath: string
+  tool: 'write' | 'edit'
+  timestamp: number
+  sessionId?: string
+}
+
+export interface ContractConsumer {
+  onEvent(event: FileChangedEvent): Promise<void>
+  onSessionEvent(event: { type: string; sessionId?: string }): Promise<void>
+}
+
+export interface EvidenceSinkEntry {
+  source: 'guardian' | 'verify' | 'archive'
+  feature: string
+  timestamp: string
+  data: unknown
+}
+
 export interface OpenFlowConfig {
   brainstorming: BrainstormingConfig
   tdd: TddConfig
@@ -101,6 +201,8 @@ export interface OpenFlowConfig {
   archive: ArchiveConfig
   writingPlan: WritingPlanConfig
   harden: HardenConfig
+  guardian: DriftGuardianConfig
+  executionQualityPolicy?: ExecutionQualityPolicyConfig
 }
 
 export const defaultConfig: OpenFlowConfig = {
@@ -150,6 +252,18 @@ export const defaultConfig: OpenFlowConfig = {
     maxRounds: 5,
     tokenBudgetPerRound: 10000,
     tokenBudgetTotal: 60000,
+  },
+  guardian: {
+    enabled: true,
+    auto_start: true,
+    auto_fix: true,
+    max_retries: 3,
+    state_dir: '.sisyphus/openflow/guardian',
+    contract_cache: true,
+  },
+  executionQualityPolicy: {
+    enabled: true,
+    defaultMode: 'balanced',
   },
 }
 
@@ -236,7 +350,7 @@ export type CurrentPromotionStrategy = 'direct_migration' | 'synthesized_refresh
 
 export interface CurrentPromotionSuggestion {
   type: PromotionType
-  targetArea: 'design' | 'requirements'
+  targetArea: 'design' | 'requirements' | 'behavior'
   targetPath: string
   sourcePath?: string
   strategy?: CurrentPromotionStrategy
@@ -271,14 +385,35 @@ export interface VerifyEvidenceCheckResult {
   detail?: string
 }
 
+export type BehaviorScenarioCheckStatus = 'verified' | 'missing_evidence' | 'failed' | 'not_applicable'
+
+export interface BehaviorScenarioCheckResult {
+  scenarioId: string
+  name: string
+  status: BehaviorScenarioCheckStatus
+  detail?: string
+}
+
 export interface VerifyEvidencePacket {
   checksRun: string[]
   checkResults: VerifyEvidenceCheckResult[]
+  behaviorScenarios?: BehaviorScenarioCheckResult[]
   observedBehaviorSummary: string
   intendedVsActualDelta: string
   docAlignmentSummary: string
   constraintConflictSummary: string
   knownRisksOrMissingEvidence: string
+  behaviorEvidence?: BehaviorScenarioEvidence[]
+}
+
+export type BehaviorEvidenceStatus = 'verified' | 'missing_evidence' | 'failed' | 'not_applicable'
+
+export interface BehaviorScenarioEvidence {
+  scenarioName: string
+  status: BehaviorEvidenceStatus
+  evidenceType: string
+  evidenceReference: string
+  reason: string
 }
 
 export interface VerifyResult {
@@ -351,4 +486,25 @@ export interface DriftItem {
   designDoc: string
   actualCode: string
   reason: string
+}
+
+// Execution Quality Policy types
+export type QualityMode = 'fast' | 'balanced' | 'strict'
+
+export type HardenPolicy = 'none' | 'risk-based' | 'final'
+
+export interface ExecutionQualityPolicy {
+  feature: string
+  plan_name: string
+  executor: string
+  quality_mode: QualityMode
+  harden_policy: HardenPolicy
+  verify_policy: string
+  selected_at: string
+  selected_by: string
+}
+
+export interface ExecutionQualityPolicyConfig {
+  enabled: boolean
+  defaultMode: QualityMode
 }

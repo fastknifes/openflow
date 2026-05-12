@@ -15,7 +15,7 @@ export const CHANGE_WORKSPACE_DIR = 'docs/changes'
 export const CURRENT_SPEC_DIR = 'docs/current/spec'
 export const CURRENT_WORKFLOW_DIR = 'docs/current/workflow'
 
-export type ChangeArtifactKind = 'design' | 'proposal' | 'decisions' | 'prd' | 'plan'
+export type ChangeArtifactKind = 'design' | 'proposal' | 'decisions' | 'prd' | 'plan' | 'behavior'
 
 const CHANGE_ARTIFACT_FILENAMES: Readonly<Record<ChangeArtifactKind, string>> = Object.freeze({
   design: 'design.md',
@@ -23,6 +23,7 @@ const CHANGE_ARTIFACT_FILENAMES: Readonly<Record<ChangeArtifactKind, string>> = 
   decisions: 'decisions.md',
   prd: 'prd.md',
   plan: 'plan.md',
+  behavior: 'behavior.md',
 })
 
 const VALID_SECURITY_CHECKS: readonly SecurityCheckType[] = ['secret', 'vuln', 'dependency']
@@ -128,6 +129,26 @@ function validateConfigValue(config: unknown): boolean {
     if (v.quality !== undefined && !isValidQualityChecks(v.quality)) return false
     if (v.auto_fix !== undefined && typeof v.auto_fix !== 'boolean') return false
     if (v.completion_prompt !== undefined && typeof v.completion_prompt !== 'boolean') return false
+    if (v.adapters !== undefined) {
+      const a = v.adapters as Record<string, unknown>
+      const validOnMissing = ['skip', 'fail']
+      for (const key of ['secret', 'vuln', 'dependency'] as const) {
+        if (a[key] !== undefined) {
+          const adapter = a[key] as Record<string, unknown>
+          if (adapter.command !== undefined && typeof adapter.command !== 'string') return false
+          if (adapter.args !== undefined && !isStringArray(adapter.args)) return false
+          if (adapter.timeout !== undefined && typeof adapter.timeout !== 'number') return false
+          if (adapter.timeout !== undefined && (adapter.timeout as number) < 1) return false
+          if (adapter.onMissing !== undefined && !validOnMissing.includes(String(adapter.onMissing))) return false
+        }
+      }
+      if (a.consistency !== undefined) {
+        const con = a.consistency as Record<string, unknown>
+        for (const key of ['drift_check', 'current_constraints', 'decisions_constraints', 'symbol_level'] as const) {
+          if (con[key] !== undefined && typeof con[key] !== 'boolean') return false
+        }
+      }
+    }
   }
 
   if (c.archive !== undefined) {
@@ -155,6 +176,23 @@ function validateConfigValue(config: unknown): boolean {
   if (c.writingPlan !== undefined) {
     const wp = c.writingPlan as Record<string, unknown>
     if (wp.enabled !== undefined && typeof wp.enabled !== 'boolean') return false
+  }
+
+  if (c.guardian !== undefined) {
+    const g = c.guardian as Record<string, unknown>
+    if (g.enabled !== undefined && typeof g.enabled !== 'boolean') return false
+    if (g.auto_start !== undefined && typeof g.auto_start !== 'boolean') return false
+    if (g.auto_fix !== undefined && typeof g.auto_fix !== 'boolean') return false
+    if (g.max_retries !== undefined && typeof g.max_retries !== 'number') return false
+    if (g.max_retries !== undefined && (g.max_retries as number) < 1) return false
+    if (g.max_retries !== undefined && (g.max_retries as number) > 10) return false
+    if (g.state_dir !== undefined && typeof g.state_dir !== 'string') return false
+    if (g.contract_cache !== undefined && typeof g.contract_cache !== 'boolean') return false
+    try {
+      if (g.state_dir !== undefined) validateConfigPath(g.state_dir as string)
+    } catch {
+      return false
+    }
   }
 
   return true
@@ -231,6 +269,10 @@ export async function getChangePlansPath(projectDir: string, featureName: string
   return getChangeDocumentPath(projectDir, featureName, 'plan')
 }
 
+export async function getChangeBehaviorPath(projectDir: string, featureName: string): Promise<string> {
+  return getChangeDocumentPath(projectDir, featureName, 'behavior')
+}
+
 export async function getChangeDocumentPath(projectDir: string, featureName: string, kind: ChangeArtifactKind): Promise<string> {
   const workspacePath = await getChangeWorkspacePath(projectDir, featureName)
   return path.join(workspacePath, CHANGE_ARTIFACT_FILENAMES[kind])
@@ -264,6 +306,15 @@ export async function getRequirementsCandidatePaths(projectDir: string, featureN
     path.join(changeWorkspacePath, 'requirements'),
     getRequirementsPath(projectDir, featureName, config),
     getLegacyRequirementsPath(projectDir, featureName),
+  ])
+}
+
+export async function getBehaviorCandidatePaths(projectDir: string, featureName: string): Promise<string[]> {
+  const changeWorkspacePath = await getChangeWorkspacePath(projectDir, featureName)
+  const changeBehaviorPath = await getChangeDocumentPath(projectDir, featureName, 'behavior')
+  return uniquePaths([
+    changeBehaviorPath,
+    path.join(changeWorkspacePath, 'behavior'),
   ])
 }
 
