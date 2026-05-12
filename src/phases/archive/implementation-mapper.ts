@@ -52,6 +52,9 @@ export async function generateImplementationMapper(options: ImplementationMapper
     ...(phasedChanges !== undefined ? { phasedChanges } : {}),
   }
   const codeMappingSection = await generateImplementationMappingSection(feature, changes, traceability, codeMappingOptions)
+  const behaviorMappingSection = options.behaviorPath
+    ? await generateBehaviorMappingSection(options.behaviorPath)
+    : null
   const globalDepsSection = formatGlobalDepsSection(driftItems)
   const verificationSection = formatVerificationSection(acceptanceState, phasedChanges, driftItems)
 
@@ -79,7 +82,16 @@ export async function generateImplementationMapper(options: ImplementationMapper
 ${codeMappingSection}
 `
 
-  const verifyNum = sectionNum(3)
+  if (behaviorMappingSection) {
+    const behaviorNum = sectionNum(3)
+    out += `
+## ${behaviorNum}. 行为到实现映射
+
+${behaviorMappingSection}
+`
+  }
+
+  const verifyNum = sectionNum(behaviorMappingSection ? 4 : 3)
   out += `
 ## ${verifyNum}. 验证与结论
 
@@ -190,6 +202,30 @@ function formatVerificationEvidence(
   }
 
   return 'no verification evidence recorded'
+}
+
+async function generateBehaviorMappingSection(behaviorPath: string): Promise<string> {
+  const lines: string[] = []
+  try {
+    const content = await fs.readFile(behaviorPath, 'utf-8')
+    const scenarioMatches = content.matchAll(/### Scenario:\s*(.+)/g)
+    for (const match of scenarioMatches) {
+      const name = match[1]?.trim()
+      if (name) {
+        lines.push(`| ${escapeMarkdown(name)} | — | — | — | — |`)
+      }
+    }
+  } catch {
+    return 'Unable to parse behavior document.\n'
+  }
+
+  if (lines.length === 0) {
+    return 'No behavior scenarios found.\n'
+  }
+
+  const header = '| Behavior Scenario | Evidence | Code Files | Key Symbols | Notes |'
+  const sep = '|------------------|----------|------------|-------------|-------|'
+  return [header, sep, ...lines].join('\n') + '\n'
 }
 
 async function generateImplementationMappingSection(

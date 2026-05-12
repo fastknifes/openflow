@@ -3,7 +3,7 @@ import * as path from 'node:path'
 import { RequirementModelSchema, type RequirementModel } from '../brainstorm/requirement-model.js'
 
 export interface TraceabilityItem {
-  sourceType: 'requirement' | 'proposal' | 'design'
+  sourceType: 'requirement' | 'proposal' | 'design' | 'behavior'
   sourcePath: string
   sourceLabel: string
   item: string
