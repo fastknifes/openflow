@@ -39,6 +39,7 @@ export async function handleHarden(
   ctx: OpenFlowContext,
   feature?: string,
   args?: { full?: boolean; mode?: string; maxRounds?: number; reviewerModel?: string; executorModel?: string },
+  sessionID?: string,
 ): Promise<string> {
   if (!ctx.config.harden.enabled) {
     return `## Harden Result
@@ -82,6 +83,7 @@ Summary: missing plan file \
   const complexity = gradeComplexity(planContent, diffStr)
   const planSummary = compressInput(buildPlanSummary(planContent, designLookup.content), 12000)
 
+  const currentSessionID = sessionID
   const nextModels: { reviewerModel?: string; executorModel?: string } = {}
   const reviewerModel = args?.reviewerModel ?? ctx.config.harden.reviewerModel
   const executorModel = args?.executorModel ?? ctx.config.harden.executorModel
@@ -106,6 +108,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
       'Harden reviewer round 1',
       reviewerPrompt,
       activeModels.reviewerModel,
+      currentSessionID,
     )
     const grouped = classifyFindings(review.text, designLookup.paths)
     const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
@@ -135,6 +138,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
       tokenBudget: ctx.config.harden.tokenBudgetTotal,
       mode: args?.mode ?? 'standard',
     },
+    currentSessionID,
   )
 
   return formatHardenResult(result)
@@ -146,6 +150,7 @@ async function runAdversarialLoop(
   designContent: string,
   diffStr: string,
   args: { maxRounds: number; tokenBudget: number; mode: string },
+  parentSessionID?: string,
 ): Promise<HardenResult> {
   const rounds: HardenRoundResult[] = []
   const findingCounts = new Map<string, number>()
@@ -173,6 +178,7 @@ async function runAdversarialLoop(
       `Harden reviewer round ${round}`,
       reviewerPrompt,
       activeModels.reviewerModel,
+      parentSessionID,
     )
     budgetConsumed += review.tokens
 
@@ -242,6 +248,7 @@ async function runAdversarialLoop(
       `Harden executor round ${round}`,
       executorPrompt,
       activeModels.executorModel,
+      parentSessionID,
     )
     budgetConsumed += execution.tokens
 
@@ -420,11 +427,16 @@ async function runAgentTask(
   description: string,
   prompt: string,
   model?: string,
+  parentSessionID?: string,
 ): Promise<AgentRunResult> {
   const client = getSessionClient(ctx)
+  const createBody: Record<string, unknown> = { title: description }
+  if (parentSessionID) {
+    createBody.parentID = parentSessionID
+  }
   const created = await client.session.create({
     query: { directory: ctx.directory },
-    body: { title: description },
+    body: createBody,
   })
   const sessionID = extractSessionID(created)
   const promptPayload = buildPromptPayload(sessionID, description, prompt, agent, model, ctx.directory)

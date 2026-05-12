@@ -19,6 +19,11 @@ import {
   hasDesignDoc,
 } from './brainstorm-workflow.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
+import { detectOmoExecutionFlow } from '../utils/omo-detection.js'
+import { loadExecutionPolicy, saveExecutionPolicy, createDefaultPolicy } from '../utils/execution-policy.js'
+import { assessChangeRisk, isHighRisk } from '../utils/risk-assessment.js'
+import * as fs from 'node:fs/promises'
+import * as nodePath from 'node:path'
 
 const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive']
 
@@ -40,8 +45,9 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     if (!message) return
 
     // OpenFlow slash-command dispatch — intercept BEFORE continuation/suggestion logic
-    if (message.trim().startsWith('/openflow-')) {
-      const trimmed = message.trim()
+    const openFlowCommand = extractOpenFlowCommand(message)
+    if (openFlowCommand) {
+      const trimmed = openFlowCommand
 
       // /openflow-brainstorm <feature>
       const brainstormMatch = trimmed.match(/^\/openflow-brainstorm(?:\s+(.+))?$/)
@@ -172,7 +178,7 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
         const hardenFeature = hardenArgs.split(/\s+--/)[0]?.trim()
         const full = hardenArgs.includes('--full')
         try {
-          const result = await handleHarden(ctx, hardenFeature || undefined, { full })
+          const result = await handleHarden(ctx, hardenFeature || undefined, { full }, input.sessionID)
           appendGuardMessage(output, result)
         } catch (err) {
           appendGuardMessage(output, err instanceof Error ? err.message : String(err))
@@ -196,14 +202,95 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
       // Unknown /openflow-* command — pass through
     }
 
+    // --- Quality Policy Lifecycle (OMO Execution) ---
+    try {
+      const omoFlow = await detectOmoExecutionFlow(ctx, message)
+      if (omoFlow === 'omo') {
+        const feature = await findActiveFeature(ctx)
+        if (feature) {
+          const existingPolicy = await loadExecutionPolicy(ctx.directory, feature)
+
+          if (!existingPolicy) {
+            // Check for pending selection from a previous turn
+            const pending = await readPendingSelection(ctx.directory)
+
+            if (pending && pending.feature === feature) {
+              // Parse user reply for quality mode
+              const modeMatch = message.match(/\b(fast|balanced|strict)\b/i)
+              const mode = modeMatch?.[1] ? modeMatch[1].toLowerCase() as 'fast' | 'balanced' | 'strict' : 'balanced'
+
+              // Determine harden_policy based on mode
+              const hardenPolicy = mode === 'fast' ? 'none' as const
+                : mode === 'strict' ? 'final' as const
+                : 'risk-based' as const
+
+              const policy = createDefaultPolicy(feature, feature, mode)
+              policy.harden_policy = hardenPolicy
+              policy.selected_by = 'user'
+              await saveExecutionPolicy(ctx.directory, policy)
+              await clearPendingSelection(ctx.directory)
+
+              appendGuardMessage(output, `## OpenFlow: Quality Mode Selected\n\nMode: **${mode}**\nHarden policy: ${hardenPolicy}\nPolicy saved for feature \`${feature}\`.`)
+            } else {
+              // No policy, no pending — prompt for selection
+              await writePendingSelection(ctx.directory, { feature, timestamp: new Date().toISOString() })
+
+              appendGuardMessage(output, `## OpenFlow: Quality Mode Selection
+
+Choose quality mode for this OMO execution:
+1. **Balanced** (Recommended) - risk-based harden + required verify
+2. **Fast** - skip harden + required verify
+3. **Strict** - final harden + required verify
+
+Reply with: \`fast\`, \`balanced\`, or \`strict\`. (Default: balanced)`)
+            }
+          } else {
+            // Policy exists — apply harden decision (Phase B)
+            const qualityMode = existingPolicy.quality_mode
+            const hardenPolicy = existingPolicy.harden_policy
+
+            if (qualityMode === 'balanced' && hardenPolicy === 'risk-based') {
+              // Assess risk from git diff
+              try {
+                const { execSync } = await import('node:child_process')
+                const diffOutput = execSync('git diff HEAD', { cwd: ctx.directory, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
+                const diffLines = diffOutput.split('\n').length
+                const files = [...new Set(
+                  diffOutput.split('\n')
+                    .filter((line: string) => line.startsWith('+++ '))
+                    .map((line: string) => line.slice(6).trim())
+                )]
+                const risk = assessChangeRisk(files, diffLines, false)
+                if (isHighRisk(risk)) {
+                  appendGuardMessage(output, `## OpenFlow: Harden Suggested\n\nBalanced mode detected **high-risk** changes.\nRecommended: run \`/openflow-harden ${feature}\``)
+                }
+              } catch {
+                // git diff unavailable — skip risk assessment silently
+              }
+            } else if (qualityMode === 'strict' && hardenPolicy === 'final') {
+              appendGuardMessage(output, `## OpenFlow: Harden Required\n\nStrict mode requires harden before verify.\nRun: \`/openflow-harden ${feature}\``)
+            }
+            // fast + none → skip harden entirely
+          }
+        }
+      }
+    } catch {
+      // Quality policy errors must never block message flow
+    }
+    // --- End Quality Policy Lifecycle ---
+
     await acceptanceHook({ sessionID: input.sessionID, message })
 
-    // Suggest /openflow-harden for complex features after implementation
+    // Suggest /openflow-harden for complex features — gated behind quality policy absence
     const acceptanceState = await import('../utils/acceptance-state.js').then(m => m.loadAcceptanceState(ctx.directory))
     if (acceptanceState?.phase === 'acceptance' && acceptanceState.feature) {
-      const hardenSuggestion = await getHardenSuggestion(ctx, acceptanceState.feature)
-      if (hardenSuggestion) {
-        appendGuardMessage(output, hardenSuggestion)
+      // Phase C: gate existing harden suggestion if quality policy exists for this feature
+      const policyForFeature = await loadExecutionPolicy(ctx.directory, acceptanceState.feature)
+      if (!policyForFeature) {
+        const hardenSuggestion = await getHardenSuggestion(ctx, acceptanceState.feature)
+        if (hardenSuggestion) {
+          appendGuardMessage(output, hardenSuggestion)
+        }
       }
     }
 
@@ -306,7 +393,17 @@ OpenFlow only suggests this step. It does not block research, reading, or implem
 
 function looksLikeDirectCommand(message: string): boolean {
   const trimmed = message.trim()
-  return trimmed.startsWith('/openflow-') || trimmed.includes('skill(name="openflow-brainstorm"') || trimmed.includes("skill(name='openflow-brainstorm'")
+  return Boolean(extractOpenFlowCommand(trimmed)) || trimmed.includes('skill(name="openflow-brainstorm"') || trimmed.includes("skill(name='openflow-brainstorm'")
+}
+
+function extractOpenFlowCommand(message: string): string | undefined {
+  const trimmed = message.trim()
+  if (trimmed.startsWith('/openflow-')) {
+    return trimmed
+  }
+
+  const commandMatch = trimmed.match(/^OpenFlow command:\s*(\/openflow-\S+(?:\s+.+)?)$/m)
+  return commandMatch?.[1]?.trim()
 }
 
 function looksLikeFeatureSwitch(message: string, activeFeature: string): boolean {
@@ -336,5 +433,41 @@ async function loadActiveBrainstormSession(directory: string, feature: string) {
     return normalizeBrainstormSession(feature, JSON.parse(content) as unknown)
   } catch {
     return undefined
+  }
+}
+
+const PENDING_SELECTION_PATH = ['openflow', 'pending-selection.json']
+
+async function readPendingSelection(directory: string): Promise<{ feature: string; timestamp: string } | null> {
+  try {
+    const filePath = nodePath.join(directory, '.sisyphus', ...PENDING_SELECTION_PATH)
+    const raw = await fs.readFile(filePath, 'utf-8')
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed.feature === 'string' && typeof parsed.timestamp === 'string') {
+      return parsed as { feature: string; timestamp: string }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+async function writePendingSelection(directory: string, data: { feature: string; timestamp: string }): Promise<void> {
+  try {
+    const filePath = nodePath.join(directory, '.sisyphus', ...PENDING_SELECTION_PATH)
+    const dir = nodePath.dirname(filePath)
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
+  } catch {
+    // Log but don't crash
+  }
+}
+
+async function clearPendingSelection(directory: string): Promise<void> {
+  try {
+    const filePath = nodePath.join(directory, '.sisyphus', ...PENDING_SELECTION_PATH)
+    await fs.unlink(filePath)
+  } catch {
+    // Already gone or inaccessible — ignore
   }
 }
