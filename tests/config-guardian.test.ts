@@ -77,7 +77,7 @@ describe('guardian config validation', () => {
   test('guardian section absent uses defaultConfig.guardian values', () => {
     const config = loadConfig({
       openflow: {
-        brainstorming: { enabled: true },
+        feature: { enabled: true },
       },
     })
     expect(config.guardian).toEqual(defaultConfig.guardian)

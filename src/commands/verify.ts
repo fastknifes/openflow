@@ -28,6 +28,7 @@ import { resolveChangeUnitDir } from '../utils/change-units.js'
 import { loadAcceptanceState, saveAcceptanceState, saveVerifyResult } from '../utils/acceptance-state.js'
 import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
+import { getActiveFeatureSession } from '../hooks/feature-workflow.js'
 import { loadExecutionPolicy } from '../utils/execution-policy.js'
 import { detectOmoExecutionFlow } from '../utils/omo-detection.js'
 import {
@@ -63,13 +64,80 @@ export interface VerifyInteractiveToolContext {
 
 export type VerifyFailureOption = 'fix' | 'accept'
 
+const OPENFLOW_COMMAND_TOKENS = [
+  'openflow-feature',
+  'openflow-change',
+  'openflow-verify',
+  'openflow-archive',
+  'openflow-init',
+  'openflow-status',
+  'openflow-config',
+  'openflow-harden',
+  'openflow-issue',
+  'openflow-migrate-docs',
+  'openflow-writing-plan',
+  'openflow-brainstorm',
+  'slash-command',
+  'command',
+  'auto',
+]
+
+/**
+ * Strips OpenFlow command-related tokens from a feature parameter that may
+ * have been mangled by the AI agent's argument parsing.  For example:
+ *   "auto-slash-command-openflow-command-openflow-verify" → ""
+ *   "openflow-verify-my-feature" → "my-feature"
+ *
+ * If the result is empty, callers treat it as "no explicit feature" and fall
+ * through to session-based or filesystem-based resolution.
+ */
+export function stripOpenFlowCommandTokens(feature: string): string {
+  // Strip markdown backtick residue first so command tokens inside backticks
+  // are exposed for matching (e.g. "`openflow-verify`" → "openflow-verify" → "")
+  let cleaned = feature.replace(/^`+|`+$/g, '')
+
+  // Iteratively strip known tokens (may need multiple passes because removals
+  // can expose new boundary matches, e.g. "auto-slash-command-openflow-verify"
+  // → strip "slash-command" → "auto--openflow-verify" → strip "openflow-verify" → "auto-")
+  let previous: string
+  do {
+    previous = cleaned
+    for (const token of OPENFLOW_COMMAND_TOKENS) {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      // Match token when surrounded by start-of-string/dash and dash/end-of-string
+      const pattern = new RegExp(`(^|-)${escaped}(-|$)`, 'g')
+      cleaned = cleaned.replace(pattern, '$1')
+    }
+    // Clean up consecutive hyphens and leading/trailing hyphens
+    cleaned = cleaned.replace(/-{2,}/g, '-').replace(/^-|-$/g, '')
+  } while (cleaned !== previous)
+
+  // Final cleanup: if the remaining string is just the bare "openflow" prefix
+  // with no real content, it's command residue, not a feature name.
+  if (cleaned === 'openflow' || cleaned === 'openflow-') {
+    return ''
+  }
+
+  return cleaned
+}
+
 export async function handleVerify(
   ctx: OpenFlowContext,
   feature?: string,
   acceptFailures?: boolean,
   toolContext?: unknown,
+  sessionID?: string,
 ): Promise<string> {
-  const resolvedFeature = feature?.trim() ? feature.trim() : await findActiveFeature(ctx)
+  // Step 1: Sanitize the feature parameter to remove OpenFlow command tokens
+  let candidateFeature = feature?.trim() ? stripOpenFlowCommandTokens(feature.trim()) : undefined
+
+  // Step 2: Sanitized away to empty string → treat as undefined
+  if (candidateFeature === '') candidateFeature = undefined
+
+  // Step 3: Resolution chain: explicit arg → session active feature → filesystem fallback
+  const resolvedFeature = candidateFeature
+    ?? (sessionID ? await getActiveFeatureSession(ctx.directory, sessionID) : undefined)
+    ?? await findActiveFeature(ctx)
 
   if (!resolvedFeature) {
     return `## Verify
@@ -126,13 +194,13 @@ export async function handleVerify(
     verifyResult.decisionType = readiness.decisionType
   }
 
-  await saveVerifyResult(ctx.directory, verifyResult)
+  await saveVerifyResult(ctx.directory, verifyResult, undefined, sanitizedFeature)
 
   if (readiness.status === VerifyReadinessStatus.NotReady && hasAskQuestion(toolContext)) {
     const selectedOption = await askVerifyFailureQuestion(toolContext)
 
     if (selectedOption === 'accept') {
-      return handleVerify(ctx, sanitizedFeature, true, toolContext)
+      return handleVerify(ctx, sanitizedFeature, true, toolContext, sessionID)
     }
   }
 
@@ -166,9 +234,20 @@ async function collectEvidence(
   const changeBehaviorPath = path.join(changesPath, 'behavior.md')
   const behaviorExists = await fileExists(changeBehaviorPath)
 
+  // Context alignment: feature mode uses design.md, issue/mixed mode uses issue-clarification.md
+  const designPath = path.join(changesPath, 'design.md')
+  const designExists = changesExists && await fileExists(designPath)
+  const contextAlignmentPresent = mode === 'feature'
+    ? designExists
+    : issueClarificationExists
+  const contextAlignmentPath = mode === 'feature'
+    ? `docs/changes/${changeDir}/design.md`
+    : `docs/changes/${changeDir}/${ISSUE_CLARIFICATION_FILENAME}`
+
   const checksRun = [
     `active_feature_resolution ✅ (${feature})`,
     `plan_exists ${planExists ? '✅' : mode === 'issue' ? 'ℹ️' : '⚠️'} (${planExists ? 'found' : mode === 'issue' ? `not required in issue mode (.sisyphus/plans/${feature}.md)` : `missing .sisyphus/plans/${feature}.md`})`,
+    `context_alignment ${contextAlignmentPresent ? '✅' : '⚠️'} (${contextAlignmentPresent ? `found ${contextAlignmentPath}` : `missing ${contextAlignmentPath}`})`,
     `behavior_exists ${behaviorExists ? '✅' : 'ℹ️'} (${behaviorExists ? 'found' : 'not found'} docs/changes/${changeDir}/behavior.md)`,
     `changes_workspace ${changesExists ? '✅' : '⚠️'} (${changesExists ? 'found' : 'missing'} docs/changes/${changeDir})`,
     `stable_constraints_current ${currentExists ? '✅' : '⚠️'} (${currentExists ? 'found' : 'missing'} docs/current)`,
@@ -197,11 +276,13 @@ async function collectEvidence(
   const checkResults = [...qualityResults, ...securityResults, ...consistencyResults]
   const failedChecks = checkResults.filter(result => !result.passed)
 
-  // Behavior scenario evidence from contract
-  const behaviorScenarios = evaluateBehaviorScenarios(contract, checkResults)
+  const behaviorEvidence = behaviorExists
+    ? await parseBehaviorEvidenceMappings(changeBehaviorPath)
+    : []
+  const behaviorScenarios = evaluateBehaviorScenarios(contract, behaviorEvidence)
 
   const missingEvidence: string[] = []
-  if (mode !== 'issue' && !planExists) missingEvidence.push('active plan file')
+  if (!contextAlignmentPresent) missingEvidence.push('context alignment artifact')
   if (!changesExists) missingEvidence.push('change workspace')
   if (mode !== 'feature' && !issueClarificationExists) missingEvidence.push('issue clarification')
 
@@ -246,11 +327,11 @@ async function collectEvidence(
       ? `Verification evidence is incomplete because ${[failedChecks.length > 0 ? `${failedChecks.length} configured check(s) failed` : '', issueFailures.length > 0 ? `${issueFailures.length} issue-mode expectation(s) remain unresolved` : ''].filter(Boolean).join(' and ')}.`
       : 'Configured verification checks did not expose an intended-vs-actual delta.',
     docAlignmentSummary: changesExists
-      ? mode === 'feature'
-        ? 'Change workspace exists; document alignment can be reviewed from the active changes workspace.'
-        : issueClarificationExists
-          ? 'Change workspace and issue clarification exist; issue intent and documentation alignment can be reviewed together.'
-          : 'Change workspace exists but issue clarification is missing; issue intent cannot be fully assessed.'
+      ? contextAlignmentPresent
+        ? mode === 'feature'
+          ? `Change workspace and design.md provide context alignment; document alignment can be reviewed from the active changes workspace.`
+          : `Change workspace and issue clarification provide context alignment; issue intent and documentation alignment can be reviewed together.`
+        : 'Change workspace exists but context alignment artifact is missing; intent cannot be fully assessed.'
       : 'Change workspace missing; document alignment cannot be fully assessed.',
     constraintConflictSummary: currentExists || decisionsExists
       ? mode === 'feature'
@@ -263,6 +344,9 @@ async function collectEvidence(
   }
   if (behaviorScenarios) {
     packet.behaviorScenarios = behaviorScenarios
+  }
+  if (behaviorEvidence.length > 0) {
+    packet.behaviorEvidence = behaviorEvidence
   }
   return packet
 }
@@ -503,8 +587,8 @@ export async function classifyReadiness(
   }
 
   const reasonCodes: string[] = []
-  if (mode !== 'issue' && !didNamedCheckPass(evidence, 'plan_exists')) {
-    reasonCodes.push('plan_missing')
+  if (!didNamedCheckPass(evidence, 'context_alignment')) {
+    reasonCodes.push('context_alignment_missing')
   }
   if (!didNamedCheckPass(evidence, 'changes_workspace')) {
     reasonCodes.push('changes_workspace_missing')
@@ -554,7 +638,7 @@ export async function classifyReadiness(
   const behaviorExists = await fileExists(changeBehaviorPath)
   if (behaviorExists && mode === 'feature') {
     const behaviorScenarios = await parseBehaviorScenarios(changeBehaviorPath)
-    if (behaviorScenarios.length > 0 && evidence.behaviorScenarios && evidence.behaviorScenarios.some(s => s.status === 'failed' || s.status === 'missing_evidence')) {
+    if (behaviorScenarios.length > 0 && evidence.behaviorScenarios && evidence.behaviorScenarios.some(isBlockingBehaviorScenarioGap)) {
       reasonCodes.push('behavior_evidence_incomplete')
     }
   }
@@ -943,45 +1027,114 @@ function hasUnapprovedDecisionPromotion(acceptanceState: AcceptanceState | null 
 
 function evaluateBehaviorScenarios(
   contract: import('../contracts/openflow-contract.js').OpenFlowContract | null,
-  checkResults: VerifyEvidenceCheckResult[],
+  evidenceMappings: import('../types.js').BehaviorScenarioEvidence[],
 ): BehaviorScenarioCheckResult[] | undefined {
   if (!contract || contract.behaviorScenarios.length === 0) return undefined
 
-  const failedCategories = new Set(
-    checkResults
-      .filter(result => !result.passed)
-      .map(result => result.category),
-  )
-
   return contract.behaviorScenarios.map((scenario) => {
-    // Derive status from check results
-    if (failedCategories.has('quality') || failedCategories.has('security')) {
+    const evidence = findBehaviorEvidence(evidenceMappings, scenario.name)
+    if (evidence) {
       return {
         scenarioId: scenario.id,
         name: scenario.name,
-        status: 'failed' as const,
-        detail: `Quality or security checks failed; scenario "${scenario.name}" cannot be verified.`,
+        criticality: scenario.criticality,
+        status: evidence.status,
+        evidenceType: evidence.evidenceType,
+        evidenceReference: evidence.evidenceReference,
+        detail: evidence.reason,
       }
     }
 
-    // If no failures, check if this is a critical scenario with no explicit evidence
     if (scenario.criticality === 'critical') {
       return {
         scenarioId: scenario.id,
         name: scenario.name,
+        criticality: scenario.criticality,
         status: 'missing_evidence' as const,
         detail: `Critical scenario "${scenario.name}" requires explicit verification evidence.`,
       }
     }
 
-    // Otherwise, missing evidence
+    // Boundary/optional scenarios should be reported without blocking readiness.
     return {
       scenarioId: scenario.id,
       name: scenario.name,
-      status: 'missing_evidence' as const,
-      detail: 'No implementation evidence mapped to this scenario.',
+      criticality: scenario.criticality,
+      status: scenario.criticality === 'optional' ? 'not_applicable' as const : 'missing_evidence' as const,
+      detail: scenario.criticality === 'optional'
+        ? 'Boundary scenario recorded for review; explicit blocking evidence is not required.'
+        : 'No implementation evidence mapped to this scenario.',
     }
   })
+}
+
+function findBehaviorEvidence(
+  evidenceMappings: import('../types.js').BehaviorScenarioEvidence[],
+  scenarioName: string,
+): import('../types.js').BehaviorScenarioEvidence | undefined {
+  const normalizedScenario = normalizeEvidenceKey(scenarioName)
+  return evidenceMappings.find((evidence) => normalizeEvidenceKey(evidence.scenarioName) === normalizedScenario)
+}
+
+async function parseBehaviorEvidenceMappings(behaviorPath: string): Promise<import('../types.js').BehaviorScenarioEvidence[]> {
+  try {
+    const content = await fs.readFile(behaviorPath, 'utf-8')
+    const lines = content.split('\n')
+    const tableStart = lines.findIndex(line => /^\|\s*Behavior\s*\|\s*Evidence Type\s*\|\s*Expected Evidence\s*\|\s*Status\s*\|/i.test(line.trim()))
+    if (tableStart < 0) return []
+
+    const result: import('../types.js').BehaviorScenarioEvidence[] = []
+    for (const line of lines.slice(tableStart + 1)) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('|')) break
+      if (/^\|[\s\-:|]+\|$/.test(trimmed)) continue
+
+      const cells = splitMarkdownTableRow(trimmed)
+      if (cells.length < 4) continue
+      const scenarioName = cells[0] ?? ''
+      if (!scenarioName) continue
+
+      const status = normalizeBehaviorEvidenceStatus(cells[3] ?? '')
+      result.push({
+        scenarioName,
+        status,
+        evidenceType: cells[1] || 'manual',
+        evidenceReference: cells[2] || 'Not specified.',
+        reason: status === 'verified'
+          ? `Verification mapping marks "${scenarioName}" as verified.`
+          : status === 'failed'
+            ? `Verification mapping marks "${scenarioName}" as failed.`
+            : status === 'not_applicable'
+              ? `Verification mapping marks "${scenarioName}" as not applicable.`
+              : `Verification mapping does not provide completed evidence for "${scenarioName}".`,
+      })
+    }
+
+    return result
+  } catch {
+    return []
+  }
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  return line.split('|').slice(1, -1).map(cell => cell.trim())
+}
+
+function normalizeBehaviorEvidenceStatus(value: string): import('../types.js').BehaviorEvidenceStatus {
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (normalized === 'verified' || normalized === 'passed' || normalized === 'pass') return 'verified'
+  if (normalized === 'failed' || normalized === 'fail') return 'failed'
+  if (normalized === 'not_applicable' || normalized === 'n/a' || normalized === 'na') return 'not_applicable'
+  return 'missing_evidence'
+}
+
+function normalizeEvidenceKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function isBlockingBehaviorScenarioGap(scenario: BehaviorScenarioCheckResult): boolean {
+  return scenario.criticality !== 'optional'
+    && (scenario.status === 'failed' || scenario.status === 'missing_evidence')
 }
 
 async function parseBehaviorScenarios(behaviorPath: string): Promise<string[]> {

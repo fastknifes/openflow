@@ -30,6 +30,7 @@ import {
   getDesignCandidatePaths,
   getRequirementsCandidatePaths,
 } from '../config.js'
+import { stripOpenFlowCommandTokens } from './verify.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 
 const RECENT_BUILDS_WINDOW = 5
@@ -39,7 +40,10 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     return 'Archive phase is disabled in configuration'
   }
 
-  const resolvedFeature = feature?.trim() || await findActiveFeature(ctx)
+  let candidateFeature = feature?.trim() ? stripOpenFlowCommandTokens(feature.trim()) : undefined
+  if (candidateFeature === '') candidateFeature = undefined
+
+  const resolvedFeature = candidateFeature || await findActiveFeature(ctx)
   if (!resolvedFeature) {
     throw new OpenFlowError(ErrorCode.INVALID_INPUT, 'Feature name is required. Usage: /openflow-archive <feature-name>')
   }
@@ -62,57 +66,68 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
   const requirementsExists = Boolean(sourceRequirementsPath)
 
-  const acceptanceState = await loadAcceptanceState(ctx.directory)
+  const acceptanceStateRaw = await loadAcceptanceState(ctx.directory)
+  const matchingAcceptanceState = acceptanceStateRaw?.feature === sanitizedFeature ? acceptanceStateRaw : null
   const issueClarificationSourcePath = await resolvePreferredExistingPath(ctx.directory, [
-    acceptanceState?.issueClarificationPath,
+    acceptanceStateRaw?.issueClarificationPath,
     path.join(sourceChangeWorkspacePath, ISSUE_CLARIFICATION_FILENAME),
   ])
   const promotionCandidateSourcePath = await resolvePreferredExistingPath(ctx.directory, [
-    acceptanceState?.promotionCandidatePath,
+    acceptanceStateRaw?.promotionCandidatePath,
     path.join(sourceChangeWorkspacePath, PROMOTION_CANDIDATE_FILENAME),
   ])
   const issueClarificationExists = issueClarificationSourcePath !== null
+  const issueResolutionSourcePath = await resolvePreferredExistingPath(ctx.directory, [
+    path.join(sourceChangeWorkspacePath, ISSUE_RESOLUTION_FILENAME),
+  ])
   const promotionCandidateExists = promotionCandidateSourcePath !== null
-  const hasAcceptanceChanges = acceptanceState !== null && acceptanceState.pendingDocUpdates.length > 0
-  const readiness = acceptanceState?.readiness
-  const useLegacyReadinessFallback = acceptanceState !== null && readiness === undefined
+  const hasAcceptanceChanges = matchingAcceptanceState !== null && matchingAcceptanceState.pendingDocUpdates.length > 0
+  const readiness = matchingAcceptanceState?.readiness
+  const useLegacyReadinessFallback = matchingAcceptanceState !== null && readiness === undefined
 
   if (readiness === VerifyReadinessStatus.NotReady || readiness === VerifyReadinessStatus.NeedsDecision) {
     return formatReadinessBlock(sanitizedFeature, readiness)
   }
 
-  if (readiness === VerifyReadinessStatus.ReadyWithDocUpdates && acceptanceState) {
-    const confirmationState = getArchiveDocUpdateConfirmationState(acceptanceState)
+  // Guard: if an acceptance state exists but belongs to a different feature,
+  // refuse to proceed. Stale readiness must neither block nor allow the
+  // requested feature — only matching readiness counts.
+  if (acceptanceStateRaw !== null && matchingAcceptanceState === null) {
+    return formatMissingReadinessBlock(sanitizedFeature, acceptanceStateRaw.feature)
+  }
+
+  if (readiness === VerifyReadinessStatus.ReadyWithDocUpdates && matchingAcceptanceState) {
+    const confirmationState = getArchiveDocUpdateConfirmationState(matchingAcceptanceState)
 
     if (!confirmationState.confirmed) {
       if (!confirmationState.waiting) {
         if (confirmationState.declined) {
-          return formatDocUpdateConfirmationDeclined(sanitizedFeature, acceptanceState.pendingDocUpdates)
+          return formatDocUpdateConfirmationDeclined(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates)
         }
 
-        acceptanceState.archiveUsedDocUpdateConfirmPath = true
-        await saveAcceptanceState(ctx.directory, acceptanceState)
-        await setWaitingForDocUpdateConfirm(ctx.directory, acceptanceState.pendingDocUpdates[0]?.file ?? `docs/changes/${sanitizedFeature}`)
-        return formatDocUpdateConfirmationRequired(sanitizedFeature, acceptanceState.pendingDocUpdates, false)
+        matchingAcceptanceState.archiveUsedDocUpdateConfirmPath = true
+        await saveAcceptanceState(ctx.directory, matchingAcceptanceState)
+        await setWaitingForDocUpdateConfirm(ctx.directory, matchingAcceptanceState.pendingDocUpdates[0]?.file ?? `docs/changes/${sanitizedFeature}`)
+        return formatDocUpdateConfirmationRequired(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates, false)
       }
 
-      return formatDocUpdateConfirmationRequired(sanitizedFeature, acceptanceState.pendingDocUpdates, true)
+      return formatDocUpdateConfirmationRequired(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates, true)
     }
   }
 
   const buildChanges = await collectFileChanges(ctx.directory)
-  const sessionChanges = await collectSessionFileChanges(ctx, acceptanceState?.sessionID)
+  const sessionChanges = await collectSessionFileChanges(ctx, matchingAcceptanceState?.sessionID)
   const changes = sessionChanges.length > 0 ? sessionChanges : buildChanges
 
-  const phaseCutoff = acceptanceState?.implementationEndedAt ?? acceptanceState?.phaseStartedAt
-  const phasedChanges = await collectPhasedSessionChanges(ctx, acceptanceState?.sessionID, phaseCutoff)
+  const phaseCutoff = matchingAcceptanceState?.implementationEndedAt ?? matchingAcceptanceState?.phaseStartedAt
+  const phasedChanges = await collectPhasedSessionChanges(ctx, matchingAcceptanceState?.sessionID, phaseCutoff)
   const driftItems = await collectDriftItems(ctx, sourceDesignPath, phasedChanges)
 
   if (useLegacyReadinessFallback && driftItems.length > 0 && Boolean(ctx.config.archive.drift_check)) {
     return formatDriftDecisionRequired(sanitizedFeature, driftItems)
   }
 
-  if (useLegacyReadinessFallback && acceptanceState?.verificationFailureCategory === 'security') {
+  if (useLegacyReadinessFallback && matchingAcceptanceState?.verificationFailureCategory === 'security') {
     return formatSecurityVerificationBlock(sanitizedFeature)
   }
 
@@ -172,7 +187,7 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     designExists,
     planExists,
     changes,
-    acceptanceState,
+    acceptanceState: matchingAcceptanceState,
     ...(phasedChanges ? { phasedChanges } : {}),
     ...(driftItems.length > 0 ? { driftItems } : {}),
     ...(issueClarificationSourcePath ? { issueClarificationPath: issueClarificationSourcePath } : {}),
@@ -186,22 +201,27 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   let governanceDecisionTargetPath: string | null = null
 
   if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
-    await writeIssueResolution({
-      projectDir: ctx.directory,
-      archiveDir,
-      feature: sanitizedFeature,
-      mode: archiveMode,
-      issueClarificationPath: issueClarificationSourcePath,
-      promotionCandidatePath: promotionCandidateSourcePath,
-      acceptanceState,
-      changes,
-    })
+    if (issueResolutionSourcePath) {
+      await fs.copyFile(issueResolutionSourcePath, path.join(archiveDir, ISSUE_RESOLUTION_FILENAME))
+      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, issueResolutionSourcePath)
+    } else {
+      await writeIssueResolution({
+        projectDir: ctx.directory,
+        archiveDir,
+        feature: sanitizedFeature,
+        mode: archiveMode,
+        issueClarificationPath: issueClarificationSourcePath,
+        promotionCandidatePath: promotionCandidateSourcePath,
+        acceptanceState: matchingAcceptanceState,
+        changes,
+      })
+    }
     issueResolutionGenerated = true
 
     governanceDecisionTargetPath = await applyGovernancePromotionIfConfirmed(
       ctx.directory,
       sanitizedFeature,
-      acceptanceState,
+      matchingAcceptanceState,
       promotionCandidateSourcePath,
     )
   }
@@ -233,9 +253,9 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     promotionSuggestions,
     promotionResult.applied.length,
     autoPromoteCurrent,
-    acceptanceState?.phase === 'verification_pending' && !acceptanceState.verificationCompletedAt,
+    matchingAcceptanceState?.phase === 'verification_pending' && !matchingAcceptanceState.verificationCompletedAt,
     useLegacyReadinessFallback,
-    acceptanceState?.archiveUsedDocUpdateConfirmPath === true,
+    matchingAcceptanceState?.archiveUsedDocUpdateConfirmPath === true,
     archiveMode,
     issueClarificationExists,
     promotionCandidateExists,
@@ -366,6 +386,21 @@ Feature: ${escapeMarkdown(feature)}
 Archive stopped because verification readiness is **${escapeMarkdown(statusLabel)}**.
 
 ${nextAction}`
+}
+
+function formatMissingReadinessBlock(
+  feature: string,
+  staleFeature: string,
+): string {
+  return `## Archive Blocked
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive stopped because no verification readiness was found for **${escapeMarkdown(feature)}**.
+
+The current acceptance state (\`.sisyphus/acceptance.local.md\`) belongs to **${escapeMarkdown(staleFeature)}**, not **${escapeMarkdown(feature)}**.
+
+Run \`/openflow-verify ${feature}\` to generate fresh readiness for this feature before archiving.`
 }
 
 function getArchiveDocUpdateConfirmationState(state: {

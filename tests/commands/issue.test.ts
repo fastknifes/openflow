@@ -1,7 +1,8 @@
 import { describe, expect, test, afterAll } from 'bun:test'
-import { access, mkdir, rm, readFile } from 'node:fs/promises'
+import { access, mkdir, rm, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { handleIssue } from '../../src/commands/issue.js'
+import { loadAcceptanceState } from '../../src/utils/acceptance-state.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 
 function createContext(directory: string): OpenFlowContext {
@@ -40,6 +41,7 @@ describe('issue command', () => {
     expect(result).toContain('--write-doc')
     expect(result).toContain('--no-doc')
     expect(result).toContain('--continue')
+    expect(result).toContain('--resolve')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -197,6 +199,146 @@ describe('issue command', () => {
     expect(result).toContain('issue-clarification.md')
     expect(result).toContain('### 1. Issue Intake')
     expect(result).toContain('### 8. Governance Promotion')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('--resolve writes durable issue artifacts without requiring a plan', async () => {
+    const root = join(process.cwd(), '.test-issue-resolve')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const date = todayPrefix()
+    const result = await handleIssue(createContext(root), '--resolve "cache stale after write" --name cache-stale')
+
+    expect(result).toContain('## Issue Work Node Recorded')
+    expect(result).toContain('plan required: no')
+    expect(result).toContain('quality gate:')
+    expect(result).toContain('openflow-quality-gate')
+
+    const workspace = join(root, 'docs', 'changes', `${date}-cache-stale`)
+    const clarificationPath = join(workspace, 'issue-clarification.md')
+    const resolutionPath = join(workspace, 'issue-resolution.md')
+    const promotionCandidatePath = join(workspace, 'promotion-candidate.md')
+    await expect(access(clarificationPath)).resolves.toBeNull()
+    await expect(access(resolutionPath)).resolves.toBeNull()
+    await expect(access(promotionCandidatePath)).resolves.toBeNull()
+    await expect(access(join(root, '.sisyphus', 'plans', 'cache-stale.md'))).rejects.toBeDefined()
+
+    const resolution = await readFile(resolutionPath, 'utf-8')
+    expect(resolution).toContain('## Recurrence Signature')
+    expect(resolution).toContain('## Future AI Guidance')
+    expect(resolution).toContain('cache stale after write')
+
+    const promotionCandidate = await readFile(promotionCandidatePath, 'utf-8')
+    expect(promotionCandidate).toContain('## Approval Needed')
+    expect(promotionCandidate).toContain('User approval required')
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.feature).toBe('cache-stale')
+    expect(state?.phase).toBe('verification_pending')
+    expect(state?.mode).toBe('issue')
+    expect(state?.primaryClassification).toBe('bugfix')
+    expect(state?.issueClarificationPath).toBe(clarificationPath)
+    expect(state?.promotionCandidatePath).toBe(promotionCandidatePath)
+    expect(state?.governancePromotionStatus).toBe('candidate_created')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('--resolve is skipped when --no-doc is active', async () => {
+    const root = join(process.cwd(), '.test-issue-resolve-no-doc')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const result = await handleIssue(createContext(root), '--resolve --no-doc "api broken" --name api-broken')
+
+    expect(result).toContain('Resolve skipped')
+    expect(result).toContain('--no-doc')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('--resolve is skipped when --env production is active', async () => {
+    const root = join(process.cwd(), '.test-issue-resolve-production')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const result = await handleIssue(createContext(root), '--resolve "api broken" --name api-broken --env production')
+
+    expect(result).toContain('Resolve skipped')
+    expect(result).toContain('--readonly or --env production')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('--resolve result mentions quality gate delegation to openflow-quality-gate', async () => {
+    const root = join(process.cwd(), '.test-issue-resolve-harden')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const result = await handleIssue(createContext(root), '--resolve "trivial fix" --name trivial-fix')
+
+    expect(result).toContain('## Issue Work Node Recorded')
+    expect(result).toContain('quality gate:')
+    expect(result).toContain('openflow-quality-gate')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('--resolve includes bugfix routing suggestion in Recommended Next Step section', async () => {
+    const root = join(process.cwd(), '.test-issue-suggest-bugfix')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const result = await handleIssue(createContext(root), '--resolve "data not saving" --name data-not-saving')
+
+    expect(result).toContain('### 9. Recommended Next Step')
+    expect(result).toContain('Fix recommended')
+    expect(result).toContain('/openflow-issue data-not-saving --resolve')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('includes similar historical issues hint when archive has matching issue-resolution.md', async () => {
+    const root = join(process.cwd(), '.test-issue-history')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    // Create an archive directory with issue-resolution.md
+    const archiveDir = join(root, 'docs', 'archive', '2026-05-01-api-broken')
+    await mkdir(archiveDir, { recursive: true })
+
+    const resolutionContent = `# Issue Resolution
+
+## Symptom
+The API is returning 500 errors when users try to login
+
+## Root Cause
+A null pointer exception in the authentication handler
+
+## Fix Summary
+Added null check before processing user credentials
+
+## Files Involved
+- src/auth/handler.ts
+
+## Verification Evidence
+All tests pass and manual testing confirmed the fix
+
+## Recurrence Signature
+Look for 500 errors in the auth endpoint
+
+## Future AI Guidance
+Check auth handler null safety first
+`
+    await writeFile(join(archiveDir, 'issue-resolution.md'), resolutionContent, 'utf-8')
+
+    const result = await handleIssue(createContext(root), '"api broken" --name api-broken')
+
+    expect(result).toContain('### Similar Historical Issues')
+    expect(result).toContain('api-broken')
+    expect(result).toContain('relevance:')
 
     await rm(root, { recursive: true, force: true })
   })

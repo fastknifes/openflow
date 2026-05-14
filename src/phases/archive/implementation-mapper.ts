@@ -221,27 +221,96 @@ function formatGuardianEvidenceSection(evidence?: GuardianEvidence): string {
 }
 
 async function generateBehaviorMappingSection(behaviorPath: string): Promise<string> {
-  const lines: string[] = []
+  const rows: BehaviorMappingRow[] = []
   try {
     const content = await fs.readFile(behaviorPath, 'utf-8')
-    const scenarioMatches = content.matchAll(/### Scenario:\s*(.+)/g)
-    for (const match of scenarioMatches) {
-      const name = match[1]?.trim()
-      if (name) {
-        lines.push(`| ${escapeMarkdown(name)} | — | — | — | — |`)
-      }
-    }
+    rows.push(...parseBehaviorMappingRows(content))
   } catch {
     return 'Unable to parse behavior document.\n'
   }
 
-  if (lines.length === 0) {
+  if (rows.length === 0) {
     return 'No behavior scenarios found.\n'
   }
 
-  const header = '| Behavior Scenario | Evidence | Code Files | Key Symbols | Notes |'
-  const sep = '|------------------|----------|------------|-------------|-------|'
+  const header = '| Behavior Scenario | Type | Expected Behavior | Evidence | Code Files | Key Symbols | Notes |'
+  const sep = '|------------------|------|-------------------|----------|------------|-------------|-------|'
+  const lines = rows.map(row => (
+    `| ${escapeMarkdown(row.name)} | ${escapeMarkdown(row.type)} | ${escapeMarkdown(row.expectedBehavior)} | — | — | — | ${escapeMarkdown(row.notes)} |`
+  ))
   return [header, sep, ...lines].join('\n') + '\n'
+}
+
+interface BehaviorMappingRow {
+  name: string
+  type: 'scenario' | 'boundary'
+  expectedBehavior: string
+  notes: string
+}
+
+function parseBehaviorMappingRows(content: string): BehaviorMappingRow[] {
+  const rows: BehaviorMappingRow[] = []
+  const lines = content.split('\n')
+  let current: {
+    name: string
+    type: 'scenario' | 'boundary'
+    given: string[]
+    when: string[]
+    then: string[]
+  } | null = null
+  let currentStep: 'given' | 'when' | 'then' | null = null
+
+  const pushCurrent = () => {
+    if (!current) return
+    rows.push({
+      name: current.name,
+      type: current.type,
+      expectedBehavior: formatExpectedBehavior(current.given, current.when, current.then),
+      notes: current.type === 'boundary' ? 'Boundary scenario; should-pass evidence.' : 'Critical behavior scenario.',
+    })
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    const heading = line.match(/^###\s+(Scenario|Boundary):\s*(.+)$/i)
+    if (heading) {
+      pushCurrent()
+      current = {
+        type: heading[1]!.toLowerCase() === 'boundary' ? 'boundary' : 'scenario',
+        name: heading[2]!.trim(),
+        given: [],
+        when: [],
+        then: [],
+      }
+      currentStep = null
+      continue
+    }
+
+    if (!current) continue
+
+    const stepHeading = line.match(/^(Given|When|Then):\s*$/i)
+    if (stepHeading) {
+      currentStep = stepHeading[1]!.toLowerCase() as 'given' | 'when' | 'then'
+      continue
+    }
+
+    if (!currentStep || !line.startsWith('-')) continue
+    const item = line.replace(/^[-*]\s*/, '').trim()
+    if (item) current[currentStep].push(item)
+  }
+
+  pushCurrent()
+  return rows
+}
+
+function formatExpectedBehavior(given: string[], when: string[], then: string[]): string {
+  const parts = [
+    given.length > 0 ? `Given ${given.join('; ')}` : '',
+    when.length > 0 ? `When ${when.join('; ')}` : '',
+    then.length > 0 ? `Then ${then.join('; ')}` : '',
+  ].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(' / ') : 'Not specified.'
 }
 
 async function generateImplementationMappingSection(

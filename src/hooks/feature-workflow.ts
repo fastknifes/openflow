@@ -219,7 +219,7 @@ export function decideTrigger(
     }
   }
 
-  const fallbackFeature = extractFeature(message)
+  const fallbackFeature = extractFeature(metadata.featureHint ?? message)
   return {
     feature: fallbackFeature,
     shouldTrigger: Boolean(fallbackFeature),
@@ -475,6 +475,11 @@ function extractFeature(value?: string): string | undefined {
   }
 
   // No requirement pattern or intent keywords matched — don't manufacture a feature slug
+  // But if the value looks like a clean feature name (no spaces, short), return it as-is
+  if (value.length <= 64 && !/\s/.test(value)) {
+    return sanitizeFeatureCandidate(value)
+  }
+
   return undefined
 }
 

@@ -38,12 +38,12 @@ async function cleanupLegacyWorkspaceSkillArtifacts(projectDir: string | undefin
   const legacyPaths = [
     path.join(projectDir, '.opencode', 'skills', 'archive.md'),
     path.join(projectDir, '.opencode', 'skills', 'verify.md'),
-    path.join(projectDir, '.opencode', 'skills', 'brainstorm.md'),
+    path.join(projectDir, '.opencode', 'skills', 'feature.md'),
     path.join(projectDir, '.opencode', 'skills', 'openflow'),
     path.join(projectDir, '.opencode', 'skills', 'archive'),
     path.join(projectDir, '.opencode', 'skills', 'verify'),
-    path.join(projectDir, '.opencode', 'skills', 'brainstorm'),
-    path.join(projectDir, '.opencode', 'commands', 'brainstorm.md'),
+    path.join(projectDir, '.opencode', 'skills', 'feature'),
+    path.join(projectDir, '.opencode', 'commands', 'feature.md'),
   ]
 
   await Promise.all(legacyPaths.map((target) => fs.rm(target, { recursive: true, force: true })))

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { RequirementModelSchema, type RequirementModel } from '../phases/brainstorm/requirement-model.js'
+import { RequirementModelSchema, type RequirementModel } from '../phases/feature/requirement-model.js'
 import type { DriftItem, PhasedChanges } from '../types.js'
 import { logger } from './logger.js'
 

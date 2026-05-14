@@ -2,19 +2,19 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  getActiveBrainstormFeature,
-  getBrainstormLifecycleState,
-  getRecentCompletedBrainstormFeature,
-} from '../../src/hooks/brainstorm-workflow.js'
+  getActiveFeatureSession,
+  getFeatureLifecycleState,
+  getRecentCompletedFeature,
+} from '../../src/hooks/feature-workflow.js'
 
-describe('brainstorm workflow lifecycle', () => {
-  test('returns active brainstorm feature for a live session binding', async () => {
-    const root = join(process.cwd(), '.test-brainstorm-lifecycle-active')
+describe('feature workflow lifecycle', () => {
+  test('returns active feature session for a live session binding', async () => {
+    const root = join(process.cwd(), '.test-feature-lifecycle-active')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'active.json'),
+      join(root, '.sisyphus', 'feature', 'active.json'),
       JSON.stringify({
         bySessionID: {
           'session-live': {
@@ -27,7 +27,7 @@ describe('brainstorm workflow lifecycle', () => {
     )
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'user-login.json'),
+      join(root, '.sisyphus', 'feature', 'user-login.json'),
       JSON.stringify({
         version: 2,
         feature: 'user-login',
@@ -42,18 +42,18 @@ describe('brainstorm workflow lifecycle', () => {
       'utf-8'
     )
 
-    await expect(getActiveBrainstormFeature(root, 'session-live')).resolves.toBe('user-login')
+    await expect(getActiveFeatureSession(root, 'session-live')).resolves.toBe('user-login')
 
     await rm(root, { recursive: true, force: true })
   })
 
   test('prunes completed sessions from active index', async () => {
-    const root = join(process.cwd(), '.test-brainstorm-lifecycle-prune')
+    const root = join(process.cwd(), '.test-feature-lifecycle-prune')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'active.json'),
+      join(root, '.sisyphus', 'feature', 'active.json'),
       JSON.stringify({
         bySessionID: {
           'session-done': {
@@ -66,7 +66,7 @@ describe('brainstorm workflow lifecycle', () => {
     )
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'user-login.json'),
+      join(root, '.sisyphus', 'feature', 'user-login.json'),
       JSON.stringify({
         version: 2,
         feature: 'user-login',
@@ -81,8 +81,8 @@ describe('brainstorm workflow lifecycle', () => {
       'utf-8'
     )
 
-    await expect(getActiveBrainstormFeature(root, 'session-done')).resolves.toBeUndefined()
-    const content = JSON.parse(await readFile(join(root, '.sisyphus', 'brainstorm', 'active.json'), 'utf-8')) as {
+    await expect(getActiveFeatureSession(root, 'session-done')).resolves.toBeUndefined()
+    const content = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'active.json'), 'utf-8')) as {
       bySessionID: Record<string, unknown>
     }
     expect(content.bySessionID['session-done']).toBeUndefined()
@@ -91,12 +91,12 @@ describe('brainstorm workflow lifecycle', () => {
   })
 
   test('returns recent completion feature inside short handoff window', async () => {
-    const root = join(process.cwd(), '.test-brainstorm-lifecycle-recent')
+    const root = join(process.cwd(), '.test-feature-lifecycle-recent')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'recent-completed.json'),
+      join(root, '.sisyphus', 'feature', 'recent-completed.json'),
       JSON.stringify({
         bySessionID: {
           'session-recent': {
@@ -108,8 +108,8 @@ describe('brainstorm workflow lifecycle', () => {
       'utf-8'
     )
 
-    await expect(getRecentCompletedBrainstormFeature(root, 'session-recent')).resolves.toBe('user-login')
-    await expect(getBrainstormLifecycleState(root, 'session-recent')).resolves.toEqual({
+    await expect(getRecentCompletedFeature(root, 'session-recent')).resolves.toBe('user-login')
+    await expect(getFeatureLifecycleState(root, 'session-recent')).resolves.toEqual({
       activeFeature: undefined,
       recentCompletedFeature: 'user-login',
     })

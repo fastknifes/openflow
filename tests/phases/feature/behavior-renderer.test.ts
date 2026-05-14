@@ -3,73 +3,91 @@ import { createMinimalRequirementModel, resetIdCounter, type RequirementModel } 
 import { renderBehaviorDocument } from '../../../src/phases/feature/behavior-renderer.js'
 
 const REQUIRED_HEADINGS = [
-  '## Scope',
-  '## Behavior Scenarios',
-  '## Must Not Behaviors',
-  '## Boundary Scenarios',
-  '## Verification Mapping',
+  '## User Context',
+  '## Trigger Rules',
+  '## Non-Trigger Rules',
+  '## User-Visible Scenarios',
+  '## Required Content',
+  '## Success Responses',
+  '## Must Not Behavior',
+  '## Acceptance / Verification Mapping',
 ] as const
 
 describe('renderBehaviorDocument', () => {
-  test('renders a full model with all required sections', () => {
+  test('renders a full model with all 8 behavior-only sections', () => {
     const model: RequirementModel = {
       feature: 'behavior-renderer',
       constraints: [
         {
           id: 'c-001',
-          category: 'scope',
+          category: 'compatibility',
           severity: 'must',
-          description: 'Keep within defined scope boundary',
-          rationale: 'Prevent scope creep',
-          verificationMethod: 'Review generated output',
+          description: 'Must not change existing public output',
+          rationale: 'Downstream consumers parse behavior docs',
+          verificationMethod: 'Compare generated output against golden files',
           sourceQuestionId: 'constraints',
         },
         {
           id: 'c-002',
           category: 'security',
           severity: 'must',
-          description: 'No sensitive data in output',
-          rationale: 'Output may be logged',
-          verificationMethod: 'Scan output for secrets',
+          description: 'No secrets in generated output',
+          rationale: 'Output may be committed to version control',
+          verificationMethod: 'Scan for secret patterns',
           sourceQuestionId: 'constraints',
         },
       ],
       scopeBoundary: {
-        inScope: ['Render behavior.md from a requirement model'],
-        outOfScope: ['Wiring into brainstorm command'],
+        inScope: ['Feature activation via slash command', 'Question flow driven by state machine'],
+        outOfScope: ['Wiring into archive command', 'Modifying design renderer'],
       },
       acceptanceCriteria: [
-        {
-          id: 'ac-001',
-          description: 'Renderer emits all required sections in order',
-        },
-        {
-          id: 'ac-002',
-          description: 'Verification mapping table is correct',
-        },
+        { id: 'ac-001', description: 'User sees behavior-only sections in generated output' },
+        { id: 'ac-002', description: 'Generated output never includes module paths or file names' },
       ],
       goals: ['Produce stable behavior markdown'],
-      nonGoals: ['Modify the brainstorm command'],
+      nonGoals: ['Modify the brainstorm command', 'Generate design diagrams'],
       testingStrategy: 'unit',
     }
 
     const markdown = renderBehaviorDocument(model)
 
     expectHeadingsExactlyOnce(markdown)
-    expect(markdown).toContain('**In scope:**')
-    expect(markdown).toContain('- Render behavior.md from a requirement model')
-    expect(markdown).toContain('**Out of scope:**')
-    expect(markdown).toContain('- Wiring into brainstorm command')
-    expect(markdown).toContain('These scenarios describe externally observable behavior.')
-    expect(markdown).toContain('- The observable outcome satisfies: Renderer emits all required sections in order')
-    expect(markdown).toContain('- The result can be confirmed without inspecting implementation details')
-    expect(markdown).toContain('### Boundary: Keep within defined scope boundary')
-    expect(markdown).toContain('- The boundary remains enforced as a must requirement')
-    expect(markdown).toContain('- Evidence: Review generated output')
-    expect(markdown).toContain('### Boundary: No sensitive data in output')
-    expect(markdown).toContain('- Evidence: Scan output for secrets')
-    expect(markdown).toContain('| Renderer emits all required sections in order | unit | Observable evidence that this behavior occurs for the intended user or caller | pending |')
-    expect(markdown).toContain('| Verification mapping table is correct | unit | Observable evidence that this behavior occurs for the intended user or caller | pending |')
+
+    // Trigger Rules
+    expect(markdown).toContain('- Goal-driven: Produce stable behavior markdown')
+    expect(markdown).toContain('- In-scope match: Feature activation via slash command')
+
+    // Non-Trigger Rules
+    expect(markdown).toContain('- Out of scope: Wiring into archive command')
+    expect(markdown).toContain('- Not a goal: Modify the brainstorm command')
+
+    // User-Visible Scenarios
+    expect(markdown).toContain('### Scenario: User sees behavior-only sections in generated output')
+    expect(markdown).toContain('**Given:**')
+    expect(markdown).toContain('**When:**')
+    expect(markdown).toContain('**Then (observable outcome):**')
+
+    // Required Content
+    expect(markdown).toContain('- Must satisfy constraint: Must not change existing public output')
+    expect(markdown).toContain('- Must satisfy constraint: No secrets in generated output')
+    expect(markdown).toContain('- Must include: Feature activation via slash command')
+
+    // Success Responses
+    expect(markdown).toContain('**Success:** User sees behavior-only sections in generated output')
+    expect(markdown).toContain('**Success:** Generated output never includes module paths or file names')
+
+    // Must Not Behavior
+    expect(markdown).toContain('- Must not: Modify the brainstorm command')
+    expect(markdown).toContain('- Security boundary: No secrets in generated output')
+
+    // Acceptance / Verification Mapping
+    expect(markdown).toContain('| Acceptance Criterion | Scenario | Evidence Type | Expected Evidence | Status |')
+    expect(markdown).toContain('| User sees behavior-only sections in generated output |')
+    expect(markdown).toContain('| unit | User-observable confirmation')
+
+    // No design/architecture language in renderer scaffolding
+    expect(markdown).not.toContain('architecture')
   })
 
   test('renders a minimal model while preserving all required headings', () => {
@@ -79,18 +97,16 @@ describe('renderBehaviorDocument', () => {
     const markdown = renderBehaviorDocument(model)
 
     expectHeadingsExactlyOnce(markdown)
-    expect(markdown).toContain('**In scope:**')
-    expect(markdown).toContain('- minimal-feature core logic')
+    expect(markdown).toContain('- In-scope match: minimal-feature core logic')
+    expect(markdown).toContain('- Goal-driven: minimal-feature works correctly')
+    expect(markdown).toContain('### Scenario: All existing tests pass')
   })
 
   test('renders empty optional fields with Not specified', () => {
     const model: RequirementModel = {
       feature: 'empty-optional-fields',
       constraints: [],
-      scopeBoundary: {
-        inScope: [],
-        outOfScope: [],
-      },
+      scopeBoundary: { inScope: [], outOfScope: [] },
       acceptanceCriteria: [],
       goals: [],
       nonGoals: [],
@@ -99,12 +115,14 @@ describe('renderBehaviorDocument', () => {
     const markdown = renderBehaviorDocument(model)
 
     expectHeadingsExactlyOnce(markdown)
-    expect(markdown).toContain('## Scope\n\nNot specified.')
-    expect(markdown).toContain('## Behavior Scenarios\n\nThese scenarios describe externally observable behavior.')
+    expect(markdown).toContain('## Trigger Rules\n\nNot specified.')
+    expect(markdown).toContain('## Non-Trigger Rules\n\nNot specified.')
+    expect(markdown).toContain('## User-Visible Scenarios\n\n')
     expect(markdown).toContain('Not specified.')
-    expect(markdown).toContain('## Must Not Behaviors\n\nNot specified.')
-    expect(markdown).toContain('## Boundary Scenarios\n\nNot specified.')
-    expect(markdown).toContain('## Verification Mapping\n\nNot specified.')
+    expect(markdown).toContain('## Required Content\n\nNot specified.')
+    expect(markdown).toContain('## Success Responses\n\nNot specified.')
+    expect(markdown).toContain('## Must Not Behavior\n\nNot specified.')
+    expect(markdown).toContain('## Acceptance / Verification Mapping\n\nNot specified.')
   })
 
   test('keeps section headings in the required order', () => {
@@ -135,12 +153,10 @@ describe('renderBehaviorDocument', () => {
 
     const markdown = renderBehaviorDocument(model)
 
-    const tableHeader = '| Behavior | Evidence Type | Expected Evidence | Status |'
-    const tableSeparator = '|----------|--------------|-------------------|--------|'
+    const tableHeader = '| Acceptance Criterion | Scenario | Evidence Type | Expected Evidence | Status |'
     expect(markdown).toContain(tableHeader)
-    expect(markdown).toContain(tableSeparator)
-    expect(markdown).toContain('| First behavior | automated | Observable evidence that this behavior occurs for the intended user or caller | pending |')
-    expect(markdown).toContain('| Second behavior | automated | Observable evidence that this behavior occurs for the intended user or caller | pending |')
+    expect(markdown).toContain('| First behavior | First behavior | automated | User-observable confirmation that "First behavior" occurs | pending |')
+    expect(markdown).toContain('| Second behavior | Second behavior | automated | User-observable confirmation that "Second behavior" occurs | pending |')
   })
 
   test('uses manual as default evidence type when testingStrategy is absent', () => {
@@ -148,88 +164,147 @@ describe('renderBehaviorDocument', () => {
       feature: 'no-strategy',
       constraints: [],
       scopeBoundary: { inScope: [], outOfScope: [] },
-      acceptanceCriteria: [
-        { id: 'ac-001', description: 'Some behavior' },
-      ],
+      acceptanceCriteria: [{ id: 'ac-001', description: 'Some behavior' }],
       goals: [],
       nonGoals: [],
     }
 
     const markdown = renderBehaviorDocument(model)
 
-    expect(markdown).toContain('| Some behavior | manual | Observable evidence that this behavior occurs for the intended user or caller | pending |')
+    expect(markdown).toContain('| Some behavior | Some behavior | manual | User-observable confirmation that "Some behavior" occurs | pending |')
   })
 
-  test('only shows scope and security constraints in boundary scenarios', () => {
+  test('maps constraints to trigger, non-trigger, and must-not rules correctly', () => {
     const model: RequirementModel = {
-      feature: 'filter-test',
+      feature: 'constraint-mapping',
       constraints: [
         {
           id: 'c-001',
-          category: 'scope',
+          category: 'compatibility',
           severity: 'must',
-          description: 'Scope constraint',
-          rationale: 'reason',
-          verificationMethod: 'review',
+          description: 'Must obey scope boundary',
+          rationale: 'Prevent scope creep',
+          verificationMethod: 'Review scope',
           sourceQuestionId: 'constraints',
         },
         {
           id: 'c-002',
-          category: 'security',
+          category: 'performance',
           severity: 'should',
-          description: 'Security constraint',
-          rationale: 'reason',
-          verificationMethod: 'review',
+          description: 'Respond within 200ms',
+          rationale: 'User experience',
+          verificationMethod: 'Benchmark',
           sourceQuestionId: 'constraints',
         },
         {
           id: 'c-003',
-          category: 'performance',
+          category: 'compatibility',
           severity: 'may',
-          description: 'Performance constraint',
-          rationale: 'reason',
-          verificationMethod: 'review',
+          description: 'Support legacy format',
+          rationale: 'Nice to have',
+          verificationMethod: 'Manual check',
+          sourceQuestionId: 'constraints',
+        },
+        {
+          id: 'c-004',
+          category: 'security',
+          severity: 'must',
+          description: 'No credentials in output',
+          rationale: 'Log safety',
+          verificationMethod: 'Secret scan',
           sourceQuestionId: 'constraints',
         },
       ],
-      scopeBoundary: { inScope: [], outOfScope: [] },
+      scopeBoundary: { inScope: ['Constraint-based behavior'], outOfScope: ['Unrelated feature'] },
       acceptanceCriteria: [],
-      goals: [],
-      nonGoals: [],
+      goals: ['Map constraints correctly'],
+      nonGoals: ['Remove existing behavior'],
     }
 
     const markdown = renderBehaviorDocument(model)
 
-    expect(markdown).toContain('### Boundary: Scope constraint')
-    expect(markdown).toContain('- The boundary remains enforced as a must requirement')
-    expect(markdown).toContain('- Evidence: review')
-    expect(markdown).toContain('### Boundary: Security constraint')
-    expect(markdown).toContain('- The boundary remains enforced as a should requirement')
-    expect(markdown).not.toContain('Performance constraint')
+    // Trigger Rules
+    expect(markdown).toContain('- Must constraint: Must obey scope boundary')
+    expect(markdown).toContain('- Should constraint: Respond within 200ms')
+
+    // Non-Trigger Rules
+    expect(markdown).toContain('- May constraint (non-trigger): Support legacy format')
+
+    // Required Content
+    expect(markdown).toContain('- Must satisfy constraint: Must obey scope boundary (verify by: Review scope)')
+
+    // Must Not Behavior
+    expect(markdown).toContain('- Security boundary: No credentials in output — must not violate (must)')
   })
 
-  test('renders scenarios from user-observable context instead of implementation mechanics', () => {
+  test('renders user context from targetUsers and problemStatement', () => {
     const model: RequirementModel = {
-      feature: 'issue-suggestions',
+      feature: 'context-test',
       constraints: [],
-      scopeBoundary: { inScope: ['Suppress feature suggestions during issue work'], outOfScope: [] },
-      acceptanceCriteria: [
-        { id: 'ac-001', description: 'Issue investigation users see issue-specific next steps', category: 'target-users' },
-      ],
+      scopeBoundary: { inScope: ['Test in-scope'], outOfScope: [] },
+      acceptanceCriteria: [{ id: 'ac-001', description: 'User sees result' }],
       goals: [],
       nonGoals: [],
-      problemStatement: 'Feature-oriented prompts distract from active issue investigation',
-      targetUsers: 'developers investigating production issues',
+      targetUsers: 'project managers',
+      problemStatement: 'Current flow lacks clear completion indicators',
     }
 
     const markdown = renderBehaviorDocument(model)
 
-    expect(markdown).toContain('- The target user is developers investigating production issues')
-    expect(markdown).toContain('- The user need or problem is: Feature-oriented prompts distract from active issue investigation')
-    expect(markdown).toContain('- The observable outcome satisfies: Issue investigation users see issue-specific next steps')
-    expect(markdown).not.toContain('git diff')
-    expect(markdown).not.toContain('acceptance-state')
+    expect(markdown).toContain('**Target users:** project managers')
+    expect(markdown).toContain('**Problem statement:** Current flow lacks clear completion indicators')
+    expect(markdown).toContain('- The target user is: project managers')
   })
+})
+
+test('rejects implementation-mechanics leakage in generated text', () => {
+  const model: RequirementModel = {
+    feature: 'mechanics-test',
+    constraints: [
+      {
+        id: 'c-001',
+        category: 'compatibility',
+        severity: 'must',
+        description: 'Report format is readable',
+        rationale: 'User needs to read it',
+        verificationMethod: 'User review session',
+        sourceQuestionId: 'constraints',
+      },
+    ],
+    scopeBoundary: {
+      inScope: ['On-demand report generation via UI'],
+      outOfScope: ['Batch reprocess historical data'],
+    },
+    acceptanceCriteria: [
+      { id: 'ac-001', description: 'User sees formatted report with correct data' },
+    ],
+    goals: ['Deliver formatted reports on request'],
+    nonGoals: ['Alter upstream data pipeline'],
+    testingStrategy: 'manual',
+  }
+
+  const markdown = renderBehaviorDocument(model)
+
+  // Renderer's own scaffolding must not contain design/implementation terminology
+  // Model-provided content (descriptions, goals, etc.) is excluded from these checks
+  const forbiddenScaffolding = [
+    'architecture',
+    'internal implementation',
+    'file path',
+    'class diagram',
+    'dependency injection',
+  ]
+
+  for (const term of forbiddenScaffolding) {
+    expect(markdown).not.toContain(term)
+  }
+
+  // Must use observable-behavior framing in renderer-generated scaffolding
+  expect(markdown).toContain('activat')
+  expect(markdown).toContain('observable outcome')
+  expect(markdown).toContain('User-Visible Scenarios')
+  expect(markdown).toContain('Trigger Rules')
+  expect(markdown).toContain('Must Not Behavior')
 })
 
 function expectHeadingsExactlyOnce(markdown: string): void {

@@ -1,8 +1,8 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import type { RequirementModel } from '../phases/brainstorm/requirement-model.js'
+import type { RequirementModel } from '../phases/feature/requirement-model.js'
 import type { OpenFlowContext } from '../types.js'
-import { RequirementModelSchema } from '../phases/brainstorm/requirement-model.js'
+import { RequirementModelSchema } from '../phases/feature/requirement-model.js'
 import { getDesignCandidatePaths, getPlanPath } from '../config.js'
 import { findLatestDocument } from '../utils/index.js'
 import { logger } from '../utils/logger.js'
@@ -27,7 +27,7 @@ export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): 
 **Feature**: \`${escapeMarkdown(sanitizedFeature)}\`
 
 ### Design Context
-${designContext || `> No design documents found for feature \`${escapeMarkdown(sanitizedFeature)}\`. Consider running \`/openflow-brainstorm ${escapeMarkdown(sanitizedFeature)}\` first.`}
+${designContext || `> No design documents found for feature \`${escapeMarkdown(sanitizedFeature)}\`. Consider running \`/openflow-feature ${escapeMarkdown(sanitizedFeature)}\` first.`}
 
 ### Plan Output Path
 

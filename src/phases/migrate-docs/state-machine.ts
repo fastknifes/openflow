@@ -1,6 +1,6 @@
 /**
  * Migration state machine - pure functions for state transitions
- * Following brainstorm's pattern: no I/O, only state transformations
+ * Following feature workflow's pattern: no I/O, only state transformations
  */
 
 import {

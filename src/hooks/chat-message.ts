@@ -1,32 +1,35 @@
 import type { Hooks } from '@opencode-ai/plugin'
 import type { OpenFlowContext } from '../types.js'
-import { handleBrainstorm } from '../commands/brainstorm.js'
-import { handleArchive, handleInit, handleStatus, handleConfig, handleVerify, handleMigrateDocs, handleHarden, handleIssue } from '../commands/index.js'
+import { handleFeature } from '../commands/feature.js'
+import { handleArchive, handleInit, handleStatus, handleConfig, handleMigrateDocs, handleIssue } from '../commands/index.js'
 import { handleChange } from '../commands/change.js'
 import { readDesignContextPacket } from '../commands/writing-plan.js'
-import { normalizeBrainstormSession, isAwaitingFormalAnswer } from '../phases/brainstorm/state-machine.js'
+import { normalizeFeatureSession, isAwaitingFormalAnswer } from '../phases/feature/state-machine.js'
 import { createAcceptanceHook } from './acceptance.js'
-import { getHardenSuggestion } from './acceptance-prompt.js'
 import {
   appendGuardMessage,
-  clearRecentBrainstormCompletion,
+  clearRecentFeatureCompletion,
   detectClosureReady,
   decideTrigger,
   extractMessageText,
-  getActiveBrainstormFeature,
-  getRecentCompletedBrainstormFeature,
+  getActiveFeatureSession,
+  getRecentCompletedFeature,
   getMessageRole,
   hasDesignDoc,
-} from './brainstorm-workflow.js'
+} from './feature-workflow.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { getContractRuntime } from '../contracts/runtime.js'
-import { detectOmoExecutionFlow } from '../utils/omo-detection.js'
-import { loadExecutionPolicy, saveExecutionPolicy, createDefaultPolicy } from '../utils/execution-policy.js'
-import { assessChangeRisk, isHighRisk } from '../utils/risk-assessment.js'
+import { loadAcceptanceState } from '../utils/acceptance-state.js'
+import { ISSUE_CLARIFICATION_FILENAME } from '../utils/issue-utils.js'
 import * as fs from 'node:fs/promises'
 import * as nodePath from 'node:path'
 
 const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive']
+
+interface ActiveIssueWorkspace {
+  slug: string
+  workspacePath: string
+}
 
 function isCompletionMessage(message: string): boolean {
   const lower = message.toLowerCase()
@@ -50,12 +53,12 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     if (openFlowCommand) {
       const trimmed = openFlowCommand
 
-      // /openflow-brainstorm <feature>
-      const brainstormMatch = trimmed.match(/^\/openflow-brainstorm(?:\s+(.+))?$/)
-      if (brainstormMatch) {
-        const feature = brainstormMatch[1]?.trim()
+      // /openflow-feature <feature>
+      const featureMatch = trimmed.match(/^\/openflow-feature(?:\s+(.+))?$/)
+      if (featureMatch) {
+        const feature = featureMatch[1]?.trim()
         try {
-          const result = await handleBrainstorm(ctx, feature || undefined, undefined, input)
+          const result = await handleFeature(ctx, feature || undefined, undefined, input)
           appendGuardMessage(output, result)
         } catch (err) {
           appendGuardMessage(output, err instanceof Error ? err.message : String(err))
@@ -77,12 +80,10 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
         return
       }
 
-      // /openflow-verify <feature>
+      // /openflow-verify <feature> — deprecated, use openflow-quality-gate
       const verifyMatch = trimmed.match(/^\/openflow-verify(?:\s+(.+))?$/)
       if (verifyMatch) {
-        const feature = verifyMatch[1]?.trim()
-        const result = await handleVerify(ctx, feature || undefined)
-        appendGuardMessage(output, result)
+        appendGuardMessage(output, '`/openflow-verify` is deprecated. Use the `openflow-quality-gate` skill instead, which automatically runs evidence-aware verify as part of its quality gate process.')
         return
       }
 
@@ -164,7 +165,7 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
           const contextPacket = await readDesignContextPacket(ctx.directory, resolvedFeature)
           const result = contextPacket
             ? `## Writing Plan Context\n\nFeature: \`${resolvedFeature}\`\n\n${contextPacket}`
-            : `No design context found for feature \`${resolvedFeature}\`. Run \`/openflow-brainstorm ${resolvedFeature}\` first.`
+            : `No design context found for feature \`${resolvedFeature}\`. Run \`/openflow-feature ${resolvedFeature}\` first.`
           appendGuardMessage(output, result)
         } catch (err) {
           appendGuardMessage(output, err instanceof Error ? err.message : String(err))
@@ -172,18 +173,10 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
         return
       }
 
-      // /openflow-harden <feature> [--full] [--mode <mode>]
+      // /openflow-harden <feature> — deprecated, use openflow-quality-gate
       const hardenMatch = trimmed.match(/^\/openflow-harden(?:\s+(.+))?$/)
       if (hardenMatch) {
-        const hardenArgs = hardenMatch[1]?.trim() ?? ''
-        const hardenFeature = hardenArgs.split(/\s+--/)[0]?.trim()
-        const full = hardenArgs.includes('--full')
-        try {
-          const result = await handleHarden(ctx, hardenFeature || undefined, { full }, input.sessionID)
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
+        appendGuardMessage(output, '`/openflow-harden` is deprecated. Use the `openflow-quality-gate` skill instead, which automatically assesses risk and runs harden only when required as part of its quality gate process.')
         return
       }
 
@@ -203,83 +196,20 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
       // Unknown /openflow-* command — pass through
     }
 
-    // --- Quality Policy Lifecycle (OMO Execution) ---
-    let omoFlow: 'omo' | 'non-omo' = 'non-omo'
-    try {
-      omoFlow = await detectOmoExecutionFlow(ctx, message)
-      if (omoFlow === 'omo') {
-        const feature = await findActiveFeature(ctx)
-        if (feature) {
-          const existingPolicy = await loadExecutionPolicy(ctx.directory, feature)
+    const activeIssueWorkspace = await findActiveIssueWorkspace(ctx.directory)
+    if (activeIssueWorkspace) {
+      appendGuardMessage(output, `## OpenFlow: Issue Investigation Active
 
-          if (!existingPolicy) {
-            // Check for pending selection from a previous turn
-            const pending = await readPendingSelection(ctx.directory)
+Active issue workspace detected: \`${activeIssueWorkspace.workspacePath}\`.
 
-            if (pending && pending.feature === feature) {
-              // Parse user reply for quality mode
-              const modeMatch = message.match(/\b(fast|balanced|strict)\b/i)
-              const mode = modeMatch?.[1] ? modeMatch[1].toLowerCase() as 'fast' | 'balanced' | 'strict' : 'balanced'
+Feature-design and feature-harden suggestions are suppressed while issue context is active.
 
-              // Determine harden_policy based on mode
-              const hardenPolicy = mode === 'fast' ? 'none' as const
-                : mode === 'strict' ? 'final' as const
-                : 'risk-based' as const
-
-              const policy = createDefaultPolicy(feature, feature, mode)
-              policy.harden_policy = hardenPolicy
-              policy.selected_by = 'user'
-              await saveExecutionPolicy(ctx.directory, policy)
-              await clearPendingSelection(ctx.directory)
-
-              appendGuardMessage(output, `## OpenFlow: Quality Mode Selected\n\nMode: **${mode}**\nHarden policy: ${hardenPolicy}\nPolicy saved for feature \`${feature}\`.`)
-            } else {
-              // No policy, no pending — prompt for selection
-              await writePendingSelection(ctx.directory, { feature, timestamp: new Date().toISOString() })
-
-              appendGuardMessage(output, `## OpenFlow: Quality Mode Selection
-
-Choose quality mode for this OMO execution:
-1. **Balanced** (Recommended) - risk-based harden + required verify
-2. **Fast** - skip harden + required verify
-3. **Strict** - final harden + required verify
-
-Reply with: \`fast\`, \`balanced\`, or \`strict\`. (Default: balanced)`)
-            }
-          } else {
-            // Policy exists — apply harden decision (Phase B)
-            const qualityMode = existingPolicy.quality_mode
-            const hardenPolicy = existingPolicy.harden_policy
-
-            if (qualityMode === 'balanced' && hardenPolicy === 'risk-based') {
-              // Assess risk from git diff
-              try {
-                const { execSync } = await import('node:child_process')
-                const diffOutput = execSync('git diff HEAD', { cwd: ctx.directory, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
-                const diffLines = diffOutput.split('\n').length
-                const files = [...new Set(
-                  diffOutput.split('\n')
-                    .filter((line: string) => line.startsWith('+++ '))
-                    .map((line: string) => line.slice(6).trim())
-                )]
-                const risk = assessChangeRisk(files, diffLines, false)
-                if (isHighRisk(risk)) {
-                  appendGuardMessage(output, `## OpenFlow: Harden Suggested\n\nBalanced mode detected **high-risk** changes.\nRecommended: run \`/openflow-harden ${feature}\``)
-                }
-              } catch {
-                // git diff unavailable — skip risk assessment silently
-              }
-            } else if (qualityMode === 'strict' && hardenPolicy === 'final') {
-              appendGuardMessage(output, `## OpenFlow: Harden Required\n\nStrict mode requires harden before verify.\nRun: \`/openflow-harden ${feature}\``)
-            }
-            // fast + none → skip harden entirely
-          }
-        }
-      }
-    } catch {
-      // Quality policy errors must never block message flow
+Recommended issue flow:
+- Continue gathering evidence with \`/openflow-issue <problem> --continue\`
+- If the fix is already complete, record it with \`/openflow-issue <problem> --resolve\`
+- Then invoke the \`openflow-quality-gate\` tool/skill to verify readiness`)
+      return
     }
-    // --- End Quality Policy Lifecycle ---
 
     await acceptanceHook({ sessionID: input.sessionID, message })
 
@@ -295,58 +225,42 @@ Reply with: \`fast\`, \`balanced\`, or \`strict\`. (Default: balanced)`)
       }
     }
 
-    // Suggest /openflow-harden for complex features — OMO execution only
-    // Non-OMO users should never see harden suggestions (design doc §4)
-    if (omoFlow === 'omo') {
-      const acceptanceState = await import('../utils/acceptance-state.js').then(m => m.loadAcceptanceState(ctx.directory))
-      if (acceptanceState?.phase === 'acceptance' && acceptanceState.feature) {
-        // Gate harden suggestion if quality policy already exists for this feature
-        const policyForFeature = await loadExecutionPolicy(ctx.directory, acceptanceState.feature)
-        if (!policyForFeature) {
-          const hardenSuggestion = await getHardenSuggestion(ctx, acceptanceState.feature)
-          if (hardenSuggestion) {
-            appendGuardMessage(output, hardenSuggestion)
-          }
-        }
-      }
-    }
-
-    if (!ctx.config.brainstorming.enabled) {
+    if (!ctx.config.feature.enabled) {
       return
     }
 
-    const activeFeature = await getActiveBrainstormFeature(ctx.directory, input.sessionID)
+    const activeFeature = await getActiveFeatureSession(ctx.directory, input.sessionID)
     if (activeFeature && !(await hasDesignDoc(ctx, activeFeature))) {
       if (looksLikeDirectCommand(message) || isCompletionMessage(message)) {
         return
       }
 
-      const activeSession = await loadActiveBrainstormSession(ctx.directory, activeFeature)
+      const activeSession = await loadActiveFeatureSession(ctx.directory, activeFeature)
       if (!activeSession || !isAwaitingFormalAnswer(activeSession)) {
         return
       }
 
       if (looksLikeFeatureSwitch(message, activeFeature)) {
-        // Let new-feature detection continue below instead of hijacking the old brainstorm.
+        // Let new-feature detection continue below instead of hijacking the old feature session.
       } else {
-        const continuation = await handleBrainstorm(ctx, undefined, message, input)
+        const continuation = await handleFeature(ctx, undefined, message, input)
         appendGuardMessage(output, continuation)
         return
       }
     }
 
-    if (!ctx.config.brainstorming.auto_trigger) {
+    if (!ctx.config.feature.auto_trigger) {
       return
     }
 
-    const recentCompletedFeature = await getRecentCompletedBrainstormFeature(ctx.directory, input.sessionID)
+    const recentCompletedFeature = await getRecentCompletedFeature(ctx.directory, input.sessionID)
     if (recentCompletedFeature) {
-      if (looksLikePostBrainstormAction(message, recentCompletedFeature)) {
+      if (looksLikePostFeatureAction(message, recentCompletedFeature)) {
         return
       }
 
-      if (!looksLikePostBrainstormAction(message, recentCompletedFeature)) {
-        await clearRecentBrainstormCompletion(ctx.directory, input.sessionID)
+      if (!looksLikePostFeatureAction(message, recentCompletedFeature)) {
+        await clearRecentFeatureCompletion(ctx.directory, input.sessionID)
       }
     }
 
@@ -365,25 +279,25 @@ OpenFlow keeps this prompt non-blocking.`)
     }
 
     const closureDecision = detectClosureReady(ctx, message)
-    if (closureDecision.isClosureReady && ctx.config.brainstorming.closure.auto_transition) {
+    if (closureDecision.isClosureReady && ctx.config.feature.closure.auto_transition) {
       const decision = decideTrigger(ctx, rawInput, rawOutput, message)
       const featureHint = decision.feature ?? '<feature-name>'
 
-		appendGuardMessage(output, `## OpenFlow: Brainstorm Closure Ready
+		appendGuardMessage(output, `## OpenFlow: Feature Design Closure Ready
 
 Detected ${closureDecision.level} closure signal(s): ${closureDecision.matchedSignals.map(s => `\`${s}\``).join(', ')}.
 
-Next step: continue the standalone brainstorm flow until design generation completes.
+Next step: continue the standalone feature design flow until design generation completes.
 
 Recommended entrypoint:
 
 \`\`\`text
-/openflow-brainstorm ${featureHint}
+/openflow-feature ${featureHint}
 \`\`\`
 
 Generation policy:
 - Design is generated automatically when the required answers are complete.
-- OpenFlow advances one question at a time through the brainstorm skill.`)
+- OpenFlow advances one question at a time through the feature design workflow.`)
       return
     }
 
@@ -392,14 +306,14 @@ Generation policy:
 
     if (await hasDesignDoc(ctx, decision.feature)) return
 
-		appendGuardMessage(output, `## OpenFlow: Brainstorm Suggested
+		appendGuardMessage(output, `## OpenFlow: Feature Design Suggested
 
 Feature \`${decision.feature}\` does not have design docs yet.
 
 Recommended next step before implementation:
 
 \`\`\`
-/openflow-brainstorm ${decision.feature}
+/openflow-feature ${decision.feature}
 \`\`\`
 
 OpenFlow only suggests this step. It does not block research, reading, or implementation tools.`)
@@ -410,7 +324,7 @@ OpenFlow only suggests this step. It does not block research, reading, or implem
 
 function looksLikeDirectCommand(message: string): boolean {
   const trimmed = message.trim()
-  return Boolean(extractOpenFlowCommand(trimmed)) || trimmed.includes('skill(name="openflow-brainstorm"') || trimmed.includes("skill(name='openflow-brainstorm'")
+  return Boolean(extractOpenFlowCommand(trimmed)) || trimmed.includes('skill(name="openflow-feature"') || trimmed.includes("skill(name='openflow-feature'")
 }
 
 function extractOpenFlowCommand(message: string): string | undefined {
@@ -432,7 +346,7 @@ function looksLikeFeatureSwitch(message: string, activeFeature: string): boolean
   return !normalized.includes(activeFeature.toLowerCase())
 }
 
-function looksLikePostBrainstormAction(message: string, feature: string): boolean {
+function looksLikePostFeatureAction(message: string, feature: string): boolean {
   const normalized = message.toLowerCase()
   if (normalized.includes(feature.toLowerCase())) {
     return true
@@ -441,50 +355,70 @@ function looksLikePostBrainstormAction(message: string, feature: string): boolea
   return /(实现|开始做|开始开发|编码|落地|archive|归档|verify|验证|start-work|ulw-loop|implement|build|code)/i.test(message)
 }
 
-async function loadActiveBrainstormSession(directory: string, feature: string) {
+async function findActiveIssueWorkspace(directory: string): Promise<ActiveIssueWorkspace | null> {
+  const state = await loadAcceptanceState(directory)
+  if (state?.mode === 'issue' && state.issueClarificationPath) {
+    const clarificationPath = nodePath.isAbsolute(state.issueClarificationPath)
+      ? state.issueClarificationPath
+      : nodePath.join(directory, state.issueClarificationPath)
+    const workspace = nodePath.dirname(clarificationPath)
+    if (await pathExists(clarificationPath) && !(await pathExists(nodePath.join(workspace, 'design.md')))) {
+      return {
+        slug: nodePath.basename(workspace),
+        workspacePath: toProjectRelativePath(directory, workspace),
+      }
+    }
+  }
+
+  const changesDir = nodePath.join(directory, 'docs', 'changes')
+  try {
+    const entries = (await fs.readdir(changesDir, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory())
+      .sort((a, b) => b.name.localeCompare(a.name))
+    for (const entry of entries) {
+      const workspace = nodePath.join(changesDir, entry.name)
+      const clarificationPath = nodePath.join(workspace, ISSUE_CLARIFICATION_FILENAME)
+      const designPath = nodePath.join(workspace, 'design.md')
+      if (await pathExists(clarificationPath) && !(await pathExists(designPath))) {
+        return {
+          slug: entry.name,
+          workspacePath: toProjectRelativePath(directory, workspace),
+        }
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function toProjectRelativePath(directory: string, filePath: string): string {
+  const relative = nodePath.relative(directory, filePath)
+  return relative && !relative.startsWith('..') && !nodePath.isAbsolute(relative)
+    ? relative.replace(/\\/g, '/')
+    : filePath
+}
+
+async function loadActiveFeatureSession(directory: string, feature: string) {
   try {
     const fs = await import('node:fs/promises')
     const path = await import('node:path')
-    const filePath = path.join(directory, '.sisyphus', 'brainstorm', `${feature}.json`)
+    const filePath = path.join(directory, '.sisyphus', 'feature', `${feature}.json`)
     const content = await fs.readFile(filePath, 'utf-8')
-    return normalizeBrainstormSession(feature, JSON.parse(content) as unknown)
+    return normalizeFeatureSession(feature, JSON.parse(content) as unknown)
   } catch {
     return undefined
   }
 }
 
-const PENDING_SELECTION_PATH = ['openflow', 'pending-selection.json']
 
-async function readPendingSelection(directory: string): Promise<{ feature: string; timestamp: string } | null> {
-  try {
-    const filePath = nodePath.join(directory, '.sisyphus', ...PENDING_SELECTION_PATH)
-    const raw = await fs.readFile(filePath, 'utf-8')
-    const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed.feature === 'string' && typeof parsed.timestamp === 'string') {
-      return parsed as { feature: string; timestamp: string }
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-async function writePendingSelection(directory: string, data: { feature: string; timestamp: string }): Promise<void> {
-  try {
-    const filePath = nodePath.join(directory, '.sisyphus', ...PENDING_SELECTION_PATH)
-    const dir = nodePath.dirname(filePath)
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
-  } catch {
-    // Log but don't crash
-  }
-}
-
-async function clearPendingSelection(directory: string): Promise<void> {
-  try {
-    const filePath = nodePath.join(directory, '.sisyphus', ...PENDING_SELECTION_PATH)
-    await fs.unlink(filePath)
-  } catch {
-    // Already gone or inaccessible — ignore
-  }
-}

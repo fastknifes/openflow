@@ -36,6 +36,6 @@ describe('skill registration', () => {
     const brainstormContent = await readFile(brainstormSkillPath, 'utf-8')
     expect(brainstormContent).toContain('name: openflow-brainstorm')
     expect(brainstormContent).toContain('description:')
-    expect(brainstormContent).toContain('/openflow-brainstorm <feature>')
+    expect(brainstormContent).toContain('/openflow-feature')
   })
 })

@@ -44,9 +44,10 @@ describe('OpenFlowPlugin', () => {
 
     expect(Object.keys(plugin.tool).sort()).toEqual([
           'openflow-archive',
-          'openflow-brainstorm',
+          'openflow-feature',
           'openflow-init',
           'openflow-issue',
+          'openflow-quality-gate',
           'openflow-writing-plan',
         ].sort())
     expect(plugin['chat.message']).toBeFunction()
@@ -73,17 +74,21 @@ describe('OpenFlowPlugin', () => {
 
     const verifyOutput = createChatOutput('/openflow-verify')
     await plugin['chat.message']?.({ sessionID: 'session-verify' } as never, verifyOutput)
-    expect(firstOutputText(verifyOutput)).toContain('## Verify')
-    expect(firstOutputText(verifyOutput)).toContain('### Evidence')
-    expect(firstOutputText(verifyOutput)).toContain('### Readiness')
+    expect(firstOutputText(verifyOutput)).toContain('deprecated')
+    expect(firstOutputText(verifyOutput)).toContain('openflow-quality-gate')
 
-    const brainstormOutput = createChatOutput('/openflow-brainstorm user-login', 'session-brainstorm')
-    await plugin['chat.message']?.({ sessionID: 'session-brainstorm' } as never, brainstormOutput)
-    expect(firstOutputText(brainstormOutput)).toContain('Brainstorm Question')
+    const hardenOutput = createChatOutput('/openflow-harden')
+    await plugin['chat.message']?.({ sessionID: 'session-harden' } as never, hardenOutput)
+    expect(firstOutputText(hardenOutput)).toContain('deprecated')
+    expect(firstOutputText(hardenOutput)).toContain('openflow-quality-gate')
+
+    const featureOutput = createChatOutput('/openflow-feature user-login', 'session-feature')
+    await plugin['chat.message']?.({ sessionID: 'session-feature' } as never, featureOutput)
+    expect(firstOutputText(featureOutput)).toContain('Feature Question')
 
     const nextConfig = {
       openflow: {
-        brainstorming: {
+        feature: {
           trigger_mode: 'always',
         },
       },
@@ -104,9 +109,9 @@ describe('OpenFlowPlugin', () => {
 
     const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
 
-    const brainstormOutput = createChatOutput('OpenFlow command: /openflow-brainstorm user-login', 'session-command-file')
-    await plugin['chat.message']?.({ sessionID: 'session-command-file' } as never, brainstormOutput)
-    expect(firstOutputText(brainstormOutput)).toContain('Brainstorm Question')
+    const featureOutput = createChatOutput('OpenFlow command: /openflow-feature user-login', 'session-command-file')
+    await plugin['chat.message']?.({ sessionID: 'session-command-file' } as never, featureOutput)
+    expect(firstOutputText(featureOutput)).toContain('Feature Question')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -117,7 +122,7 @@ describe('OpenFlowPlugin', () => {
 
     const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
 
-    const first = createChatOutput('/openflow-brainstorm user-login', 'plugin-session')
+    const first = createChatOutput('/openflow-feature user-login', 'plugin-session')
     await plugin['chat.message']?.({ sessionID: 'plugin-session' } as never, first)
     expect(firstOutputText(first)).toContain('这个功能主要要解决什么问题？')
 
@@ -133,7 +138,9 @@ describe('OpenFlowPlugin', () => {
     const final = createChatOutput('兼容现有系统', 'plugin-session')
     await plugin['chat.message']?.({ sessionID: 'plugin-session' } as never, final)
 
-    expect(firstOutputText(final)).toContain('Design document generated')
+    expect(firstOutputText(final)).toContain('Feature Design Complete')
+    expect(firstOutputText(final)).toContain('design.md')
+    expect(firstOutputText(final)).toContain('behavior.md')
 
     const changeDirs = await readdir(join(root, 'docs', 'changes'))
     const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
@@ -150,7 +157,7 @@ describe('OpenFlowPlugin', () => {
     await rm(root, { recursive: true, force: true })
 
     const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
-    const start = createChatOutput('/openflow-brainstorm user-login', 'plugin-session-resume')
+    const start = createChatOutput('/openflow-feature user-login', 'plugin-session-resume')
     await plugin['chat.message']?.({ sessionID: 'plugin-session-resume' } as never, start)
 
     const resumed = createChatOutput('支持新场景', 'plugin-session-resume')
@@ -174,9 +181,10 @@ describe('OpenFlowPlugin', () => {
 
     expect(Object.keys(plugin.tool).sort()).toEqual([
           'openflow-archive',
-          'openflow-brainstorm',
+          'openflow-feature',
           'openflow-init',
           'openflow-issue',
+          'openflow-quality-gate',
           'openflow-writing-plan',
         ].sort())
     expect(plugin['chat.message']).toBeFunction()

@@ -121,15 +121,21 @@ export class ContractRuntime {
 
   // Extract or load contract for a feature
   async getOrExtractContract(feature: string): Promise<OpenFlowContract | null> {
-    // Check cache first
     const cached = this.registry.get(feature)
-    if (cached) return cached
+    if (cached && (!this.started || !this.projectDir)) return cached
 
-    // Extract fresh
     const contract = await this.extractor.extract(feature, this.projectDir)
-    if (contract) {
-      this.registry.set(feature, contract)
+
+    if (!contract) {
+      if (cached) this.registry.delete(feature)
+      return null
     }
+
+    if (cached && sourceHashesEqual(cached.sourceHashes, contract.sourceHashes)) {
+      return cached
+    }
+
+    this.registry.set(feature, contract)
     return contract
   }
 
@@ -166,4 +172,12 @@ export class ContractRuntime {
 // Convenience function for accessing the singleton
 export function getContractRuntime(): ContractRuntime {
   return ContractRuntime.getInstance()
+}
+
+function sourceHashesEqual(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftKeys = Object.keys(left).sort()
+  const rightKeys = Object.keys(right).sort()
+  if (leftKeys.length !== rightKeys.length) return false
+
+  return leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key])
 }

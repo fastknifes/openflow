@@ -139,8 +139,8 @@ describe('archive command', () => {
       config: {
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        brainstorming: { 
-          ...defaultConfig.brainstorming, 
+        feature: { 
+          ...defaultConfig.feature, 
           output_dir: 'docs/current/design',
           prd_output_dir: 'docs/current/requirements',
         },
@@ -194,7 +194,7 @@ describe('archive command', () => {
       config: {
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        brainstorming: { ...defaultConfig.brainstorming, output_dir: 'docs/current/design' },
+        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
       },
     }
 
@@ -234,7 +234,7 @@ describe('archive command', () => {
       config: {
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        brainstorming: { ...defaultConfig.brainstorming, output_dir: 'docs/current/design' },
+        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
       },
     }
 
@@ -301,7 +301,7 @@ describe('archive command', () => {
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
         acceptance: { ...defaultConfig.acceptance, drift_detection: true },
-        brainstorming: { ...defaultConfig.brainstorming, output_dir: 'docs/current/design' },
+        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
       },
     }
 
@@ -360,8 +360,8 @@ describe('archive command', () => {
       config: {
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
-        brainstorming: {
-          ...defaultConfig.brainstorming,
+        feature: {
+          ...defaultConfig.feature,
           output_dir: 'docs/current/design',
           prd_output_dir: 'docs/current/requirements',
         },
@@ -618,8 +618,8 @@ describe('archive command', () => {
       config: {
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
-        brainstorming: {
-          ...defaultConfig.brainstorming,
+        feature: {
+          ...defaultConfig.feature,
           output_dir: 'docs/current/design',
           prd_output_dir: 'docs/current/requirements',
         },
@@ -655,7 +655,7 @@ describe('archive command', () => {
       config: {
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        brainstorming: { ...defaultConfig.brainstorming, output_dir: 'docs/current/design' },
+        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
       },
     }
 
@@ -789,8 +789,6 @@ Prevents stale state from bypassing semantic checks.
       'utf-8'
     )
 
-    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
-    await writeFile(join(testDir, '.sisyphus', 'plans', `${feature}.md`), '# plan', 'utf-8')
     await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260509-000001'), { recursive: true })
     await writeFile(
       join(testDir, '.sisyphus', 'builds', 'build-20260509-000001', 'changes.json'),
@@ -853,6 +851,129 @@ Prevents stale state from bypassing semantic checks.
     expect(resolution).toContain('candidate remains pending and was not written to `docs/decisions/*`')
 
     await expect(access(join(testDir, 'docs', 'decisions', `${feature}.md`))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('archives issue-only workspace without design or plan and preserves preexisting issue-resolution', async () => {
+    const testDir = join(process.cwd(), '.test-archive-issue-no-design')
+    await rm(testDir, { recursive: true, force: true })
+
+    const feature = 'issue-no-design'
+    const changeDir = join(testDir, 'docs', 'changes', feature)
+    await mkdir(changeDir, { recursive: true })
+    await writeFile(
+      join(changeDir, 'issue-clarification.md'),
+      `# Issue Clarification
+
+### 1. Issue Intake
+Cache invalidation misses stale entries under concurrent writes.
+
+### 2. Requirement Clarification
+Cache must return fresh data after any write completes.
+
+### 3. Constraint Clarification
+Do not add external dependencies.
+
+### 4. Evidence Investigation
+Reproduced stale read under concurrent write load.
+
+### 5. Semantic Alignment
+Write-through cache semantics required.
+
+### 6. Classification
+bugfix
+
+### 7. Next Action Gate
+Fix cache invalidation race condition.
+
+### 8. Governance Promotion
+Capture write-through cache rule as governance candidate.
+`,
+      'utf-8'
+    )
+    const preexistingResolutionContent = `# Issue Resolution
+
+## Symptom
+Cache invalidation misses stale entries under concurrent writes.
+
+## Root Cause
+Race condition between write completion and cache invalidation signal.
+
+## Fix Summary
+Added synchronous invalidation barrier after write commit.
+`
+    await writeFile(
+      join(changeDir, 'issue-resolution.md'),
+      preexistingResolutionContent,
+      'utf-8'
+    )
+    await writeFile(
+      join(changeDir, 'promotion-candidate.md'),
+      `# Promotion Candidate
+
+## Proposed Decision
+Enforce synchronous cache invalidation barrier after write commit.
+`,
+      'utf-8'
+    )
+
+    // No design.md, no .sisyphus/plans/<feature>.md 鈥?issue mode must succeed without them.
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260513-000001'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260513-000001', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/cache.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-13T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.Ready,
+      pendingDocUpdates: [],
+      mode: 'issue',
+      issueSlug: feature,
+      rawIssue: 'Cache invalidation misses stale entries',
+      primaryClassification: 'bugfix',
+      classifications: ['bugfix'],
+      governancePromotionStatus: 'candidate_created',
+      issueClarificationPath: join(changeDir, 'issue-clarification.md'),
+      promotionCandidatePath: join(changeDir, 'promotion-candidate.md'),
+      verifyResult: {
+        readiness: VerifyReadinessStatus.Ready,
+        reasonCodes: [],
+        evidenceSummary: 'All cache tests pass.',
+        constraintsChecked: ['test', 'lint'],
+        verifiedAt: '2026-05-13T01:00:00.000Z',
+      },
+    })
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+    expect(result).toContain('Archive mode: issue')
+    expect(result).toContain('Design documents: ❌')
+    expect(result).toContain('Plan: ❌')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'issue-clarification.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'promotion-candidate.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'issue-resolution.md'))).resolves.toBeNull()
+
+    const archivedResolution = await readFile(join(archiveDir, 'issue-resolution.md'), 'utf-8')
+    expect(archivedResolution).toBe(preexistingResolutionContent)
+    expect(archivedResolution).toContain('Race condition between write completion and cache invalidation signal.')
+    expect(archivedResolution).toContain('Added synchronous invalidation barrier after write commit.')
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -972,7 +1093,7 @@ Prevents stale state from bypassing semantic checks.
         ...defaultConfig,
         archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: true },
         acceptance: { ...defaultConfig.acceptance, drift_detection: true },
-        brainstorming: { ...defaultConfig.brainstorming, output_dir: 'docs/current/design' },
+        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
       },
     }
 
@@ -981,6 +1102,160 @@ Prevents stale state from bypassing semantic checks.
     expect(result).toContain('Archive was paused')
 
     await expect(access(join(testDir, 'docs', 'archive', 'pause-feature', 'implementation-mapper.md'))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('stale not_ready from a different feature does not block archive of the requested feature', async () => {
+    const staleFeature = 'stale-feature'
+    const targetFeature = 'target-feature'
+    const testDir = join(process.cwd(), '.test-archive-stale-not-ready-no-block')
+
+    await rm(testDir, { recursive: true, force: true })
+
+    // Create acceptance state for the STALE feature with NotReady readiness
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await saveAcceptanceState(testDir, {
+      feature: staleFeature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.NotReady,
+      pendingDocUpdates: [],
+    })
+
+    // Set up workspace for the TARGET feature
+    await mkdir(join(testDir, 'docs', 'changes', targetFeature), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', targetFeature, 'design.md'), '# Target Design\n\nTarget feature archive test', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', `${targetFeature}.md`), '# Target Plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260421-000002'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260421-000002', 'changes.json'),
+      JSON.stringify([{ filePath: `src/${targetFeature}.ts`, tool: 'edit', timestamp: Date.now() }]),
+      'utf-8',
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    const result = await handleArchive(ctx, targetFeature)
+
+    // The archive should NOT be blocked by stale-feature's not_ready message
+    expect(result).not.toContain('not ready')
+    // But archive SHOULD be blocked because no matching readiness exists for target
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('no verification readiness was found')
+    expect(result).toContain(`**${targetFeature}**`)
+    // The message must reference the stale feature
+    expect(result).toContain(`**${staleFeature}**`)
+    // The stale-feature state should still exist (we don't overwrite it)
+    expect(result).toContain('/openflow-verify')
+
+    const acceptanceStateAfter = await loadAcceptanceState(testDir)
+    expect(acceptanceStateAfter?.feature).toBe(staleFeature)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('stale ready from a different feature does not auto-allow archive of the requested feature', async () => {
+    const staleFeature = 'stale-ready-feature'
+    const targetFeature = 'target-no-verify'
+    const testDir = join(process.cwd(), '.test-archive-stale-ready-no-allow')
+
+    await rm(testDir, { recursive: true, force: true })
+
+    // Create acceptance state for the STALE feature with Ready readiness
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await saveAcceptanceState(testDir, {
+      feature: staleFeature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.Ready,
+      pendingDocUpdates: [],
+    })
+
+    // Set up workspace for the TARGET feature (no acceptance state for it)
+    await mkdir(join(testDir, 'docs', 'changes', targetFeature), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', targetFeature, 'design.md'), '# Target Design\n\nNo verify ready for target', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', `${targetFeature}.md`), '# Target Plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260421-000003'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260421-000003', 'changes.json'),
+      JSON.stringify([{ filePath: `src/${targetFeature}.ts`, tool: 'edit', timestamp: Date.now() }]),
+      'utf-8',
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    const result = await handleArchive(ctx, targetFeature)
+
+    // The archive should NOT auto-allow based on stale-feature's ready
+    expect(result).not.toContain('Archive Complete')
+    // Archive should be blocked because no matching readiness exists for target
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('no verification readiness was found')
+    expect(result).toContain(`**${targetFeature}**`)
+    // The message must reference the stale feature
+    expect(result).toContain(`**${staleFeature}**`)
+    // The stale acceptance state should remain unchanged (still belongs to stale-feature)
+    expect(result).toContain('/openflow-verify')
+
+    const acceptanceStateAfter = await loadAcceptanceState(testDir)
+    expect(acceptanceStateAfter?.feature).toBe(staleFeature)
+    expect(acceptanceStateAfter?.readiness).toBe(VerifyReadinessStatus.Ready)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('strips OpenFlow command tokens from archive feature parameter', async () => {
+    const targetFeature = 'my-real-feature'
+    const testDir = join(process.cwd(), '.test-archive-strip-tokens')
+
+    await rm(testDir, { recursive: true, force: true })
+
+    // Set up workspace for the real feature
+    await mkdir(join(testDir, 'docs', 'changes', targetFeature), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', targetFeature, 'design.md'), '# Design', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', `${targetFeature}.md`), '# Plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260421-000004'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260421-000004', 'changes.json'),
+      JSON.stringify([{ filePath: `src/${targetFeature}.ts`, tool: 'edit', timestamp: Date.now() }]),
+      'utf-8',
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    // Pass a mangled feature name with command tokens — should resolve to the real feature
+    const result = await handleArchive(ctx, 'openflow-archive-my-real-feature')
+
+    expect(result).toContain('Archive Complete')
+    expect(result).toContain(`**Feature**: ${targetFeature}`)
 
     await rm(testDir, { recursive: true, force: true })
   })

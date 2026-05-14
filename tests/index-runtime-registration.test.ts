@@ -26,11 +26,11 @@ describe('OpenFlowPlugin runtime registration', () => {
 
     await OpenFlowPlugin(createPluginInput(root) as never)
 
-    // 1. Command .md files are created
-    const commandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-brainstorm.md')
+    // 1. Command .md files are created (openflow-feature replaces old brainstorm command)
+    const commandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-feature.md')
     const commandContent = await readFile(commandPath, 'utf-8')
     expect(commandContent).toContain('description:')
-    expect(commandContent).toContain('openflow-brainstorm')
+    expect(commandContent).toContain('openflow-feature')
 
     // 2. Legacy global skill dirs are cleaned (registerCommands calls cleanupLegacySkillDirs),
     //    then brainstorm is re-registered as an active skill by registerSkills.
@@ -38,7 +38,7 @@ describe('OpenFlowPlugin runtime registration', () => {
     await expect(access(brainstormSkillPath)).resolves.toBeNull()
     const brainstormSkillContent = await readFile(brainstormSkillPath, 'utf-8')
     expect(brainstormSkillContent).toContain('name: openflow-brainstorm')
-    expect(brainstormSkillContent).toContain('/openflow-brainstorm <feature>')
+    expect(brainstormSkillContent).toContain('/openflow-feature')
 
     // 4. writing-plan is the intentional agent-callable skill exception.
     const writingPlanCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-writing-plan.md')

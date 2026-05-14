@@ -10,7 +10,7 @@ import type {
   Constraint,
 } from './openflow-contract.js'
 
-import { RequirementModelSchema, type RequirementModel } from '../phases/brainstorm/requirement-model.js'
+import { RequirementModelSchema, type RequirementModel } from '../phases/feature/requirement-model.js'
 
 import { resolveChangeUnitDir } from '../utils/change-units.js'
 
@@ -33,7 +33,7 @@ export class ContractExtractor {
 
     if (!hasAny) return null
 
-    const sourceHashes = await this.computeSourceHashes(sourceFiles, projectDir)
+    const sourceHashes = await this.computeSourceHashes(sourceFiles, workspaceDir)
 
     const contract: OpenFlowContract = {
       feature,
@@ -65,11 +65,15 @@ export class ContractExtractor {
     return files
   }
 
-  private async computeSourceHashes(files: string[], _projectDir: string): Promise<Record<string, string>> {
+  private async computeSourceHashes(files: string[], workspaceDir: string): Promise<Record<string, string>> {
     const hashes: Record<string, string> = {}
-    // Use workspaceDir-relative paths; we don't have it here, so hash empty for now
     for (const file of files) {
-      hashes[file] = crypto.createHash('md5').update(file).digest('hex').slice(0, 8)
+      try {
+        const content = await fs.readFile(path.join(workspaceDir, file))
+        hashes[file] = crypto.createHash('sha256').update(content).digest('hex')
+      } catch {
+        hashes[file] = crypto.createHash('sha256').update('').digest('hex')
+      }
     }
     return hashes
   }
@@ -90,7 +94,11 @@ export class ContractExtractor {
     if (frontmatter && frontmatter.length > 0) return frontmatter
 
     // Fallback: markdown table
-    return this.parseTableScenarios(content)
+    const tableScenarios = this.parseTableScenarios(content)
+    if (tableScenarios.length > 0) return tableScenarios
+
+    // Fallback: markdown headings with Given/When/Then blocks
+    return this.parseHeadingScenarios(content)
   }
 
   private parseFrontmatterScenarios(content: string): BehaviorScenario[] | undefined {
@@ -218,6 +226,49 @@ export class ContractExtractor {
       .split('|')
       .slice(1, -1)
       .map(c => c.trim())
+  }
+
+  private parseHeadingScenarios(content: string): BehaviorScenario[] {
+    const lines = content.split('\n')
+    const result: BehaviorScenario[] = []
+    let current: BehaviorScenario | null = null
+    let currentStep: 'given' | 'when' | 'then' | null = null
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      const heading = line.match(/^###\s+(Scenario|Boundary):\s*(.+)$/i)
+      if (heading) {
+        if (current) result.push(current)
+        const kind = heading[1]!.toLowerCase()
+        const name = heading[2]!.trim()
+        current = {
+          id: `${kind}-${result.length}`,
+          name,
+          given: [],
+          when: [],
+          then: [],
+          criticality: kind === 'boundary' ? 'optional' : 'critical',
+        }
+        currentStep = null
+        continue
+      }
+
+      if (!current) continue
+
+      const stepHeading = line.match(/^(Given|When|Then):\s*$/i)
+      if (stepHeading) {
+        currentStep = stepHeading[1]!.toLowerCase() as 'given' | 'when' | 'then'
+        continue
+      }
+
+      if (!currentStep || !line.startsWith('-')) continue
+
+      const item = line.replace(/^[-*]\s*/, '').trim()
+      if (item) current[currentStep].push(item)
+    }
+
+    if (current) result.push(current)
+    return result
   }
 
   // --- b. Design metadata from design.meta.json ---

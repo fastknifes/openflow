@@ -4,15 +4,13 @@ import * as os from 'node:os'
 import { logger } from './utils/logger.js'
 
 const COMMANDS: Record<string, string> = {
-  'openflow-brainstorm': 'OpenFlow brainstorm command for design clarification',
+  'openflow-feature': 'OpenFlow feature command for feature design clarification',
   'openflow-change': 'OpenFlow change command for feature workspace management',
   'openflow-init': 'OpenFlow init command for initializing AGENTS.md with docs guide',
-  'openflow-verify': 'OpenFlow verify command for evidence and readiness checks',
   'openflow-archive': 'OpenFlow archive command for completed features',
   'openflow-status': 'OpenFlow status command',
   'openflow-config': 'OpenFlow config command',
   'openflow-migrate-docs': 'Migrate documentation from other workflow tools into OpenFlow docs structure',
-  'openflow-harden': 'OpenFlow harden command for adversarial quality hardening',
   'openflow-issue': 'OpenFlow issue clarification and triage command for uncertain problems',
 }
 
@@ -22,14 +20,14 @@ const COMMANDS: Record<string, string> = {
 const LEGACY_SKILL_DIRS = [
   'openflow-change',
   'openflow-init',
-  'openflow-verify',
   'openflow-archive',
   'openflow-migrate-docs',
-  'openflow-harden',
 ]
 
 const STALE_COMMAND_FILES = [
   'openflow-writing-plan.md',
+  'openflow-harden.md',
+  'openflow-verify.md',
 ]
 
 function getGlobalConfigDir(): string {

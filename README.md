@@ -127,7 +127,7 @@ If you force both into the same workflow, AI usually starts coding too early.
 For **clear-boundary** work: new features, requirement changes, refactors.
 
 ```
-brainstorm → implement → [harden] → verify → archive
+brainstorm → implement → quality-gate → archive
               ↑
         Two implementation paths:
         1. OpenCode: plan → build
@@ -136,8 +136,7 @@ brainstorm → implement → [harden] → verify → archive
 
 - **brainstorm**: Explore intent, generate design proposal
 - **implement**: Execute only after the change boundary is clear
-- **harden**: Optional extra adversarial review for higher-risk changes (`[harden]` = optional)
-- **verify**: Not “looks done,” but a formal evidence + readiness gate
+- **quality-gate**: AI invokes `openflow-quality-gate` after implementation to decide whether adversarial hardening is needed, then verify evidence and readiness
 - **archive**: Turns the change into official, traceable project history
 
 ### 🔍 Mode 2: Issue Investigation Workflow (Unique to OpenFlow)
@@ -176,18 +175,20 @@ issue → investigate → classify → decide → next step
 /openflow-issue <problem description>          # Start investigation
 /openflow-issue <problem> --readonly          # Read-only investigation (no file modifications)
 /openflow-issue <problem> --write-doc         # Output investigation doc to docs/changes/
+/openflow-issue <problem> --resolve           # Fix and generate resolution artifacts (quality-gate handles harden/verify)
 ```
 
 ### 📋 Which Mode to Use?
 
 | Scenario | Use This Workflow |
 |----------|-----------------|
-| Add new feature | `brainstorm` → `implement` → `verify` → `archive` |
-| Modify existing feature with a clear boundary | `brainstorm` → `implement` → `verify` → `archive` |
+| Add new feature | `brainstorm` → `implement` → `quality-gate` → `archive` |
+| Modify existing feature with a clear boundary | `brainstorm` → `implement` → `quality-gate` → `archive` |
 | Uncertain problem discovered | **`issue`** |
 | Online data anomaly | **`issue`** (might be data issue, not necessarily code) |
 | Not sure whether it is a bug | Start with **`issue`**, do not patch immediately |
 | Bug confirmed and the fix boundary is clear | Use **`issue`** first to confirm classification, then follow feature workflow |
+| Bug confirmed, want to fix and verify in one step | **`issue --resolve`** |
 
 ---
 
@@ -205,10 +206,10 @@ OpenFlow maintains more than feature docs. It continuously maintains global fact
 - Team changes, session loss, and context switches no longer wipe out system knowledge
 
 ### 🛡️ Quality Governance, Not Last-Minute Cleanup
-OpenFlow controls code quality in two layers:
+OpenFlow controls code quality through a unified quality gate:
 - **Front-loaded constraints**: TDD plan enhancement is enabled by default, pushing testing and verification requirements into the implementation plan
-- **Post-implementation hardening**: complex changes can run through `harden`, where reviewer / executor rounds repeatedly challenge design alignment, regression risk, and missing validation
-- **Final gate**: even after implementation, `verify` still requires evidence and readiness before the change can count as complete
+- **AI-driven quality gate**: After implementation, the AI invokes `openflow-quality-gate`, which decides whether adversarial hardening is needed based on change complexity, then performs evidence-aware verification
+- **Final gate**: readiness classification (`Ready`, `ReadyWithDocUpdates`, `NotReady`, `NeedsDecision`) before the change can count as complete
 
 That means quality is not something checked casually at the end. It is constrained before implementation, during implementation, and after implementation
 
@@ -238,7 +239,7 @@ OpenFlow treats archive as a formal closing stage:
 ### 🏗️ Better Fit For Brownfield Systems Than Demo-First Workflows
 OpenFlow is structured for long-lived systems:
 - Problems may be clarified before they are implemented
-- High-risk changes may add `harden`
+- High-risk changes receive automatic adversarial hardening via `openflow-quality-gate`
 - Documentation, design, verification, and archive all constrain AI behavior together
 - The model fits systems that already have history, constraints, and production reality
 
@@ -249,14 +250,14 @@ OpenFlow is structured for long-lived systems:
 ### Feature Development Workflow
 
 ```
-You: /openflow-brainstorm add dark mode
+You: /openflow-feature add dark mode
 AI:  ✓ Clarified the change boundary: theme switching, localStorage persistence, component compatibility
      ✓ Generated design.md, requirements.md
      Design saved to docs/changes/2026-05-10-dark-mode/
 
 You: [implement executes according to plan...]
-You: /openflow-verify dark mode
-AI:  Drift detection: ✓ Passed
+AI:  [invokes openflow-quality-gate automatically]
+     Drift detection: ✓ Passed
      Evidence: ✓ lint ✓ typecheck ✓ test
      Readiness: Ready
 
@@ -270,14 +271,15 @@ AI:  ✓ Archived to docs/archive/2026-05-10-dark-mode/
 ```
 You: /openflow-issue "API returning strange data"
 AI:  ✓ Investigating...
-     ✓ Boundary is still unclear, staying read-only
-     ✓ Classification: data_issue (not code bug)
-     ✓ Next step suggestion: Check data source, not code
+     ✓ Similar historical issue found: 2026-04-28-api-data-format
+     ✓ Classification: bugfix
+     ✓ Recommended next step: Use --resolve to fix and verify
 
-You: /openflow-issue "User can't see payment button" --write-doc
-AI:  ✓ Written to docs/changes/2026-05-10-payment-button/issue-clarification.md
-     ✓ Classification: cannot_determine
-     ✓ Suggestion: Need more evidence (screenshots, steps, environment info)
+You: /openflow-issue "API returning strange data" --resolve
+AI:  ✓ Generated issue-resolution.md (root cause, fix summary, recurrence signature)
+     ✓ Generated promotion-candidate.md
+     ✓ Complexity: trivial — quality-gate skipped harden
+     ✓ Quality gate: Ready
 ```
 
 ---
@@ -289,9 +291,9 @@ Need a practical walkthrough instead of a command list? Read the step-by-step tu
 ### 🎯 You Only Need Three Core Commands
 
 ```text
-/openflow-brainstorm <feature>     # Design a feature (Mode 1)
-/openflow-issue <problem>         # Investigate a problem (Mode 2)
-/openflow-verify <feature>        # Generate evidence & readiness
+/openflow-feature <feature>             # Design a feature (Mode 1)
+/openflow-issue <problem>              # Investigate a problem (Mode 2)
+openflow-quality-gate                  # AI-invoked post-implementation quality gate
 ```
 
 ---
@@ -301,7 +303,7 @@ Need a practical walkthrough instead of a command list? Read the step-by-step tu
 #### 1. Initiation: `/openflow-init`
 Start here for any new project. It sets up the `AGENTS.md` guide and prepares your workspace for governed development.
 
-#### 2. Design Phase: `/openflow-brainstorm <feature>`
+#### 2. Design Phase: `/openflow-feature <feature>`
 - **What it does**: Explores intent, asks clarifying questions, and proposes 2-3 approaches.
 - **Intelligent Output**: Based on the complexity of the feature, it generates a tailored set of documents in `docs/changes/YYYY-MM-DD-feature/`, which may include:
   - `design.md`: Core architecture and technical solution (Primary).
@@ -321,18 +323,13 @@ Use this when the problem is still ambiguous and you do **not** want to assume i
 - **Typical use**: Investigating wrong data, strange behavior, unclear business rules, config/environment issues, or cases where you first need to decide whether the next step is fix, further investigation, or brainstorm.
 - **Helpful flags**: `--readonly`, `--write-doc`, `--continue`.
 
-#### 5. Hardening Phase: `/openflow-harden <feature>`
-Run this between implementation and verify when a change is complex, risky, or cross-cutting.
-- **What it does**: Performs adversarial quality hardening through reviewer/executor style inspection loops.
-- **Typical use**: Multi-file logic changes, state/permission/data-flow changes, public interface changes, or any implementation that may pass tests but still hide regressions.
-- **Helpful flags**: `--full`, `--mode quick|standard|deep`, `--max-rounds N`.
+#### 5. Quality Gate: `openflow-quality-gate` (AI-Invoked)
+After implementation, the AI invokes the `openflow-quality-gate` Skill automatically. See [Quality Governance ↓](#-quality-governance-not-last-minute-cleanup) for details.
+- **What it does**: Decides whether risk-based adversarial hardening is needed, then performs evidence-aware verification.
+- **Typical use**: Invoked automatically after any code change. You review the output for readiness classification.
+- **Not a user command**: This is a Skill invoked by the AI, not a slash command users enter manually.
 
-#### 6. Verification Phase: `/openflow-verify <feature>`
-The gatekeeper. Before claiming success, you must run verify.
-- **Drift Detection**: Automatically checks if the implementation has "drifted" from the approved design and requirements.
-- **Evidence Phase**: Runs tests, security scans (secrets/vulns), and linting.
-- **Readiness Phase**: Classifies the state as `Ready`, `ReadyWithDocUpdates`, `NotReady`, or `NeedsDecision`.
-- **The Iron Law**: No completion claims without fresh verification evidence.
+> **Internal capabilities**: The harden adversarial review and verify evidence collection still exist as underlying mechanisms (`/openflow-harden`, `/openflow-verify`). They are no longer the normal manual workflow entrypoints. Their capabilities are coordinated by `openflow-quality-gate`. See `docs/current/design/openflow-harden/design.md` for historical design context.
 
 #### 7. Closure: `/openflow-archive <feature>`
 The final authority.
@@ -392,7 +389,7 @@ Customize the behavior further in your `opencode.json`:
 ```json
 {
   "openflow": {
-    "brainstorming": {
+    "feature": {
       "enabled": true,
       "auto_trigger": true,
       "trigger_mode": "smart"

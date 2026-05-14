@@ -93,3 +93,123 @@ async function pathExists(filePath: string): Promise<boolean> {
     return false
   }
 }
+
+// ---------------------------------------------------------------------------
+// Issue Resolution Builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Input for the issue-resolution.md generator.
+ *
+ * `symptom`, `rootCause`, and `fixSummary` are required — a resolution
+ * without them would be meaningless. Everything else is optional and will
+ * be replaced with useful fallback text when missing.
+ */
+export interface IssueResolutionInput {
+  /** Original problem description */
+  symptom: string
+  /** Identified root cause */
+  rootCause: string
+  /** Summary of the fix approach */
+  fixSummary: string
+  /** Files that were changed (paths) */
+  filesInvolved?: string[]
+  /** What confirmed the fix works */
+  verificationEvidence?: string
+  /** How to recognise the same problem in the future */
+  recurrenceSignature?: string
+  /** What the next AI should check first for similar issues */
+  futureAIGuidance?: string
+}
+
+/**
+ * Prevent user-provided markdown from injecting ##-level headings that
+ * would collide with the section headings in the generated document.
+ * Lighter than `escapeMarkdown` — preserves intentional formatting
+ * (bold, code, lists) while demoting any heading lines to bold text.
+ */
+function safeSectionContent(text: string): string {
+  return text
+    .replace(/^#{1,4}\s+(.+)$/gm, '**$1**')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function contentOr(value: string | undefined, fallback: string): string {
+  if (!value || value.trim().length === 0) return fallback
+  return safeSectionContent(value)
+}
+
+/**
+ * Build the markdown content for an issue-resolution document.
+ * Pure string generation — does NOT write to disk.
+ *
+ * Required sections: Symptom, Root Cause, Fix Summary, Files Involved,
+ * Verification Evidence, Recurrence Signature, Future AI Guidance.
+ */
+export function buildIssueResolution(input: IssueResolutionInput): string {
+  const sections: string[] = []
+
+  sections.push('# Issue Resolution')
+  sections.push('')
+
+  // Symptom (required)
+  sections.push('## Symptom')
+  sections.push('')
+  sections.push(safeSectionContent(input.symptom))
+  sections.push('')
+
+  // Root Cause (required)
+  sections.push('## Root Cause')
+  sections.push('')
+  sections.push(safeSectionContent(input.rootCause))
+  sections.push('')
+
+  // Fix Summary (required)
+  sections.push('## Fix Summary')
+  sections.push('')
+  sections.push(safeSectionContent(input.fixSummary))
+  sections.push('')
+
+  // Files Involved (optional)
+  sections.push('## Files Involved')
+  sections.push('')
+  const files = input.filesInvolved?.filter(f => f.trim().length > 0)
+  if (files && files.length > 0) {
+    for (const f of files) {
+      sections.push(`- ${safeSectionContent(f)}`)
+    }
+  } else {
+    sections.push('_No files recorded._')
+  }
+  sections.push('')
+
+  // Verification Evidence (optional)
+  sections.push('## Verification Evidence')
+  sections.push('')
+  sections.push(contentOr(
+    input.verificationEvidence,
+    '_No verification evidence recorded._',
+  ))
+  sections.push('')
+
+  // Recurrence Signature (optional)
+  sections.push('## Recurrence Signature')
+  sections.push('')
+  sections.push(contentOr(
+    input.recurrenceSignature,
+    '_No recurrence signature recorded. Consider adding one to help future investigations._',
+  ))
+  sections.push('')
+
+  // Future AI Guidance (optional)
+  sections.push('## Future AI Guidance')
+  sections.push('')
+  sections.push(contentOr(
+    input.futureAIGuidance,
+    '_No AI guidance recorded. Consider adding hints about what to check first when similar symptoms appear._',
+  ))
+  sections.push('')
+
+  return sections.join('\n')
+}

@@ -39,7 +39,7 @@ export async function handleChange(ctx: OpenFlowContext, feature?: string, descr
   if (acceptanceState?.feature === sanitizedFeature && acceptanceState.phase === 'archived') {
     throw new OpenFlowError(
       ErrorCode.INVALID_INPUT,
-      `Feature '${sanitizedFeature}' has been archived. Requirement changes are not allowed on archived features. Start a new /openflow-brainstorm session for a new change cycle.`
+      `Feature '${sanitizedFeature}' has been archived. Requirement changes are not allowed on archived features. Start a new /openflow-feature session for a new change cycle.`
     )
   }
 
@@ -112,7 +112,7 @@ function formatMissingWorkspace(feature: string): string {
 No changes workspace found for this feature.
 
 ### Next Step
-Run \`/openflow-brainstorm ${escapeMarkdown(feature)}\` to create a design workspace first, then use \`/openflow-change ${escapeMarkdown(feature)}\` for requirement changes.
+Run \`/openflow-feature ${escapeMarkdown(feature)}\` to create a design workspace first, then use \`/openflow-change ${escapeMarkdown(feature)}\` for requirement changes.
 `
 }
 
@@ -125,7 +125,7 @@ function formatMissingDesignDocs(feature: string, workspacePath: string): string
 No design documents found in this workspace.
 
 ### Next Step
-Run \`/openflow-brainstorm ${escapeMarkdown(feature)}\` to generate design documents first.
+Run \`/openflow-feature ${escapeMarkdown(feature)}\` to generate design documents first.
 `
 }
 

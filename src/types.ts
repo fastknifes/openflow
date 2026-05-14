@@ -1,16 +1,16 @@
-export interface BrainstormingConfig {
+export interface FeatureConfig {
   enabled: boolean
   output_dir: string
   auto_trigger: boolean
-  trigger_mode: BrainstormTriggerMode
+  trigger_mode: FeatureTriggerMode
   generate_prd: boolean
   prd_output_dir: string
-  closure: BrainstormClosureConfig
+  closure: FeatureClosureConfig
 }
 
-export type BrainstormTriggerMode = 'smart' | 'always' | 'never'
+export type FeatureTriggerMode = 'smart' | 'always' | 'never'
 
-export interface BrainstormClosureConfig {
+export interface FeatureClosureConfig {
   enabled: boolean
   auto_transition: boolean
   strong_signals: string[]
@@ -194,7 +194,7 @@ export interface EvidenceSinkEntry {
 }
 
 export interface OpenFlowConfig {
-  brainstorming: BrainstormingConfig
+  feature: FeatureConfig
   tdd: TddConfig
   verification: VerificationConfig
   acceptance: AcceptanceConfig
@@ -206,7 +206,7 @@ export interface OpenFlowConfig {
 }
 
 export const defaultConfig: OpenFlowConfig = {
-  brainstorming: {
+  feature: {
     enabled: true,
     output_dir: 'docs/changes',
     auto_trigger: true,
@@ -288,17 +288,17 @@ export interface OpenFlowContext {
   enhancedPlans: Set<string>
 }
 
-export type BrainstormWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
+export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
 
-export type BrainstormQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
+export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
 
-export interface PersistedBrainstormSession {
+export interface PersistedFeatureSession {
   version: 2
   feature: string
-  workflowState: BrainstormWorkflowState
-  pendingQuestionId: BrainstormQuestionId | null
-  askedQuestionIds: BrainstormQuestionId[]
-  answers: Partial<Record<BrainstormQuestionId, string>>
+  workflowState: FeatureWorkflowState
+  pendingQuestionId: FeatureQuestionId | null
+  askedQuestionIds: FeatureQuestionId[]
+  answers: Partial<Record<FeatureQuestionId, string>>
   generatedDocs: string[]
   generationAttemptCount: number
   lastError?: string
@@ -307,17 +307,17 @@ export interface PersistedBrainstormSession {
   updatedAt: string
 }
 
-export interface ActiveBrainstormIndex {
+export interface ActiveFeatureIndex {
   bySessionID: Record<string, { feature: string; updatedAt: string }>
 }
 
-export interface RecentBrainstormCompletionIndex {
+export interface RecentFeatureCompletionIndex {
   bySessionID: Record<string, { feature: string; completedAt: string }>
 }
 
 export type RequestType = 'trivial' | 'explicit' | 'exploratory' | 'open-ended' | 'fix'
 
-export type BrainstormTriggerSource = 'intent' | 'fallback' | 'config'
+export type FeatureTriggerSource = 'intent' | 'fallback' | 'config'
 
 export type TaskType = 'implementation' | 'test' | 'verification' | 'review' | 'setup' | 'unknown'
 
@@ -390,7 +390,10 @@ export type BehaviorScenarioCheckStatus = 'verified' | 'missing_evidence' | 'fai
 export interface BehaviorScenarioCheckResult {
   scenarioId: string
   name: string
+  criticality?: 'critical' | 'normal' | 'optional'
   status: BehaviorScenarioCheckStatus
+  evidenceType?: string
+  evidenceReference?: string
   detail?: string
 }
 
@@ -472,6 +475,8 @@ export interface AcceptanceState {
   governancePromotionStatus?: GovernancePromotionStatus
   issueClarificationPath?: string
   promotionCandidatePath?: string
+  /** Evidence freshness metadata for quality-gate reuse decisions */
+  evidenceFreshness?: EvidenceFreshnessMetadata
 }
 
 // 按阶段分段的文件变更记录
@@ -507,4 +512,86 @@ export interface ExecutionQualityPolicy {
 export interface ExecutionQualityPolicyConfig {
   enabled: boolean
   defaultMode: QualityMode
+}
+
+// ── Quality Gate contracts ────────────────────────────────────────────────
+// Shared types for autonomous quality gate orchestration.
+// Reuses HardenStatus, HardenPolicy, and VerifyReadinessStatus.
+// Readiness fields mirror VerifyResult fields (flattened, prefixed) for
+// archive compatibility — no separate readiness store.
+
+/** The semantic context source available to the quality gate.
+ *  Represents what kind of work triggered evaluation — NOT a quality mode. */
+export type QualityGateContextKind =
+  | 'feature'   // feature/change workflow
+  | 'issue'     // issue investigation
+  | 'plan'      // plan execution context
+  | 'request'   // generic user request without explicit workflow
+  | 'limited'   // context available but budget-restricted
+  | 'none'      // no semantic context available
+
+export interface QualityGateResult {
+  /** Feature name this quality gate was evaluated for */
+  feature: string
+  /** Semantic context source (feature / issue / plan / request / limited / none) */
+  contextKind: QualityGateContextKind
+  /** The harden policy decided (none / risk-based / final) */
+  hardenDecision: HardenPolicy
+  /** Result of harden if executed */
+  hardenStatus?: HardenStatus
+  /** Readiness for archive — reuses VerifyReadinessStatus */
+  readiness?: VerifyReadinessStatus
+  /** Reason codes for the readiness decision */
+  readinessReasonCodes?: string[]
+  /** Summary of readiness-relevant evidence */
+  readinessEvidenceSummary?: string
+  /** Constraints checked during verification */
+  readinessConstraintsChecked?: string[]
+  /** When readiness was last verified (ISO timestamp) */
+  readinessVerifiedAt?: string
+  /** High-level evidence narrative */
+  evidenceSummary?: string
+  /** Non-blocking warnings collected during evaluation */
+  warnings: string[]
+  /** True when context budget was insufficient — NOT a failure signal */
+  limitedContext: boolean
+}
+
+// ── Evidence Freshness Metadata ───────────────────────────────────────────
+// Tracks when evidence was recorded so the quality gate can distinguish
+// fresh, stale, and missing evidence without trusting natural-language claims.
+
+export interface EvidenceFreshnessMetadata {
+  /** Git HEAD commit hash when evidence was recorded (git rev-parse HEAD) */
+  gitHead: string
+  /** Changed files at time of recording (git diff --name-only) */
+  changedFiles: string[]
+  /** Short diff identity hash for quick comparison */
+  diffHash: string
+  /** ISO-8601 timestamp when evidence was recorded */
+  recordedAt: string
+  /** Names of evidence checks that were run (e.g. ["test", "typecheck"]) */
+  evidenceChecks: string[]
+  /** Human-readable summary of the evidence collected */
+  evidenceSummary: string
+}
+
+export type EvidenceFreshnessStatus = 'fresh' | 'stale' | 'missing'
+
+export interface EvidenceFreshnessResult {
+  status: EvidenceFreshnessStatus
+  /** Stored metadata (present unless status is 'missing') */
+  metadata?: EvidenceFreshnessMetadata
+  /** Human-readable reason for the classification */
+  reason: string
+  /** When stale: what specifically differed (e.g. "git HEAD changed", "working tree changed") */
+  staleDetails?: string[]
+}
+
+/** Injectable workspace snapshot — allows tests to avoid real git commands. */
+export interface CurrentWorkspaceState {
+  gitHead: string
+  changedFiles: string[]
+  /** Unix-ms timestamp of the most recent changed file (optional) */
+  latestChangeTimestamp?: number
 }

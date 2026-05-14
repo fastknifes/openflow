@@ -43,9 +43,9 @@ function firstOutputText(output: ReturnType<typeof createOutput>): string {
   return ((output.parts[0] as { text?: string }).text) ?? ''
 }
 
-describe('chat-message brainstorm guidance', () => {
-  test('suggests brainstorm skill entrypoint for new feature requests', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-command')
+describe('chat-message feature guidance', () => {
+  test('suggests feature skill entrypoint for new feature requests', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-command')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
@@ -54,8 +54,8 @@ describe('chat-message brainstorm guidance', () => {
 
     await hook(createInput('session-command'), output)
 
-    expect(firstOutputText(output)).toContain('/openflow-brainstorm feature-')
-    expect(firstOutputText(output)).not.toContain('`/brainstorm ')
+    expect(firstOutputText(output)).toContain('/openflow-feature feature-')
+    expect(firstOutputText(output)).not.toContain('`/feature ')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -83,13 +83,13 @@ describe('chat-message brainstorm guidance', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('turn-to-turn continuation bridge advances brainstorm from plain user reply', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-resume')
+  test('turn-to-turn continuation bridge advances feature from plain user reply', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-resume')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'active.json'),
+      join(root, '.sisyphus', 'feature', 'active.json'),
       JSON.stringify({
         bySessionID: {
           'session-resume': {
@@ -102,7 +102,7 @@ describe('chat-message brainstorm guidance', () => {
     )
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'user-login.json'),
+      join(root, '.sisyphus', 'feature', 'user-login.json'),
       JSON.stringify({
         version: 2,
         feature: 'user-login',
@@ -125,7 +125,7 @@ describe('chat-message brainstorm guidance', () => {
 
     expect(firstOutputText(output)).toContain('这个功能的主要使用者是谁？')
 
-    const saved = JSON.parse(await readFile(join(root, '.sisyphus', 'brainstorm', 'user-login.json'), 'utf-8')) as {
+    const saved = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
       answers: Record<string, string>
       pendingQuestionId: string
     }
@@ -136,12 +136,12 @@ describe('chat-message brainstorm guidance', () => {
   })
 
   test('continuation bridge does not consume low-signal formal replies', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-low-signal')
+    const root = join(process.cwd(), '.test-chat-feature-low-signal')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'active.json'),
+      join(root, '.sisyphus', 'feature', 'active.json'),
       JSON.stringify({
         bySessionID: {
           'session-low': {
@@ -154,7 +154,7 @@ describe('chat-message brainstorm guidance', () => {
     )
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'user-login.json'),
+      join(root, '.sisyphus', 'feature', 'user-login.json'),
       JSON.stringify({
         version: 2,
         feature: 'user-login',
@@ -182,13 +182,13 @@ describe('chat-message brainstorm guidance', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('continuation bridge ignores plain discussion when brainstorm is not awaiting formal answer', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-discussion-mode')
+  test('continuation bridge ignores plain discussion when feature is not awaiting formal answer', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-discussion-mode')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'active.json'),
+      join(root, '.sisyphus', 'feature', 'active.json'),
       JSON.stringify({
         bySessionID: {
           'session-discussion': {
@@ -201,7 +201,7 @@ describe('chat-message brainstorm guidance', () => {
     )
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'user-login.json'),
+      join(root, '.sisyphus', 'feature', 'user-login.json'),
       JSON.stringify({
         version: 2,
         feature: 'user-login',
@@ -227,13 +227,13 @@ describe('chat-message brainstorm guidance', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('completed brainstorm does not keep hijacking later implementation chat', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-post-complete')
+  test('completed feature does not keep hijacking later implementation chat', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-post-complete')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'recent-completed.json'),
+      join(root, '.sisyphus', 'feature', 'recent-completed.json'),
       JSON.stringify({
         bySessionID: {
           'session-done': {
@@ -249,18 +249,18 @@ describe('chat-message brainstorm guidance', () => {
     const output = createOutput('开始实现这个功能')
     await hook(createInput('session-done'), output)
 
-    expect(firstOutputText(output)).not.toContain('Brainstorm In Progress')
+    expect(firstOutputText(output)).not.toContain('Feature In Progress')
 
     await rm(root, { recursive: true, force: true })
   })
 
-  test('active brainstorm does not hijack obvious feature switch messages', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-switch-feature')
+  test('active feature does not hijack obvious feature switch messages', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-switch-feature')
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, '.sisyphus', 'brainstorm'), { recursive: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'active.json'),
+      join(root, '.sisyphus', 'feature', 'active.json'),
       JSON.stringify({
         bySessionID: {
           'session-switch': {
@@ -273,7 +273,7 @@ describe('chat-message brainstorm guidance', () => {
     )
 
     await writeFile(
-      join(root, '.sisyphus', 'brainstorm', 'user-login.json'),
+      join(root, '.sisyphus', 'feature', 'user-login.json'),
       JSON.stringify({
         version: 2,
         feature: 'user-login',
@@ -293,32 +293,32 @@ describe('chat-message brainstorm guidance', () => {
     const output = createOutput('我想实现一个新的功能：支付功能')
     await hook(createInput('session-switch'), output)
 
-    expect(firstOutputText(output)).toContain('/openflow-brainstorm ')
+    expect(firstOutputText(output)).toContain('/openflow-feature ')
     expect(firstOutputText(output)).not.toContain('这个功能的主要使用者是谁？')
 
     await rm(root, { recursive: true, force: true })
   })
 
-  test('slash-command dispatch: /openflow-brainstorm routes to handler', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-slash-dispatch')
+  test('slash-command dispatch: /openflow-feature routes to handler', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-slash-dispatch')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
     const hook = createChatMessageHook(createContext(root))
-    const output = createOutput('/openflow-brainstorm my-feature')
+    const output = createOutput('/openflow-feature my-feature')
 
-    await hook(createInput('session-slash-brainstorm'), output)
+    await hook(createInput('session-slash-feature'), output)
 
     // Dispatch should inject handler result — not the suggestion template
-    expect(firstOutputText(output)).not.toContain('Brainstorm Suggested')
-    // Handler should have produced brainstorm content (first question or session info)
+    expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
+    // Handler should have produced feature content (first question or session info)
     expect(firstOutputText(output)).toContain('my-feature')
 
     await rm(root, { recursive: true, force: true })
   })
 
   test('slash-command dispatch: /openflow-status routes to handler', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-slash-status')
+    const root = join(process.cwd(), '.test-chat-feature-slash-status')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
@@ -328,13 +328,13 @@ describe('chat-message brainstorm guidance', () => {
     await hook(createInput('session-slash-status'), output)
 
     expect(firstOutputText(output)).toContain('OpenFlow Status')
-    expect(firstOutputText(output)).not.toContain('Brainstorm Suggested')
+    expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
 
     await rm(root, { recursive: true, force: true })
   })
 
-  test('slash-command dispatch: /openflow-verify without feature returns help text', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-slash-verify-noarg')
+  test('slash-command dispatch: /openflow-verify returns deprecation guidance', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-slash-verify-noarg')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
@@ -343,14 +343,15 @@ describe('chat-message brainstorm guidance', () => {
 
     await hook(createInput('session-slash-verify-noarg'), output)
 
-    // Should contain the help/error about missing feature, not crash
-    expect(firstOutputText(output)).toContain('active feature is required')
+    // /openflow-verify was deprecated in Task 7 — should return deprecation message
+    expect(firstOutputText(output)).toContain('deprecated')
+    expect(firstOutputText(output)).toContain('openflow-quality-gate')
 
     await rm(root, { recursive: true, force: true })
   })
 
   test('slash-command dispatch: non-user role with slash text does not dispatch', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-slash-nonuser')
+    const root = join(process.cwd(), '.test-chat-feature-slash-nonuser')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
@@ -366,7 +367,7 @@ describe('chat-message brainstorm guidance', () => {
         agent: 'test',
         model: { providerID: 'p', modelID: 'm' },
       },
-      parts: [{ id: 'p1', sessionID: 's1', messageID: 'm1', type: 'text' as const, text: '## OpenFlow: Brainstorm Suggested\n\nRecommended next step before implementation:\n\n```\n/openflow-brainstorm feature-xxx\n```' }],
+      parts: [{ id: 'p1', sessionID: 's1', messageID: 'm1', type: 'text' as const, text: '## OpenFlow: Feature Design Suggested\n\nRecommended next step before implementation:\n\n```\n/openflow-feature feature-xxx\n```' }],
     } as Parameters<ReturnType<typeof createChatMessageHook>>[1]
 
     await hook(createInput('session-nonuser'), output)
@@ -374,13 +375,13 @@ describe('chat-message brainstorm guidance', () => {
     // System-role message should be left untouched — no dispatch, no guard message injected
     const parts = output.parts as Array<{ text?: string }>
     expect(parts.length).toBe(1)
-    expect(parts[0].text).toContain('/openflow-brainstorm feature-xxx')
+    expect(parts[0].text).toContain('/openflow-feature feature-xxx')
 
     await rm(root, { recursive: true, force: true })
   })
 
   test('non-OpenFlow slash command passes through without dispatch', async () => {
-    const root = join(process.cwd(), '.test-chat-brainstorm-slash-passthrough')
+    const root = join(process.cwd(), '.test-chat-feature-slash-passthrough')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 

@@ -3,7 +3,7 @@
 **Date**: 2026-05-08
 **Version**: 1.0
 **Priority**: P1
-**Status**: Draft
+**Status**: Archived
 
 ---
 
@@ -73,7 +73,7 @@
 ## 6. 相关文档
 
 - [设计文档](./design.md)
-- [执行计划](../../.sisyphus/plans/openflow-harden.md)
+- [执行计划](../../.sisyphus/plans/rename-brainstorm-to-feature.md)
 
 ---
 
@@ -81,11 +81,11 @@
 
 | 日期 | 版本 | 变更内容 | 作者 |
 |------|------|----------|------|
-| 2026-05-08 | 1.0 | 初始版本 | - |
+| 2026-05-13 | 1.0 | 初始版本 | - |
 
-# openflow-harden - Product Requirements Document
+# rename-brainstorm-to-feature - Product Requirements Document
 
-**Date**: 2026-05-08
+**Date**: 2026-05-13
 **Version**: 1.0
 **Priority**: P1
 **Status**: Draft

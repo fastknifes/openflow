@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { handleFeature } from '../../src/commands/brainstorm.js'
-import { defaultSynthesizer } from '../../src/phases/brainstorm/llm-adapter.js'
+import { handleFeature } from '../../src/commands/feature.js'
+import { defaultSynthesizer } from '../../src/phases/feature/llm-adapter.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 
 function createContext(directory: string): OpenFlowContext {
@@ -52,7 +52,7 @@ function createQuestionToolContext(directory: string, answers: string[], session
   }
 }
 
-describe('brainstorm command', () => {
+describe('feature command', () => {
   test('throws when feature is missing and no active session exists', async () => {
     const root = join(process.cwd(), '.test-feature-missing-feature')
     await rm(root, { recursive: true, force: true })
@@ -65,14 +65,14 @@ describe('brainstorm command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('starts brainstorm in collecting state and persists first pending question', async () => {
+  test('starts feature in collecting state and persists first pending question', async () => {
     const root = join(process.cwd(), '.test-feature-first-question')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
     const result = await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root))
 
-    expect(result).toContain('Brainstorm Question')
+    expect(result).toContain('Feature Question')
     expect(result).toContain('这个功能主要要解决什么问题？')
     expect(result).toContain('answered 0/5')
 
@@ -328,7 +328,7 @@ describe('brainstorm command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('marks brainstorm failed when requirement model validation fails', async () => {
+  test('marks feature failed when requirement model validation fails', async () => {
     const root = join(process.cwd(), '.test-feature-validation-failure')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
@@ -360,7 +360,7 @@ describe('brainstorm command', () => {
 
       const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-invalid', 'message-5'))
 
-      expect(result).toContain('Brainstorm Pending')
+      expect(result).toContain('Feature Design Pending')
       expect(result).toContain('String must contain at least 1 character')
 
       const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {

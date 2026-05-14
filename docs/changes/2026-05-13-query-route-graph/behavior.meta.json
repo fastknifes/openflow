@@ -1,0 +1,81 @@
+{
+  "feature": "query-route-graph",
+  "constraints": [
+    {
+      "id": "d-0001",
+      "category": "compatibility",
+      "severity": "must",
+      "description": "Keep a rollback path available for the change",
+      "rationale": "Minimizing risk requires an easy way to revert if issues appear",
+      "verificationMethod": "Confirm the rollout can be disabled or reverted without manual data repair",
+      "sourceQuestionId": "priority"
+    },
+    {
+      "id": "d-0002",
+      "category": "scope",
+      "severity": "must",
+      "description": "Keep the change scope narrow to reduce regression surface area",
+      "rationale": "Smaller changes reduce the number of failure modes introduced at once",
+      "verificationMethod": "Review the touched files and modules for unnecessary breadth",
+      "sourceQuestionId": "priority"
+    },
+    {
+      "id": "d-0003",
+      "category": "compatibility",
+      "severity": "must",
+      "description": "Protect existing behavior with explicit regression coverage",
+      "rationale": "Regression safety is part of the stated top priority",
+      "verificationMethod": "Run targeted regression tests around existing behavior",
+      "sourceQuestionId": "priority"
+    },
+    {
+      "id": "d-0004",
+      "category": "scope",
+      "severity": "should",
+      "description": "风险最小",
+      "rationale": "This free-text constraint was provided directly during brainstorming and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    }
+  ],
+  "scopeBoundary": {
+    "inScope": [
+      "query-route-graph 工程或研发内部使用",
+      "Address the stated problem: 继续收敛：该功能是 OpenFlow Runtime 内部的 Query Route Graph，用于 query-only 后台任务的跨会话复用。第一版不提供用户命令、不提供用户开关、不做用户可见审计、不写专用 debug 日志。普通用户完全无感；AI/agent/runtime 内部自动 lookup、decide、record。它应与 Drift Guardian 共用 singleton/runtime 管理模型，但作为 sibling service 保持职责分离，不并入 drift guardian 语义。后续如果需要调试，另做通用 Diagnostics/Trace Runtime，让多个 OpenFlow 子系统统一接入。"
+    ],
+    "outOfScope": []
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "ac-0001",
+      "description": "query-route-graph addresses the stated problem: 继续收敛：该功能是 OpenFlow Runtime 内部的 Query Route Graph，用于 query-only 后台任务的跨会话复用。第一版不提供用户命令、不提供用户开关、不做用户可见审计、不写专用 debug 日志。普通用户完全无感；AI/agent/runtime 内部自动 lookup、decide、record。它应与 Drift Guardian 共用 singleton/runtime 管理模型，但作为 sibling service 保持职责分离，不并入 drift guardian 语义。后续如果需要调试，另做通用 Diagnostics/Trace Runtime，让多个 OpenFlow 子系统统一接入。",
+      "category": "problem"
+    },
+    {
+      "id": "ac-0002",
+      "description": "query-route-graph works for the target users: 工程或研发内部使用",
+      "category": "target-users"
+    },
+    {
+      "id": "ac-0003",
+      "description": "query-route-graph implementation reflects the selected priority: 风险最小",
+      "category": "priority"
+    },
+    {
+      "id": "ac-0004",
+      "description": "query-route-graph respects the stated constraint: 风险最小",
+      "category": "constraints"
+    }
+  ],
+  "goals": [
+    "Solve: 继续收敛：该功能是 OpenFlow Runtime 内部的 Query Route Graph，用于 query-only 后台任务的跨会话复用。第一版不提供用户命令、不提供用户开关、不做用户可见审计、不写专用 debug 日志。普通用户完全无感；AI/agent/runtime 内部自动 lookup、decide、record。它应与 Drift Guardian 共用 singleton/runtime 管理模型，但作为 sibling service 保持职责分离，不并入 drift guardian 语义。后续如果需要调试，另做通用 Diagnostics/Trace Runtime，让多个 OpenFlow 子系统统一接入。",
+    "Serve target users: 工程或研发内部使用",
+    "Honor priority: 风险最小"
+  ],
+  "nonGoals": [
+    "Unrelated modules or workflows"
+  ],
+  "problemStatement": "继续收敛：该功能是 OpenFlow Runtime 内部的 Query Route Graph，用于 query-only 后台任务的跨会话复用。第一版不提供用户命令、不提供用户开关、不做用户可见审计、不写专用 debug 日志。普通用户完全无感；AI/agent/runtime 内部自动 lookup、decide、record。它应与 Drift Guardian 共用 singleton/runtime 管理模型，但作为 sibling service 保持职责分离，不并入 drift guardian 语义。后续如果需要调试，另做通用 Diagnostics/Trace Runtime，让多个 OpenFlow 子系统统一接入。",
+  "targetUsers": "工程或研发内部使用",
+  "testingStrategy": "Use targeted tests and review to verify: 风险最小, 风险最小"
+}

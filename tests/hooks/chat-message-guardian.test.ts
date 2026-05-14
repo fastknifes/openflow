@@ -10,12 +10,12 @@ function createContext(directory: string, overrides?: Partial<OpenFlowContext['c
   return {
     config: {
       ...defaultConfig,
-      brainstorming: {
-        ...defaultConfig.brainstorming,
+      feature: {
+        ...defaultConfig.feature,
         closure: {
-          ...defaultConfig.brainstorming.closure,
-          strong_signals: [...defaultConfig.brainstorming.closure.strong_signals],
-          weak_signals: [...defaultConfig.brainstorming.closure.weak_signals],
+          ...defaultConfig.feature.closure,
+          strong_signals: [...defaultConfig.feature.closure.strong_signals],
+          weak_signals: [...defaultConfig.feature.closure.weak_signals],
         },
       },
       tdd: { ...defaultConfig.tdd },

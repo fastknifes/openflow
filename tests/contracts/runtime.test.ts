@@ -520,6 +520,30 @@ describe('getOrExtractContract', () => {
     const result = await runtime.getOrExtractContract('unknown-feature')
     expect(result).toBeNull()
   })
+
+  test('invalidates cached contract when source content hash changes', async () => {
+    await fs.mkdir(path.join(dir, '.sisyphus'), { recursive: true })
+    await fs.writeFile(
+      path.join(dir, '.sisyphus', 'change-units.json'),
+      JSON.stringify({ version: 1, byFeature: { 'feat-cache': { changeDir: '2026-01-01-feat-cache' } } }),
+    )
+    const workspace = path.join(dir, 'docs', 'changes', '2026-01-01-feat-cache')
+    await fs.mkdir(workspace, { recursive: true })
+    await fs.writeFile(path.join(workspace, 'design.md'), '# Design\nfirst', 'utf-8')
+    await fs.writeFile(path.join(workspace, 'behavior.md'), '### Scenario: cached behavior\nGiven:\n- a\nWhen:\n- b\nThen:\n- c\n', 'utf-8')
+
+    await runtime.start(dir)
+    const first = await runtime.getOrExtractContract('feat-cache')
+    await fs.writeFile(path.join(workspace, 'design.md'), '# Design\nsecond', 'utf-8')
+    const second = await runtime.getOrExtractContract('feat-cache')
+
+    expect(first).not.toBeNull()
+    expect(second).not.toBeNull()
+    expect(second).not.toBe(first)
+    expect(second!.sourceHashes['design.md']).not.toBe(first!.sourceHashes['design.md'])
+
+    await runtime.stop()
+  })
 })
 
 describe('Contract cache persistence', () => {

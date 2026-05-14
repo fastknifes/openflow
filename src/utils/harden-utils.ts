@@ -60,6 +60,28 @@ function hasNewDefinitions(diffStr: string): boolean {
   return false
 }
 
+export function gradeComplexityFromDiff(diffStr: string): ComplexityGrade {
+  const diffLines = diffStr.split('\n').filter(l => l.startsWith('+') || l.startsWith('-')).length
+  if (!diffStr || diffStr.trim().length === 0 || diffLines <= 3) return 'trivial'
+
+  const { filesChanged, totalLines } = countDiffStats(diffStr)
+
+  if (onlyDocConfigFiles(diffStr)) return 'trivial'
+
+  if (filesChanged <= 1 && totalLines <= 10) return 'trivial'
+
+  if (hasNewDefinitions(diffStr)) return 'complex'
+
+  if (
+    (filesChanged <= 1 && totalLines <= 50) ||
+    (filesChanged === 2 && totalLines < filesChanged * 10)
+  ) {
+    return 'simple'
+  }
+
+  return 'complex'
+}
+
 export function gradeComplexity(planContent: string, diffStr: string): ComplexityGrade {
   if (!planContent || planContent.trim().length === 0) return 'complex'
 

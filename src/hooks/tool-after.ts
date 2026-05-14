@@ -14,7 +14,7 @@ import {
   hasDecisionsDocument,
   hasPrdDocument,
   isPrdGenerationEnabled,
-} from '../phases/brainstorm/prd-generator.js'
+} from '../phases/feature/prd-generator.js'
 
 const sessionBuildIds = new Map<string, string>()
 
@@ -82,6 +82,7 @@ function appendToolAfterPrompt(output: unknown, prompt: string): void {
 
 export function createToolAfterHook(ctx: OpenFlowContext) {
   const acceptancePromptHook = createAcceptancePromptHook(ctx)
+  const featureWorkflowConfig = (ctx.config as unknown as Record<string, { enabled: boolean }>)['feature']!
 
   const hook: NonNullable<Hooks['tool.execute.after']> = async (input, _output): Promise<void> => {
     if (input.tool !== 'write' && input.tool !== 'edit') return
@@ -148,7 +149,7 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
       if (planName && !ctx.enhancedPlans.has(planName)) {
         logger.info('Plan file detected', { path: filePath })
 
-        if (ctx.config.tdd.enabled || ctx.config.verification.in_plan || ctx.config.brainstorming.enabled) {
+        if (ctx.config.tdd.enabled || ctx.config.verification.in_plan || featureWorkflowConfig.enabled) {
           const enhanced = await enhancePlan({
             planPath: filePath,
             config: ctx.config,

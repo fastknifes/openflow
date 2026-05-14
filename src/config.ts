@@ -88,8 +88,8 @@ function validateConfigValue(config: unknown): boolean {
 
   const c = config as Record<string, unknown>
 
-  if (c.brainstorming !== undefined) {
-    const b = c.brainstorming as Record<string, unknown>
+  if (c.feature !== undefined) {
+    const b = c.feature as Record<string, unknown>
     if (b.enabled !== undefined && typeof b.enabled !== 'boolean') return false
     if (b.output_dir !== undefined && typeof b.output_dir !== 'string') return false
     if (b.auto_trigger !== undefined && typeof b.auto_trigger !== 'boolean') return false
@@ -230,7 +230,7 @@ export function getChangesPath(projectDir: string, buildId: string): string {
 }
 
 export function getDesignPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
-  const outputDir = config?.brainstorming?.output_dir ?? defaultConfig.brainstorming.output_dir
+  const outputDir = config?.feature?.output_dir ?? defaultConfig.feature.output_dir
   return path.join(projectDir, outputDir, featureName)
 }
 
@@ -279,7 +279,7 @@ export async function getChangeDocumentPath(projectDir: string, featureName: str
 }
 
 export function getRequirementsPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
-  const outputDir = config?.brainstorming?.prd_output_dir ?? defaultConfig.brainstorming.prd_output_dir
+  const outputDir = config?.feature?.prd_output_dir ?? defaultConfig.feature.prd_output_dir
   return path.join(projectDir, outputDir, featureName)
 }
 

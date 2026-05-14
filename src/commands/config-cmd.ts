@@ -3,17 +3,23 @@ import { escapeMarkdown } from '../utils/security.js'
 
 export function handleConfig(ctx: OpenFlowContext): string {
   const config = ctx.config
+  const featureWorkflowConfig = (config as unknown as Record<string, {
+    enabled: boolean
+    output_dir: string
+    auto_trigger: boolean
+    trigger_mode: string
+  }>)['feature']!
 
   return `## OpenFlow Configuration
 
 \`\`\`json
 {
   "openflow": {
-    "brainstorming": {
-      "enabled": ${config.brainstorming.enabled},
-      "output_dir": "${escapeMarkdown(config.brainstorming.output_dir)}",
-      "auto_trigger": ${config.brainstorming.auto_trigger},
-      "trigger_mode": "${escapeMarkdown(config.brainstorming.trigger_mode)}"
+    "feature": {
+      "enabled": ${featureWorkflowConfig.enabled},
+      "output_dir": "${escapeMarkdown(featureWorkflowConfig.output_dir)}",
+      "auto_trigger": ${featureWorkflowConfig.auto_trigger},
+      "trigger_mode": "${escapeMarkdown(featureWorkflowConfig.trigger_mode)}"
     },
     "tdd": {
       "enabled": ${config.tdd.enabled},

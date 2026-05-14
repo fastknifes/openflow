@@ -5,10 +5,10 @@ import { registerCommands } from './command-registration.js'
 import { registerSkills } from './skills/registration.js'
 import { loadConfig } from './config.js'
 import { logger, OpenFlowError } from './utils/index.js'
-import { handleInit, handleWritingPlan, handleIssue, handleArchive } from './commands/index.js'
+import { handleInit, handleWritingPlan, handleIssue, handleArchive, handleQualityGate, type QualityGateArgs } from './commands/index.js'
 import { getContractRuntime } from './contracts/runtime.js'
 import { GuardianConsumer } from './drift/guardian-consumer.js'
-import { handleBrainstorm } from './commands/brainstorm.js'
+import { handleFeature } from './commands/feature.js'
 import { createChatMessageHook } from './hooks/chat-message.js'
 import { createToolBeforeHook } from './hooks/tool-before.js'
 import { createToolAfterHook } from './hooks/tool-after.js'
@@ -27,7 +27,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
   }
 
   logger.info('Plugin initialized', {
-    brainstorming: config.brainstorming.enabled,
+    feature: config.feature.enabled,
     tdd: config.tdd.enabled,
     verification: config.verification.in_plan,
     archive: config.archive.enabled,
@@ -100,15 +100,15 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           }
         },
       }),
-      'openflow-brainstorm': tool({
-        description: 'OpenFlow brainstorm command for design clarification. Start or continue feature design. Provide feature name and optionally an answer to the current brainstorm question.',
+      'openflow-feature': tool({
+        description: 'OpenFlow feature command for design clarification. Start or continue feature design. Provide feature name and optionally an answer to the current feature question.',
         args: {
           feature: tool.schema.string().max(64),
           answer: tool.schema.string().optional(),
         },
         execute: async (args: { feature: string; answer?: string }, toolContext) => {
           try {
-            return await handleBrainstorm(openflowCtx, args.feature || undefined, args.answer, toolContext)
+            return await handleFeature(openflowCtx, args.feature || undefined, args.answer, toolContext)
           } catch (error) {
             if (error instanceof OpenFlowError) {
               return error.toUserMessage()
@@ -143,6 +143,27 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           void toolContext
           try {
             return await handleArchive(openflowCtx, args.feature)
+          } catch (error) {
+            if (error instanceof OpenFlowError) {
+              return error.toUserMessage()
+            }
+            return `Error: ${error instanceof Error ? error.message : String(error)}`
+          }
+        },
+      }),
+      'openflow-quality-gate': tool({
+        description: 'Quality Gate executed after code changes or bug fixes. AI should call openflow-quality-gate and not claim completion until readiness is returned.',
+        args: {
+          feature: tool.schema.string().max(64).optional(),
+          sessionID: tool.schema.string().optional(),
+        },
+        execute: async (args: { feature?: string; sessionID?: string }, toolContext) => {
+          void toolContext
+          try {
+            const gateArgs: QualityGateArgs = {}
+            if (args.feature) gateArgs.feature = args.feature
+            if (args.sessionID) gateArgs.sessionID = args.sessionID
+            return await handleQualityGate(openflowCtx, gateArgs)
           } catch (error) {
             if (error instanceof OpenFlowError) {
               return error.toUserMessage()

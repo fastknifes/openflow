@@ -149,8 +149,25 @@ src/auth.ts: @stable - must not change`
     for (const file of result!.sourceFiles) {
       expect(result!.sourceHashes[file]).toBeDefined()
       expect(typeof result!.sourceHashes[file]).toBe('string')
-      expect(result!.sourceHashes[file]).toHaveLength(8)
+      expect(result!.sourceHashes[file]).toHaveLength(64)
     }
+  })
+
+  test('sourceHashes change when source file content changes', async () => {
+    const workspace = join(tempDir, 'docs', 'changes', changeDir)
+    await mkdir(workspace, { recursive: true })
+    const designPath = join(workspace, 'design.md')
+    await writeFile(designPath, '# Design\nfirst', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), '### Scenario: cached behavior\nGiven:\n- a\nWhen:\n- b\nThen:\n- c\n', 'utf-8')
+
+    const extractor = new ContractExtractor()
+    const first = await extractor.extract(feature, tempDir)
+    await writeFile(designPath, '# Design\nsecond', 'utf-8')
+    const second = await extractor.extract(feature, tempDir)
+
+    expect(first).not.toBeNull()
+    expect(second).not.toBeNull()
+    expect(first!.sourceHashes['design.md']).not.toBe(second!.sourceHashes['design.md'])
   })
 
   test('contract has extractedAt timestamp', async () => {
@@ -206,6 +223,62 @@ src/auth.ts: @stable - must not change`
     expect(scenario.when).toEqual(['clicks login'])
     expect(scenario.then).toEqual(['dashboard'])
     expect(scenario.criticality).toBe('critical')
+  })
+
+  test('behavior.md with markdown heading scenarios and boundaries', async () => {
+    const behaviorContent = `# Behavior Contract: Login
+
+## Behavior Scenarios
+
+### Scenario: Login succeeds
+
+Given:
+- user is on login page
+
+When:
+- user submits valid credentials
+
+Then:
+- dashboard is shown
+
+## Boundary Scenarios
+
+### Boundary: Invalid password
+
+Given:
+- user is on login page
+
+When:
+- user submits invalid password
+
+Then:
+- error is shown
+`
+
+    await mkdir(join(tempDir, 'docs', 'changes', changeDir), { recursive: true })
+    await writeFile(join(tempDir, 'docs', 'changes', changeDir, 'behavior.md'), behaviorContent, 'utf-8')
+
+    const extractor = new ContractExtractor()
+    const result = await extractor.extract(feature, tempDir)
+
+    expect(result).not.toBeNull()
+    expect(result!.behaviorScenarios).toHaveLength(2)
+    expect(result!.behaviorScenarios[0]).toMatchObject({
+      id: 'scenario-0',
+      name: 'Login succeeds',
+      given: ['user is on login page'],
+      when: ['user submits valid credentials'],
+      then: ['dashboard is shown'],
+      criticality: 'critical',
+    })
+    expect(result!.behaviorScenarios[1]).toMatchObject({
+      id: 'boundary-1',
+      name: 'Invalid password',
+      given: ['user is on login page'],
+      when: ['user submits invalid password'],
+      then: ['error is shown'],
+      criticality: 'optional',
+    })
   })
 
   test('missing behavior.md does not crash - returns empty scenarios', async () => {

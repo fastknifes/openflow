@@ -39,6 +39,7 @@ export function classifyVerificationFailure(reason: string): VerificationFailure
 
 export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean> {
   const { planPath, config, baseDir } = options
+  const featureWorkflowConfig = (config as unknown as Record<string, { enabled: boolean }>)['feature']!
 
   try {
     const content = await fs.readFile(planPath, 'utf-8')
@@ -53,7 +54,7 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
     let enhancedContent = content
     let enhancementAdded = false
 
-    if (featureName && config.brainstorming.enabled) {
+    if (featureName && featureWorkflowConfig.enabled) {
       const designSummary = await readDesignDocuments(baseDir, featureName)
       if (designSummary) {
         const withDesignContext = addDesignContextSection(enhancedContent, designSummary, featureName)

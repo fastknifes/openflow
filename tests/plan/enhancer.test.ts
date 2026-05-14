@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { classifyVerificationFailure, enhancePlan } from '../../src/plan/enhancer.js'
-import { createMinimalRequirementModel } from '../../src/phases/brainstorm/requirement-model.js'
+import { createMinimalRequirementModel } from '../../src/phases/feature/requirement-model.js'
 import { defaultConfig } from '../../src/types.js'
 
 const TEST_ROOT = join(process.cwd(), '.test-enhancer')
@@ -35,8 +35,8 @@ describe('plan enhancer', () => {
 
     const config = {
       ...defaultConfig,
-      brainstorming: {
-        ...defaultConfig.brainstorming,
+      feature: {
+        ...defaultConfig.feature,
         enabled: false,
       },
       tdd: {
@@ -81,7 +81,7 @@ describe('plan enhancer', () => {
     await writeFile(join(designDir, 'design.md'), '# Design\n\n## Overview\n\nLegacy markdown should not win.\n', 'utf-8')
 
     const model = createMinimalRequirementModel('demo-feature')
-    model.problemStatement = 'Use structured brainstorm output to enrich the plan.'
+    model.problemStatement = 'Use structured feature output to enrich the plan.'
     model.goals = ['Explain the problem clearly to the implementation agent']
     model.constraints = [
       {
@@ -102,8 +102,8 @@ describe('plan enhancer', () => {
 
     const config = {
       ...defaultConfig,
-      brainstorming: {
-        ...defaultConfig.brainstorming,
+      feature: {
+        ...defaultConfig.feature,
         enabled: true,
       },
       tdd: {
@@ -126,7 +126,7 @@ describe('plan enhancer', () => {
 
     expect(result).toBe(true)
     expect(enhanced).toContain('## Design Context')
-    expect(enhanced).toContain('Use structured brainstorm output to enrich the plan.')
+    expect(enhanced).toContain('Use structured feature output to enrich the plan.')
     expect(enhanced).toContain('Explain the problem clearly to the implementation agent')
     expect(enhanced).toContain('[MUST / compatibility] Keep markdown extraction as a fallback path')
     expect(enhanced).toContain('The plan includes acceptance criteria from the sidecar')

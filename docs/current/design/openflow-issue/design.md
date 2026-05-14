@@ -11,7 +11,7 @@
 OpenFlow 当前主流程更适合 feature/change：
 
 ```text
-brainstorm → implement → harden → verify → archive
+brainstorm → implement → quality-gate → archive
 ```
 
 该流程的核心价值是通过文档约束 AI，让实现符合设计、需求、当前事实和全局决策。但用户在实际开发中经常输入的是“不确定性质的问题”，例如：
@@ -666,9 +666,11 @@ implementation-mapper.md
 - `multiple_valid_semantics`
 - 用户明确希望设计新行为
 
-### 15.2 `/openflow-harden`
+### 15.2 `openflow-quality-gate`（含 harden 能力）
 
-复杂 issue 修复后建议运行。触发条件：
+> `harden` 的对抗性审查能力已集成至 `openflow-quality-gate`。以下内容描述的是 harden 阶段的审查重点，仍然适用。
+
+复杂 issue 修复后，quality-gate 会根据风险自动判断是否需要运行对抗性审查。触发条件：
 
 - 多文件改动
 - 涉及状态机、权限、金额、订单、库存、数据流
@@ -676,14 +678,16 @@ implementation-mapper.md
 - 涉及线上事故级问题
 - 涉及公共接口或用户可见行为
 
-`harden` 审查重点应扩展为：
+harden 审查重点应扩展为：
 
 - 修复是否恢复语义，而不是改变语义
 - 是否遗漏同语义入口
 - 是否把数据问题误修成代码问题
 - 是否引入新的用户可见行为变化
 
-### 15.3 `/openflow-verify`
+### 15.3 `openflow-quality-gate`（含 verify 能力）
+
+> `/openflow-verify` 的证据收集能力已集成至 `openflow-quality-gate`。以下内容描述的是 verify 阶段的检查逻辑，仍然适用。
 
 需要支持 issue-aware 模式。
 
@@ -793,16 +797,16 @@ B. force_sell_destroy 可在历史列表展示，但不参与上链。
   │    └─ semantic alignment
   │
   ├─ bugfix
-  │    └─ allow implement → verify → archive?
+  │    └─ allow implement → quality-gate → archive?
   │
   ├─ data_issue
   │    └─ data remediation / protective fix / user decision
   │
   ├─ config_issue
-  │    └─ config fix → verify
+  │    └─ config fix → quality-gate
   │
   ├─ environment_issue
-  │    └─ environment fix → verify
+  │    └─ environment fix → quality-gate
   │
   ├─ doc_ambiguity
   │    └─ ask user / brainstorm / decision → governance promotion candidate
