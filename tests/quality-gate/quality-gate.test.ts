@@ -85,6 +85,13 @@ function createMockVerify(callLog: CallLog): (ctx: OpenFlowContext, feature?: st
   }
 }
 
+function createMockHardenWithSession(capture: { sessionID?: string }): (ctx: OpenFlowContext, feature?: string, sessionID?: string) => Promise<string> {
+  return async (_ctx, _feature, sessionID) => {
+    capture.sessionID = sessionID
+    return '## Harden Result\n\nStatus: pass\nRounds: 1\nBudget consumed: 100\nSummary: mock harden passed'
+  }
+}
+
 function createMockErrorHarden(callLog: CallLog): () => Promise<string> {
   return async () => {
     callLog.order.push('harden-error')
@@ -249,6 +256,33 @@ describe('handleQualityGate', () => {
 
     // No fast/balanced/strict
     expect(output).not.toMatch(/fast|balanced|strict/i)
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  // ── sessionID propagation: harden receives sessionID from args ─────────────
+
+  test('high-risk change passes sessionID through to overrideHarden', async () => {
+    const directory = await createGitFixture('session-id-prop', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const capture: { sessionID?: string } = {}
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: 'test-session-123' }, {
+      overrideHarden: createMockHardenWithSession(capture),
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    // sessionID was captured from the third argument of overrideHarden
+    expect(capture.sessionID).toBe('test-session-123')
+
+    // Harden and verify both ran
+    expect(callLog.order).toContain('verify')
+
+    // Risk is high (multi-file fixture)
+    expect(output).toContain('`high`')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -548,8 +582,8 @@ describe('handleQualityGate', () => {
 
   // ── Fresh evidence reuse ──────────────────────────────────────────────────
 
-  test('fresh evidence is reflected in quality gate report', async () => {
-    const directory = await createGitFixture('fresh-evidence', 'trivial')
+  test('fresh evidence skips verify and reuses stored acceptance state', async () => {
+    const directory = await createGitFixture('fresh-evidence', 'no-diff')
     const callLog: CallLog = { order: [] }
     const ctx = createStandardContext(directory, {
       harden: { ...defaultConfig.harden, enabled: true },
@@ -582,14 +616,20 @@ describe('handleQualityGate', () => {
       },
     })
 
+    // overrideVerify intentionally omitted — fresh evidence should skip verify
     const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
       overrideHarden: createMockHarden(callLog),
-      overrideVerify: createMockVerify(callLog),
     })
 
     // Freshness section should indicate fresh
     expect(output).toContain('Evidence Freshness')
     expect(output).toContain('Fresh')
+
+    // Verify should NOT have been called — evidence is fresh and reused
+    expect(callLog.order).not.toContain('verify')
+
+    // Output should include reused evidence indicators
+    expect(output).toContain('reused from fresh acceptance state')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
