@@ -136,6 +136,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
     {
       maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds,
       tokenBudget: ctx.config.harden.tokenBudgetTotal,
+      tokenBudgetPerRound: ctx.config.harden.tokenBudgetPerRound,
       mode: args?.mode ?? 'standard',
     },
     currentSessionID,
@@ -149,7 +150,7 @@ async function runAdversarialLoop(
   planSummary: string,
   designContent: string,
   diffStr: string,
-  args: { maxRounds: number; tokenBudget: number; mode: string },
+  args: { maxRounds: number; tokenBudget: number; tokenBudgetPerRound: number; mode: string },
   parentSessionID?: string,
 ): Promise<HardenResult> {
   const rounds: HardenRoundResult[] = []
@@ -184,6 +185,16 @@ async function runAdversarialLoop(
 
     const grouped = classifyFindings(review.text, [])
     const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
+
+    if (review.tokens > args.tokenBudgetPerRound) {
+      rounds.push({ round, findings })
+      return {
+        status: 'budget_exhausted',
+        rounds,
+        budgetConsumed,
+        summary: `reviewer consumed ${review.tokens} tokens in round ${round}, exceeding per-round budget of ${args.tokenBudgetPerRound}.`,
+      }
+    }
 
     if (grouped.ambiguous.length > 0) {
       rounds.push({ round, findings })
@@ -251,6 +262,16 @@ async function runAdversarialLoop(
       parentSessionID,
     )
     budgetConsumed += execution.tokens
+
+    if (execution.tokens > args.tokenBudgetPerRound) {
+      rounds.push({ round, findings, fixReport: execution.text })
+      return {
+        status: 'budget_exhausted',
+        rounds,
+        budgetConsumed,
+        summary: `executor consumed ${execution.tokens} tokens in round ${round}, exceeding per-round budget of ${args.tokenBudgetPerRound}.`,
+      }
+    }
 
     if (containsExecutorFailureSignal(execution.text)) {
       rounds.push({ round, findings, fixReport: execution.text })

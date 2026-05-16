@@ -250,8 +250,8 @@ export const defaultConfig: OpenFlowConfig = {
   harden: {
     enabled: true,
     maxRounds: 5,
-    tokenBudgetPerRound: 10000,
-    tokenBudgetTotal: 60000,
+    tokenBudgetPerRound: 50000,
+    tokenBudgetTotal: 250000,
   },
   guardian: {
     enabled: true,
