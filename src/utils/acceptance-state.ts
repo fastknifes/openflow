@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { VerifyReadinessStatus, type AcceptanceState, type ArchiveDocUpdateConfirmationStatus, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type AcceptedKnownIssueSummary, type ArchiveDocUpdateConfirmationStatus, type EvidenceFreshnessMetadata, type HardenTerminalSummary, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus } from '../types.js'
 import { getAcceptanceStatePath } from '../config.js'
 import { logger } from './logger.js'
 
@@ -36,6 +36,7 @@ const FIELD_PREFIXES = {
   readinessEvidenceSummary: 'readinessEvidenceSummary:',
   readinessConstraintsChecked: 'readinessConstraintsChecked:',
   readinessVerifiedAt: 'readinessVerifiedAt:',
+  hardenSummary: 'hardenSummary:',
   mode: 'mode:',
   issueSlug: 'issueSlug:',
   rawIssue: 'rawIssue:',
@@ -44,6 +45,12 @@ const FIELD_PREFIXES = {
   governancePromotionStatus: 'governancePromotionStatus:',
   issueClarificationPath: 'issueClarificationPath:',
   promotionCandidatePath: 'promotionCandidatePath:',
+  evidenceFreshnessGitHead: 'evidenceFreshnessGitHead:',
+  evidenceFreshnessChangedFiles: 'evidenceFreshnessChangedFiles:',
+  evidenceFreshnessDiffHash: 'evidenceFreshnessDiffHash:',
+  evidenceFreshnessRecordedAt: 'evidenceFreshnessRecordedAt:',
+  evidenceFreshnessEvidenceChecks: 'evidenceFreshnessEvidenceChecks:',
+  evidenceFreshnessEvidenceSummary: 'evidenceFreshnessEvidenceSummary:',
 } as const
 
 const PROMOTION_SUGGESTIONS_HEADER = '## Current Promotion Suggestions'
@@ -63,6 +70,14 @@ function parseStateFile(content: string): AcceptanceState | null {
   let readinessConstraintsChecked: string[] = []
   let readinessVerifiedAt: string | undefined
   let hasReadinessField = false
+  const freshnessMeta: {
+    gitHead?: string
+    changedFiles?: string[]
+    diffHash?: string
+    recordedAt?: string
+    evidenceChecks?: string[]
+    evidenceSummary?: string
+  } = {}
   
   let inPendingUpdates = false
   
@@ -148,6 +163,9 @@ function parseStateFile(content: string): AcceptanceState | null {
       readinessVerifiedAt = extractFieldValue(trimmed, FIELD_PREFIXES.readinessVerifiedAt)
       hasReadinessField = true
       inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.hardenSummary)) {
+      result.hardenSummary = extractFieldValue(trimmed, FIELD_PREFIXES.hardenSummary)
+      inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.mode)) {
       result.mode = extractFieldValue(trimmed, FIELD_PREFIXES.mode) as 'feature' | 'issue'
       inPendingUpdates = false
@@ -171,6 +189,24 @@ function parseStateFile(content: string): AcceptanceState | null {
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.promotionCandidatePath)) {
       result.promotionCandidatePath = extractFieldValue(trimmed, FIELD_PREFIXES.promotionCandidatePath)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessGitHead)) {
+      freshnessMeta.gitHead = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessGitHead)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessChangedFiles)) {
+      freshnessMeta.changedFiles = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessChangedFiles))
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessDiffHash)) {
+      freshnessMeta.diffHash = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessDiffHash)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessRecordedAt)) {
+      freshnessMeta.recordedAt = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessRecordedAt)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessEvidenceChecks)) {
+      freshnessMeta.evidenceChecks = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessEvidenceChecks))
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessEvidenceSummary)) {
+      freshnessMeta.evidenceSummary = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessEvidenceSummary)
       inPendingUpdates = false
     } else if (trimmed === PENDING_UPDATES_HEADER) {
       inPendingUpdates = true
@@ -268,6 +304,40 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.readiness) {
     state.readiness = result.readiness
   }
+  if (result.hardenSummary) {
+    state.hardenSummary = result.hardenSummary
+    try {
+      const parsed = JSON.parse(result.hardenSummary) as Partial<HardenTerminalSummary> & {
+        acceptedKnownIssues?: AcceptedKnownIssueSummary[]
+      }
+      if (Array.isArray(parsed.acceptedKnownIssues) && parsed.acceptedKnownIssues.length > 0) {
+        state.acceptedKnownIssues = parsed.acceptedKnownIssues
+      }
+      const status = parsed.status
+      const stopReason = parsed.stopReason
+      const unresolvedMustFixCount = parsed.unresolvedMustFixCount
+      const unresolvedNeedsDecisionCount = parsed.unresolvedNeedsDecisionCount
+      const acceptedKnownIssueCount = parsed.acceptedKnownIssueCount
+      if (typeof status === 'string'
+        && typeof stopReason === 'string'
+        && typeof unresolvedMustFixCount === 'number'
+        && typeof unresolvedNeedsDecisionCount === 'number'
+        && typeof acceptedKnownIssueCount === 'number') {
+        const terminalSummary: HardenTerminalSummary = {
+          status,
+          stopReason,
+          unresolvedMustFixCount,
+          unresolvedNeedsDecisionCount,
+          acceptedKnownIssueCount,
+        }
+        state.hardenTerminalSummary = {
+          ...terminalSummary,
+        }
+      }
+    } catch {
+      // ignore invalid stored summary to preserve backward compatibility
+    }
+  }
   if (hasReadinessField) {
     state.verifyResult = {
       readiness: result.readiness ?? state.readiness ?? VerifyReadinessStatus.NotReady,
@@ -278,6 +348,18 @@ function parseStateFile(content: string): AcceptanceState | null {
     }
     if (readinessDecisionType) {
       state.verifyResult.decisionType = readinessDecisionType
+    }
+  }
+
+  // Evidence freshness metadata (reconstructed via freshnessMeta by parsing block above)
+  if (freshnessMeta.gitHead && freshnessMeta.recordedAt) {
+    state.evidenceFreshness = {
+      gitHead: freshnessMeta.gitHead,
+      changedFiles: freshnessMeta.changedFiles ?? [],
+      diffHash: freshnessMeta.diffHash ?? '',
+      recordedAt: freshnessMeta.recordedAt,
+      evidenceChecks: freshnessMeta.evidenceChecks ?? [],
+      evidenceSummary: freshnessMeta.evidenceSummary ?? '',
     }
   }
 
@@ -350,6 +432,31 @@ function serializeState(state: AcceptanceState): string {
     pushOptionalLine(lines, FIELD_PREFIXES.readinessEvidenceSummary, state.verifyResult.evidenceSummary)
     pushOptionalLine(lines, FIELD_PREFIXES.readinessConstraintsChecked, state.verifyResult.constraintsChecked.join(', '))
     pushOptionalLine(lines, FIELD_PREFIXES.readinessVerifiedAt, state.verifyResult.verifiedAt)
+  }
+  if (state.hardenSummary) {
+    pushOptionalLine(lines, FIELD_PREFIXES.hardenSummary, state.hardenSummary)
+  } else {
+    if (state.hardenTerminalSummary || state.acceptedKnownIssues) {
+      const summaryPayload = {
+        ...(state.hardenTerminalSummary
+          ? state.hardenTerminalSummary
+          : {}),
+        ...(state.acceptedKnownIssues
+          ? { acceptedKnownIssues: state.acceptedKnownIssues }
+          : {}),
+      }
+      if (Object.keys(summaryPayload).length > 0) {
+        pushOptionalLine(lines, FIELD_PREFIXES.hardenSummary, JSON.stringify(summaryPayload))
+      }
+    }
+  }
+  if (state.evidenceFreshness) {
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessRecordedAt, state.evidenceFreshness.recordedAt)
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessGitHead, state.evidenceFreshness.gitHead)
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessChangedFiles, state.evidenceFreshness.changedFiles.join(', '))
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessDiffHash, state.evidenceFreshness.diffHash)
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessEvidenceChecks, state.evidenceFreshness.evidenceChecks.join(', '))
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessEvidenceSummary, state.evidenceFreshness.evidenceSummary)
   }
   pushOptionalLine(lines, FIELD_PREFIXES.mode, state.mode)
   pushOptionalLine(lines, FIELD_PREFIXES.issueSlug, state.issueSlug)
@@ -536,17 +643,63 @@ export async function markImplementationComplete(projectDir: string): Promise<vo
 
 export async function saveVerifyResult(
   projectDir: string,
-  verifyResult: VerifyResult
+  verifyResult: VerifyResult,
+  freshnessMetadata?: EvidenceFreshnessMetadata,
+  feature?: string,
 ): Promise<void> {
   const state = await loadAcceptanceState(projectDir)
   if (!state) {
     logger.warn('Cannot save verify result: no active acceptance state')
     return
   }
+  // Guard: if the loaded state belongs to a different feature, create a new
+  // acceptance state for the target feature instead of overwriting the stale one.
+  if (feature && state.feature !== feature) {
+    logger.warn('Acceptance state feature mismatch — creating target-feature state for verify result', {
+      expectedFeature: feature,
+      staleFeature: state.feature,
+    })
+    const targetState: AcceptanceState = {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    }
+    targetState.readiness = verifyResult.readiness
+    targetState.verifyResult = verifyResult
+    if (freshnessMetadata) {
+      targetState.evidenceFreshness = freshnessMetadata
+    }
+    await saveAcceptanceState(projectDir, targetState)
+    logger.info('Saved verify result to new acceptance state', { feature, readiness: verifyResult.readiness })
+    return
+  }
   state.readiness = verifyResult.readiness
   state.verifyResult = verifyResult
+  if (freshnessMetadata) {
+    state.evidenceFreshness = freshnessMetadata
+  }
   await saveAcceptanceState(projectDir, state)
   logger.info('Saved verify result', { feature: state.feature, readiness: verifyResult.readiness })
+}
+
+/**
+ * Record evidence freshness metadata against an existing acceptance state
+ * without overwriting the verify result. Use this to update freshness
+ * tracking when evidence is reused or supplemental checks are added.
+ */
+export async function recordEvidenceFreshness(
+  projectDir: string,
+  metadata: EvidenceFreshnessMetadata,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot record evidence freshness: no active acceptance state')
+    return
+  }
+  state.evidenceFreshness = metadata
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Recorded evidence freshness', { feature: state.feature, recordedAt: metadata.recordedAt })
 }
 
 export interface IssueClarificationState {

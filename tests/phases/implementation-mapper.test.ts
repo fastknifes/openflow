@@ -142,4 +142,48 @@ describe('generateImplementationMapper', () => {
     expect(content).toContain('## 3. 需求到实现映射')
     expect(content).toContain('## 4. 验证与结论')
   })
+
+  test('includes behavior mapping for scenario and boundary heading blocks', async () => {
+    await setupTestDir()
+    const behaviorPath = join(testDir, 'docs', 'changes', 'test-feat', 'behavior.md')
+    await writeFile(behaviorPath, `# Behavior Contract: test
+
+## Behavior Scenarios
+
+### Scenario: User can complete core flow
+
+Given:
+- user has valid input
+
+When:
+- user runs the command
+
+Then:
+- result is generated
+
+## Boundary Scenarios
+
+### Boundary: Missing optional context
+
+Given:
+- optional context is absent
+
+When:
+- user runs the command
+
+Then:
+- system continues with fallback
+`, 'utf-8')
+
+    const content = await generateImplementationMapper({
+      ...baseOptions,
+      behaviorPath,
+    })
+
+    expect(content).toContain('## 3. 行为到实现映射')
+    expect(content).toContain('| Behavior Scenario | Type | Expected Behavior | Evidence | Code Files | Key Symbols | Notes |')
+    expect(content).toContain('| User can complete core flow | scenario | Given user has valid input / When user runs the command / Then result is generated | — | — | — | Critical behavior scenario. |')
+    expect(content).toContain('| Missing optional context | boundary | Given optional context is absent / When user runs the command / Then system continues with fallback | — | — | — | Boundary scenario; should-pass evidence. |')
+    expect(content).toContain('## 4. 验证与结论')
+  })
 })

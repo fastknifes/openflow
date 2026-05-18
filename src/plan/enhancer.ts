@@ -19,6 +19,10 @@ interface DesignDocSummary {
 const DESIGN_CONTEXT_HEADER = '## Design Context'
 const TDD_EXPANDED_HEADER = '## TDD Expanded Tasks'
 const VERIFICATION_HEADER = '## Verification Phase'
+const BUDGET_WARNING_HEADER = '## Plan Budget Warning'
+
+const MAX_SAME_WAVE_TASKS = 4
+const MAX_ESTIMATED_UNITS = 20
 
 export interface EnhancePlanOptions {
   planPath: string
@@ -39,6 +43,7 @@ export function classifyVerificationFailure(reason: string): VerificationFailure
 
 export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean> {
   const { planPath, config, baseDir } = options
+  const featureWorkflowConfig = (config as unknown as Record<string, { enabled: boolean }>)['feature']!
 
   try {
     const content = await fs.readFile(planPath, 'utf-8')
@@ -53,7 +58,7 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
     let enhancedContent = content
     let enhancementAdded = false
 
-    if (featureName && config.brainstorming.enabled) {
+    if (featureName && featureWorkflowConfig.enabled) {
       const designSummary = await readDesignDocuments(baseDir, featureName)
       if (designSummary) {
         const withDesignContext = addDesignContextSection(enhancedContent, designSummary, featureName)
@@ -85,6 +90,14 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
         enhancementAdded = true
         logger.info('Added verification tasks section')
       }
+    }
+
+    // Budget warning: always evaluated, non-blocking
+    const withBudgetWarning = addBudgetWarning(enhancedContent, tasks)
+    if (withBudgetWarning !== enhancedContent) {
+      enhancedContent = withBudgetWarning
+      enhancementAdded = true
+      logger.info('Added plan budget warning', { tasks: tasks.length })
     }
 
     if (enhancementAdded) {
@@ -188,6 +201,37 @@ async function extractKeySections(filePath: string): Promise<string> {
   }
 }
 
+function addBudgetWarning(content: string, tasks: ParsedTask[]): string {
+  if (content.includes(BUDGET_WARNING_HEADER)) return content
+
+  const taskCount = tasks.length
+  const implementationCount = tasks.filter((t) => t.isImplementation).length
+  // Estimated units: implementation tasks ≈3 units (TDD cycle), others ≈1
+  const estimatedUnits = implementationCount * 3 + (taskCount - implementationCount) * 1
+
+  if (taskCount <= MAX_SAME_WAVE_TASKS && estimatedUnits <= MAX_ESTIMATED_UNITS) {
+    return content
+  }
+
+  const lines: string[] = [
+    '',
+    '---',
+    BUDGET_WARNING_HEADER,
+    '',
+    '> This plan exceeds recommended task density. The warning is non-blocking —',
+    '> implementation may proceed, but consider splitting into smaller waves.',
+    '',
+    `- **Same-wave tasks**: ${taskCount} (recommended max: ${MAX_SAME_WAVE_TASKS})`,
+    `- **Estimated execution units**: ${estimatedUnits} (recommended max: ${MAX_ESTIMATED_UNITS})`,
+    '',
+    '**Suggestion**: Split large waves across multiple `/start-work` invocations',
+    'or reduce per-wave task count to keep execution feedback loops short.',
+    '',
+  ]
+
+  return content + lines.join('\n')
+}
+
 function addDesignContextSection(content: string, summary: DesignDocSummary, feature: string): string {
   if (content.includes(DESIGN_CONTEXT_HEADER)) return content
 
@@ -231,7 +275,7 @@ function addTddExpansionComment(content: string, tasks: ParsedTask[]): string {
 - Test: \`tests/unit/path/to/test.ts\`
 - Implementation: \`src/path/to/file.ts\`
 
-- [ ] **Step 1: RED - Write failing test**
+**Step 1: RED - Write failing test**
 \`\`\`typescript
 // Write test for ${task.title}
 describe('${task.title}', () => {
@@ -243,39 +287,35 @@ describe('${task.title}', () => {
 })
 \`\`\`
 
-- [ ] **Step 2: Run test to verify it fails**
+**Step 2: Run test to verify it fails**
 Run: \`bun test tests/unit/path/to/test.ts\`
 Expected: FAIL
 
-- [ ] **Step 3: GREEN - Implement minimal code**
+**Step 3: GREEN - Implement minimal code**
 \`\`\`typescript
 // Minimal implementation to pass
 \`\`\`
 
-- [ ] **Step 4: Run test to verify it passes**
+**Step 4: Run test to verify it passes**
 Run: \`bun test tests/unit/path/to/test.ts\`
 Expected: PASS
 
-- [ ] **Step 5: REFACTOR - Clean up while keeping tests green**
-
-- [ ] **Step 6: Commit**
-\`\`\`bash
-git add tests/ src/
-git commit -m "feat: ${task.title}"
-\`\`\`
+**Step 5: REFACTOR - Clean up while keeping tests green**
 `)
   }
 
   const tddSection = `
+
 ---
 ${TDD_EXPANDED_HEADER}
 
-> Auto-expanded by OpenFlow. Each implementation task follows Red-Green-Refactor cycle.
+> Procedural TDD guidance. Each implementation task follows Red-Green-Refactor cycle.
+> These are not executable checklist items; follow the cycle for each task.
 
 ${tddExpandedTasks.join('\n')}
 
 `
-  return insertAfterTopTitle(content, tddSection)
+  return content + tddSection
 }
 
 function addVerificationSection(content: string, verification: OpenFlowConfig['verification']): string {
@@ -295,12 +335,23 @@ ${securityChecks}
 ### Quality Checks
 ${qualityChecks}
 
+### Final Verification Authority
+
+**After all implementation tasks are complete, invoke \`openflow-quality-gate\` as the final readiness authority.**
+
+The quality gate performs:
+- Adversarial hardening assessment (risk-based)
+- Evidence collection and verification
+- Readiness classification (\`Ready\`, \`ReadyWithDocUpdates\`, \`NotReady\`, \`NeedsDecision\`)
+
+Do not claim completion until \`openflow-quality-gate\` returns \`Ready\` or \`ReadyWithDocUpdates\`.
+
 ### Failure Handling
 - Quality failure: fix implementation and rerun verification.
 - Security failure: block archive until fixed.
 - Consistency failure: sync docs and implementation, then rerun verification.
 
-> Auto-generated by OpenFlow. Complete all verification tasks before archiving.
+> Auto-generated by OpenFlow. \`openflow-quality-gate\` is the final verification authority.
 `
 
   return content + verificationSection

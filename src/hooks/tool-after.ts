@@ -3,9 +3,19 @@ import type { OpenFlowContext, FileChangeRecord } from '../types.js'
 import { extractPlanName } from '../plan/parser.js'
 import { enhancePlan } from '../plan/enhancer.js'
 import { trackFileChange } from '../utils/file-tracker.js'
-import { generateBuildId } from '../utils/security.js'
 import { logger } from '../utils/logger.js'
+import { getContractRuntime } from '../contracts/runtime.js'
 import { createAcceptancePromptHook } from './acceptance-prompt.js'
+import {
+  appendToolAfterPrompt,
+  extractFeatureFromDesignPath,
+  isDesignDoc,
+  isPlanFile,
+  normalizePath,
+  resolveBuildId,
+  shouldPromptForAcceptanceDocSync,
+  shouldTrackChange,
+} from './tool-after-policy.js'
 import {
   evaluateDocumentBundle,
   ensureDecisionsDocument,
@@ -13,74 +23,11 @@ import {
   hasDecisionsDocument,
   hasPrdDocument,
   isPrdGenerationEnabled,
-} from '../phases/brainstorm/prd-generator.js'
-
-const sessionBuildIds = new Map<string, string>()
-
-function normalizePath(filePath: string): string {
-  return filePath.toLowerCase().replace(/\\/g, '/')
-}
-
-function isPlanFile(normalizedPath: string): boolean {
-  return normalizedPath.includes('.sisyphus/plans/') && normalizedPath.endsWith('.md')
-}
-
-function isDesignDoc(normalizedPath: string): boolean {
-  return /^(?:\d{8}-(proposal|design|decisions)|(proposal|design|decisions))\.md$/.test(normalizedPath.split('/').pop() || '')
-}
-
-function extractFeatureFromDesignPath(filePath: string): string | null {
-  const parts = filePath.split(/[/\\]/)
-  const changesIdx = parts.lastIndexOf('changes')
-  if (changesIdx !== -1) {
-    const featurePart = parts[changesIdx + 1]
-    if (featurePart && !/\.md$/i.test(featurePart)) {
-      return featurePart.replace(/^\d{4}-\d{2}-\d{2}-/, '')
-    }
-  }
-
-  const designIdx = parts.lastIndexOf('design')
-  if (designIdx === -1) return null
-  return parts[designIdx - 1] || null
-}
-
-function shouldTrackChange(normalizedPath: string): boolean {
-  return !normalizedPath.includes('node_modules/') && !normalizedPath.includes('.sisyphus/')
-}
-
-function resolveBuildId(sessionID?: string): string {
-  if (sessionID) {
-    const existingBuildId = sessionBuildIds.get(sessionID)
-    if (existingBuildId) {
-      return existingBuildId
-    }
-
-    const newBuildId = generateBuildId()
-    sessionBuildIds.set(sessionID, newBuildId)
-    return newBuildId
-  }
-
-  const buildId = generateBuildId()
-  logger.debug('Generated isolated build ID for no-session change tracking', { buildId })
-  return buildId
-}
-
-function shouldPromptForAcceptanceDocSync(normalizedPath: string): boolean {
-  return !normalizedPath.startsWith('docs/') && !normalizedPath.includes('/docs/')
-}
-
-function appendToolAfterPrompt(output: unknown, prompt: string): void {
-  if (!output || typeof output !== 'object') {
-    return
-  }
-
-  const rawOutput = output as Record<string, unknown>
-  const existingOutput = typeof rawOutput.output === 'string' ? rawOutput.output : ''
-  rawOutput.output = existingOutput ? `${existingOutput}\n\n${prompt}` : prompt
-}
+} from '../phases/feature/prd-generator.js'
 
 export function createToolAfterHook(ctx: OpenFlowContext) {
   const acceptancePromptHook = createAcceptancePromptHook(ctx)
+  const featureWorkflowConfig = (ctx.config as unknown as Record<string, { enabled: boolean }>)['feature']!
 
   const hook: NonNullable<Hooks['tool.execute.after']> = async (input, _output): Promise<void> => {
     if (input.tool !== 'write' && input.tool !== 'edit') return
@@ -147,7 +94,7 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
       if (planName && !ctx.enhancedPlans.has(planName)) {
         logger.info('Plan file detected', { path: filePath })
 
-        if (ctx.config.tdd.enabled || ctx.config.verification.in_plan || ctx.config.brainstorming.enabled) {
+        if (ctx.config.tdd.enabled || ctx.config.verification.in_plan || featureWorkflowConfig.enabled) {
           const enhanced = await enhancePlan({
             planPath: filePath,
             config: ctx.config,
@@ -172,6 +119,26 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
         logger.debug('Tracked file change', { filePath, buildId })
       } catch (error) {
         logger.error('Failed to track file change', error instanceof Error ? error : undefined)
+      }
+
+      // Dispatch file change event to ContractRuntime for Guardian
+      if (ctx.config.guardian?.enabled) {
+        try {
+          const runtime = getContractRuntime()
+          if (runtime.isStarted) {
+            await runtime.processFileChange({
+              type: 'file_changed',
+              filePath,
+              tool: input.tool as 'write' | 'edit',
+              timestamp: Date.now(),
+              sessionId: input.sessionID,
+            })
+          }
+        } catch (error) {
+          logger.debug('Guardian event dispatch failed', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
       }
 
       if (shouldPromptForAcceptanceDocSync(normalizedPath)) {

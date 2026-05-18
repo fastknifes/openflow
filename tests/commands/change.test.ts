@@ -33,14 +33,14 @@ function createAcceptanceState(feature: string, overrides: Partial<AcceptanceSta
 }
 
 describe('openflow-change command', () => {
-  test('guides to brainstorm when workspace is missing', async () => {
+  test('guides to feature when workspace is missing', async () => {
     const root = join(process.cwd(), '.test-change-missing-workspace')
     await rm(root, { recursive: true, force: true })
 
     const result = await handleChange(createContext(root), 'missing-feature', 'change requirement')
 
     expect(result).toContain('Workspace Not Found')
-    expect(result).toContain('/openflow-brainstorm missing-feature')
+    expect(result).toContain('/openflow-feature missing-feature')
 
     await rm(root, { recursive: true, force: true })
   })

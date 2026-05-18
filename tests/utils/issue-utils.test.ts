@@ -6,15 +6,23 @@ import {
   issueSlug,
   resolveIssueWorkspace,
   detectMode,
+  buildIssueResolution,
+  readIssuePacket,
   ISSUE_CLARIFICATION_FILENAME,
+  ISSUE_PACKET_FILENAME,
   PROMOTION_CANDIDATE_FILENAME,
   ISSUE_RESOLUTION_FILENAME,
   type IssueMode,
+  type IssueResolutionInput,
 } from '../../src/utils/issue-utils'
 
 describe('issue-utils constants', () => {
   test('ISSUE_CLARIFICATION_FILENAME is correct', () => {
     expect(ISSUE_CLARIFICATION_FILENAME).toBe('issue-clarification.md')
+  })
+
+  test('ISSUE_PACKET_FILENAME is correct', () => {
+    expect(ISSUE_PACKET_FILENAME).toBe('issue-packet.json')
   })
 
   test('PROMOTION_CANDIDATE_FILENAME is correct', () => {
@@ -98,6 +106,46 @@ describe('resolveIssueWorkspace', () => {
   test('should handle directory with trailing slash', () => {
     const result = resolveIssueWorkspace({ directory: '/project/root/' }, 'test-issue')
     expect(result.workspacePath).toBe(`/project/root/docs/changes/${result.workspacePath.split('/').pop()}`)
+  })
+})
+
+describe('readIssuePacket', () => {
+  let tmpDir: string
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'issue-packet-test-'))
+  })
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true })
+  })
+
+  test('normalizes missing array fields from partial manual packet', async () => {
+    await fs.writeFile(path.join(tmpDir, ISSUE_PACKET_FILENAME), JSON.stringify({
+      version: 1,
+      slug: 'partial-packet',
+      status: 'classified',
+      classification: 'bugfix',
+    }), 'utf-8')
+
+    const packet = await readIssuePacket(tmpDir)
+
+    expect(packet).not.toBeNull()
+    expect(packet!.evidence).toEqual([])
+    expect(packet!.hypotheses).toEqual([])
+    expect(packet!.requiredChecks).toEqual([])
+    expect(packet!.symptom).toBe('partial-packet')
+  })
+
+  test('rejects packet with invalid classification value', async () => {
+    await fs.writeFile(path.join(tmpDir, ISSUE_PACKET_FILENAME), JSON.stringify({
+      version: 1,
+      slug: 'invalid-packet',
+      status: 'classified',
+      classification: 'definitely_not_valid',
+    }), 'utf-8')
+
+    await expect(readIssuePacket(tmpDir)).resolves.toBeNull()
   })
 })
 
@@ -188,5 +236,169 @@ describe('detectMode', () => {
     await setupWorkspace('fallback-feature', ['design.md'])
     const mode = await detectMode({ directory: tmpDir }, 'fallback-feature')
     expect(mode).toBe('feature')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildIssueResolution
+// ---------------------------------------------------------------------------
+
+const REQUIRED_HEADINGS = [
+  '## Symptom',
+  '## Root Cause',
+  '## Fix Summary',
+  '## Files Involved',
+  '## Verification Evidence',
+  '## Recurrence Signature',
+  '## Future AI Guidance',
+]
+
+const FULL_INPUT: IssueResolutionInput = {
+  symptom: 'API returns 500 on login',
+  rootCause: 'Null pointer in auth middleware when session cookie is missing',
+  fixSummary: 'Added null guard in auth middleware to handle missing session cookie',
+  filesInvolved: ['src/auth/middleware.ts', 'tests/auth/middleware.test.ts'],
+  verificationEvidence: 'All 42 tests pass; manual login with cleared cookies works',
+  recurrenceSignature: '500 on any auth-protected route when cookies are cleared',
+  futureAIGuidance: 'Check auth middleware null guards first when seeing 500s on protected routes',
+}
+
+describe('buildIssueResolution', () => {
+  test('contains all required headings', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    for (const heading of REQUIRED_HEADINGS) {
+      expect(md).toContain(heading)
+    }
+  })
+
+  test('includes document title', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('# Issue Resolution')
+  })
+
+  test('renders symptom from input', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('API returns 500 on login')
+  })
+
+  test('renders root cause from input', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('Null pointer in auth middleware')
+  })
+
+  test('renders fix summary from input', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('Added null guard in auth middleware')
+  })
+
+  test('renders files involved as list items', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('- src/auth/middleware.ts')
+    expect(md).toContain('- tests/auth/middleware.test.ts')
+  })
+
+  test('renders verification evidence from input', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('All 42 tests pass')
+  })
+
+  test('renders recurrence signature from input', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('500 on any auth-protected route')
+  })
+
+  test('renders future AI guidance from input', () => {
+    const md = buildIssueResolution(FULL_INPUT)
+    expect(md).toContain('Check auth middleware null guards first')
+  })
+})
+
+describe('buildIssueResolution fallbacks', () => {
+  const MINIMAL_INPUT: IssueResolutionInput = {
+    symptom: 'Login page blank',
+    rootCause: 'Missing CSS import',
+    fixSummary: 'Added missing import',
+  }
+
+  test('renders files involved fallback when omitted', () => {
+    const md = buildIssueResolution(MINIMAL_INPUT)
+    expect(md).toContain('_No files recorded._')
+  })
+
+  test('renders verification evidence fallback when omitted', () => {
+    const md = buildIssueResolution(MINIMAL_INPUT)
+    expect(md).toContain('_No verification evidence recorded._')
+  })
+
+  test('renders recurrence signature fallback when omitted', () => {
+    const md = buildIssueResolution(MINIMAL_INPUT)
+    expect(md).toContain('_No recurrence signature recorded.')
+  })
+
+  test('renders future AI guidance fallback when omitted', () => {
+    const md = buildIssueResolution(MINIMAL_INPUT)
+    expect(md).toContain('_No AI guidance recorded.')
+  })
+
+  test('renders files involved fallback when array is empty', () => {
+    const md = buildIssueResolution({ ...MINIMAL_INPUT, filesInvolved: [] })
+    expect(md).toContain('_No files recorded._')
+  })
+
+  test('renders fallback when optional field is empty string', () => {
+    const md = buildIssueResolution({ ...MINIMAL_INPUT, verificationEvidence: '   ' })
+    expect(md).toContain('_No verification evidence recorded._')
+  })
+
+  test('all required headings still present with minimal input', () => {
+    const md = buildIssueResolution(MINIMAL_INPUT)
+    for (const heading of REQUIRED_HEADINGS) {
+      expect(md).toContain(heading)
+    }
+  })
+})
+
+describe('buildIssueResolution heading safety', () => {
+  test('demotes user heading lines to bold text', () => {
+    const md = buildIssueResolution({
+      symptom: '## Not a real section\nSome detail',
+      rootCause: '### Nested heading',
+      fixSummary: 'Fix applied',
+    })
+    expect(md).not.toMatch(/^## Not a real section$/m)
+    expect(md).toContain('**Not a real section**')
+    expect(md).toContain('**Nested heading**')
+  })
+
+  test('preserves non-heading markdown formatting', () => {
+    const md = buildIssueResolution({
+      symptom: 'Error: **critical** failure in `login()`',
+      rootCause: 'Bad config',
+      fixSummary: 'Fixed',
+    })
+    expect(md).toContain('**critical**')
+    expect(md).toContain('`login()`')
+  })
+
+  test('collapses excessive blank lines', () => {
+    const md = buildIssueResolution({
+      symptom: 'Line 1\n\n\n\n\nLine 2',
+      rootCause: 'Cause',
+      fixSummary: 'Fix',
+    })
+    expect(md).not.toContain('\n\n\n\n')
+  })
+
+  test('filters out blank file entries', () => {
+    const md = buildIssueResolution({
+      symptom: 'Bug',
+      rootCause: 'Cause',
+      fixSummary: 'Fix',
+      filesInvolved: ['src/a.ts', '   ', '', 'src/b.ts'],
+    })
+    expect(md).toContain('- src/a.ts')
+    expect(md).toContain('- src/b.ts')
+    // Blank entries should not produce list items
+    expect(md).not.toContain('-    ')
   })
 })

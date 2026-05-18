@@ -23,21 +23,25 @@ describe('OpenFlowPlugin runtime registration', () => {
     const legacySkillDir = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-brainstorm')
     await mkdir(join(legacySkillDir), { recursive: true })
     await writeFile(join(legacySkillDir, 'SKILL.md'), 'legacy skill', 'utf-8')
+    const legacyFeatureSkillDir = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-feature')
+    await mkdir(join(legacyFeatureSkillDir), { recursive: true })
+    await writeFile(join(legacyFeatureSkillDir, 'SKILL.md'), 'legacy feature skill', 'utf-8')
 
     await OpenFlowPlugin(createPluginInput(root) as never)
 
-    // 1. Command .md files are created
-    const commandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-brainstorm.md')
+    // 1. Command .md files are created (openflow-feature replaces old brainstorm command)
+    const commandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-feature.md')
     const commandContent = await readFile(commandPath, 'utf-8')
     expect(commandContent).toContain('description:')
-    expect(commandContent).toContain('openflow-brainstorm')
+    expect(commandContent).toContain('openflow-feature')
 
-    // 2. Legacy global skill dirs are cleaned (registerCommands calls cleanupLegacySkillDirs)
-    await expect(access(join(legacySkillDir, 'SKILL.md'))).rejects.toBeDefined()
-
-    // 3. Non-writing-plan OpenFlow skill dirs are not recreated.
+    // 2. Legacy global skill dirs are cleaned (registerCommands calls cleanupLegacySkillDirs),
+    //    then brainstorm is re-registered as an active skill by registerSkills.
     const brainstormSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-brainstorm', 'SKILL.md')
-    await expect(access(brainstormSkillPath)).rejects.toBeDefined()
+    await expect(access(brainstormSkillPath)).resolves.toBeNull()
+    const brainstormSkillContent = await readFile(brainstormSkillPath, 'utf-8')
+    expect(brainstormSkillContent).toContain('name: openflow-brainstorm')
+    expect(brainstormSkillContent).toContain('/openflow-feature')
 
     // 4. writing-plan is the intentional agent-callable skill exception.
     const writingPlanCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-writing-plan.md')
@@ -48,6 +52,10 @@ describe('OpenFlowPlugin runtime registration', () => {
     expect(writingPlanSkillContent).toContain('name: openflow-writing-plan')
     expect(writingPlanSkillContent).toContain('/openflow-writing-plan <feature>')
 
+    // 4b. openflow-feature remains command-only and must not be registered as a skill.
+    const featureSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-feature', 'SKILL.md')
+    await expect(access(featureSkillPath)).rejects.toBeDefined()
+
     // 5. openflow-issue command file is created with correct description
     const issueCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-issue.md')
     const issueCommandContent = await readFile(issueCommandPath, 'utf-8')
@@ -55,6 +63,18 @@ describe('OpenFlowPlugin runtime registration', () => {
     expect(issueCommandContent).toContain('openflow-issue')
     expect(issueCommandContent).toContain('OpenFlow issue clarification and triage command for uncertain problems')
     expect(issueCommandContent).toContain('OpenFlow command: /openflow-issue $ARGUMENTS')
+
+    // 6. Negative-scope: openflow-reflect command file must NOT be created
+    const reflectCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-reflect.md')
+    await expect(access(reflectCommandPath)).rejects.toBeDefined()
+
+    // 7. Negative-scope: openflow-reflect skill directory must NOT be created
+    const reflectSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-reflect', 'SKILL.md')
+    await expect(access(reflectSkillPath)).rejects.toBeDefined()
+
+    // 8. Negative-scope: openflow-ai-reflection is skill-only; no command file
+    const aiReflectionCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-ai-reflection.md')
+    await expect(access(aiReflectionCommandPath)).rejects.toBeDefined()
 
     await rm(root, { recursive: true, force: true })
   })

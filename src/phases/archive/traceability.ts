@@ -1,9 +1,9 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { RequirementModelSchema, type RequirementModel } from '../brainstorm/requirement-model.js'
+import { RequirementModelSchema, type RequirementModel } from '../feature/requirement-model.js'
 
 export interface TraceabilityItem {
-  sourceType: 'requirement' | 'proposal' | 'design'
+  sourceType: 'requirement' | 'proposal' | 'design' | 'behavior'
   sourcePath: string
   sourceLabel: string
   item: string

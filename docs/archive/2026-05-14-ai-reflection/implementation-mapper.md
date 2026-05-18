@@ -1,0 +1,47 @@
+# ai-reflection - Implementation Mapper
+
+**Date**: 2026-05-18
+**Status**: Archived
+
+## 1. 概述
+
+本次变更解决了与 `ai-reflection` 相关的实现追溯需求。
+
+**归档时间**: 2026-05-18
+**追溯范围**: 本次变更覆盖需求到实现的完整追溯链。
+
+## 2. 需求到实现映射
+
+> 未发现 requirements / proposal 追溯项，已回退使用 design 文档生成追溯关系。
+
+| 追溯来源 | 需求/决策 | 代码文件 | 关键符号 | 关联说明 | 验证证据 |
+|----------|-----------|----------|----------|----------|----------|
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Goals \(goal-1\) | Solve: 用户同意初步方案：不新增顶层 docs 目录；将 AI 自我反思/错误经验放在 docs/current/workflow/ai-reflection/；采用 index.md 总览 + 按错误类型分类的文档，例如 premature-implementation.md、verification-skipped.md、docs-misuse.md、delegation-misuse.md、context-loss.md；每个分类文档记录规则、失败案例、根因、下次正确行为、是否应提升到 AGENTS.md/skill 规则。用户现在要求：基于现有约束，判断还有哪些问题没有澄清，是否能够直接生成设计文档。 | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/skills/ai-reflection-skill.ts; F:/ai-code/openflow/src/skills/quality-gate-skill.ts | file-level fallback | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/skills/ai-reflection-skill.ts \(modified\); F:/ai-code/openflow/src/skills/quality-gate-skill.ts \(modified\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Goals \(goal-2\) | Serve target users: 内部开发者 | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/commands/init-content.ts; F:/ai-code/openflow/src/skills/quality-gate-skill.ts | file-level fallback | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/commands/init-content.ts \(created\); F:/ai-code/openflow/src/skills/quality-gate-skill.ts \(modified\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Goals \(goal-3\) | Honor priority: 易维护 | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/commands/init-content.ts; F:/ai-code/openflow/src/skills/quality-gate-skill.ts | file-level fallback | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/commands/init-content.ts \(created\); F:/ai-code/openflow/src/skills/quality-gate-skill.ts \(modified\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Constraints \(d-0001\) | Keep the implementation additive and focused on the new capability | F:/ai-code/openflow/src/commands/init-content.ts | file-level fallback | F:/ai-code/openflow/src/commands/init-content.ts \(created\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Constraints \(d-0002\) | Favor code clarity and maintainable structure in the implementation | F:/ai-code/openflow/src/commands/init-content.ts; F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/skills/quality-gate-skill.ts | file-level fallback | F:/ai-code/openflow/src/commands/init-content.ts \(created\); F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/skills/quality-gate-skill.ts \(modified\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Constraints \(d-0003\) | Preserve compatibility guarantees with existing systems and interfaces | F:/ai-code/openflow/src/commands/init-content.ts | file-level fallback | F:/ai-code/openflow/src/commands/init-content.ts \(created\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Acceptance Criteria \(ac-0001\) | ai-reflection addresses the stated problem: 用户同意初步方案：不新增顶层 docs 目录；将 AI 自我反思/错误经验放在 docs/current/workflow/ai-reflection/；采用 index.md 总览 + 按错误类型分类的文档，例如 premature-implementation.md、verification-skipped.md、docs-misuse.md、delegation-misuse.md、context-loss.md；每个分类文档记录规则、失败案例、根因、下次正确行为、是否应提升到 AGENTS.md/skill 规则。用户现在要求：基于现有约束，判断还有哪些问题没有澄清，是否能够直接生成设计文档。 | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/skills/ai-reflection-skill.ts; F:/ai-code/openflow/src/skills/quality-gate-skill.ts | file-level fallback | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/skills/ai-reflection-skill.ts \(modified\); F:/ai-code/openflow/src/skills/quality-gate-skill.ts \(modified\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Acceptance Criteria \(ac-0002\) | ai-reflection works for the target users: 内部开发者 | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/skills/ai-reflection-skill.ts | file-level fallback | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/skills/ai-reflection-skill.ts \(modified\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Acceptance Criteria \(ac-0003\) | ai-reflection implementation reflects the selected priority: 易维护 | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/skills/ai-reflection-skill.ts | file-level fallback | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/skills/ai-reflection-skill.ts \(modified\) | no verification evidence recorded |
+| design: docs/changes/2026-05-14-ai-reflection/design.md → Acceptance Criteria \(ac-0004\) | ai-reflection respects the stated constraint: 兼容现有系统 | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md; F:/ai-code/openflow/src/skills/ai-reflection-skill.ts | file-level fallback | F:/ai-code/openflow/docs/changes/2026-05-14-ai-reflection/behavior.md \(modified\); F:/ai-code/openflow/src/skills/ai-reflection-skill.ts \(modified\) | no verification evidence recorded |
+
+
+## 3. 行为到实现映射
+
+| Behavior Scenario | Type | Expected Behavior | Evidence | Code Files | Key Symbols | Notes |
+|------------------|------|-------------------|----------|------------|-------------|-------|
+| user correction triggers AI reflection | scenario | Given The user tells the AI it made a workflow/process mistake. / When The AI recognizes the message as a must-trigger signal. / Then The AI invokes \`openflow-ai-reflection\` itself.; The AI records a case in the matching category document.; The AI does not ask the user to run a reflection command. | — | — | — | Critical behavior scenario. |
+| AI self-detects a hard-rule violation | scenario | Given The AI notices it violated a hard instruction or OpenFlow rule. / When The AI has enough context to describe what went wrong. / Then The AI invokes \`openflow-ai-reflection\`.; The AI records root cause, correct behavior, recurrence signal, and scope boundary.; The AI does not claim completion until reflection is recorded or explicitly skipped as non-trigger. | — | — | — | Critical behavior scenario. |
+| review finding exposes AI process mistake | scenario | Given Review, harden, verify, test, or typecheck output reveals a process failure caused by AI behavior. / When The AI determines the finding has recurrence value. / Then The AI records the finding as evidence in the reflection case.; The AI does not automatically edit global rules. | — | — | — | Critical behavior scenario. |
+| reflection docs are missing | scenario | Given The AI has triggered reflection.; \`docs/current/workflow/ai-reflection/\` or required category files are missing. / When The AI follows the reflection skill. / Then The AI creates the missing reflection docs using the standard templates.; The AI appends the new case to the selected category document. | — | — | — | Critical behavior scenario. |
+| repeated mistake category | scenario | Given The mistake belongs to an existing category such as \`verification-skipped\`. / When The AI records reflection. / Then The AI appends the case to \`verification-skipped.md\`.; The AI does not create a standalone incident file.; The index remains the overview of category counts and promotion candidates. | — | — | — | Critical behavior scenario. |
+| promotion candidate | scenario | Given The reflection lesson appears important enough to become a stronger rule. / When The AI records the case. / Then The AI marks \`promoteToRule\` as \`yes\` or \`needs-review\`.; The AI may list a follow-up action.; The AI does not edit \`AGENTS.md\`, skill files, tests, or workflow docs automatically.; category;; summary;; trigger;; context;; what went wrong;; root cause;; correct behavior next time;; recurrence signal;; evidence;; classification;; corrective rule;; scope boundary;; promotion decision.; severity;; related files;; related command;; follow-up action.; the category used;; the file updated;; the corrective rule;; whether the lesson is a promotion candidate;; that no automatic global-rule change was made.; Must not ask the user to manually trigger the MVP reflection flow.; Must not provide \`/openflow-reflect\` as the MVP entry.; Must not create a background watcher.; Must not infer reflection from every tool failure.; Must not write one file per incident.; Must not accept unsafe category names as file paths.; Must not silently promote reflection lessons into global rules.; Must not claim reflection replaces verification or issue-resolution. | — | — | — | Critical behavior scenario. |
+
+
+## 4. 验证与结论
+
+**验证证据**: no verification evidence recorded
+
+

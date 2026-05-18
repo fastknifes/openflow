@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { access, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { classifyReadiness, handleVerify } from '../../src/commands/verify.js'
+import { classifyReadiness, handleVerify, stripOpenFlowCommandTokens } from '../../src/commands/verify.js'
+import { ContractRuntime } from '../../src/contracts/runtime.js'
 import {
   VerifyDecisionType,
   VerifyReadinessStatus,
@@ -37,6 +38,7 @@ function createEvidence(overrides: Partial<VerifyEvidencePacket> = {}): VerifyEv
     checksRun: [
       'active_feature_resolution ✅ (demo-feature)',
       'plan_exists ✅ (found .sisyphus/plans/demo-feature.md)',
+      'context_alignment ✅ (found docs/changes/demo-feature/design.md)',
       'changes_workspace ✅ (found docs/changes/demo-feature)',
       'stable_constraints_current ✅ (found docs/current)',
       'stable_constraints_decisions ✅ (found docs/decisions)',
@@ -83,6 +85,56 @@ function createIssueAcceptanceState(
 }
 
 describe('verify command', () => {
+  test('derives behavior scenario status from verification mapping evidence', async () => {
+    const testDir = join(process.cwd(), '.test-verify-behavior-mapping-evidence')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'change-units.json'),
+      JSON.stringify({ version: 1, byFeature: { 'demo-feature': { changeDir: '2026-01-01-demo-feature' } } }),
+      'utf-8',
+    )
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', '2026-01-01-demo-feature')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior Contract: demo-feature
+
+## Behavior Scenarios
+
+### Scenario: core behavior
+
+Given:
+- user has input
+
+When:
+- user runs command
+
+Then:
+- output is produced
+
+## Verification Mapping
+
+| Behavior | Evidence Type | Expected Evidence | Status |
+|---|---|---|---|
+| core behavior | test | tests/demo.test.ts | verified |
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('scenario-0: core behavior ✅ (verified')
+    expect(result).toContain('1/1 behavior scenarios verified')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
   test('resolves active feature, persists verify result, and returns structured readiness output', async () => {
     const testDir = join(process.cwd(), '.test-verify-active-feature')
     await rm(testDir, { recursive: true, force: true })
@@ -92,6 +144,7 @@ describe('verify command', () => {
     await writeFile(join(plansDir, 'older-feature.md'), '# older', 'utf-8')
     await writeFile(join(plansDir, 'latest-feature.md'), '# latest', 'utf-8')
     await mkdir(join(testDir, 'docs', 'changes', 'latest-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'latest-feature', 'design.md'), '# Design', 'utf-8')
     await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
     await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
     await saveAcceptanceState(testDir, createAcceptanceState('latest-feature'))
@@ -169,7 +222,7 @@ describe('verify command', () => {
     expect(readiness.decisionType).toBeUndefined()
   })
 
-  test('returns not_ready when plan or changes workspace evidence is missing', async () => {
+  test('returns not_ready when context alignment or changes workspace evidence is missing', async () => {
     const context = createContext(process.cwd(), { quality: [], security: [] })
     const readiness = await classifyReadiness(
       context,
@@ -178,17 +231,18 @@ describe('verify command', () => {
         checksRun: [
           'active_feature_resolution ✅ (demo-feature)',
           'plan_exists ⚠️ (missing .sisyphus/plans/demo-feature.md)',
+          'context_alignment ⚠️ (missing docs/changes/demo-feature/design.md)',
           'changes_workspace ⚠️ (missing docs/changes/demo-feature)',
           'stable_constraints_current ✅ (found docs/current)',
           'stable_constraints_decisions ✅ (found docs/decisions)',
         ],
-        knownRisksOrMissingEvidence: 'Missing evidence: active plan file, change workspace.',
+        knownRisksOrMissingEvidence: 'Missing evidence: context alignment artifact, change workspace.',
       }),
       createAcceptanceState('demo-feature'),
     )
 
     expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
-    expect(readiness.reasonCodes).toEqual(['plan_missing', 'changes_workspace_missing'])
+    expect(readiness.reasonCodes).toEqual(['context_alignment_missing', 'changes_workspace_missing'])
   })
 
   test('returns ready_with_doc_updates when checks pass but pending doc updates remain', async () => {
@@ -223,6 +277,58 @@ describe('verify command', () => {
     expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
   })
 
+  test('does not block readiness for optional behavior scenario evidence gaps', async () => {
+    const testDir = join(process.cwd(), '.test-verify-optional-behavior')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Boundary: optional fallback\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'boundary-0',
+          name: 'optional fallback',
+          criticality: 'optional',
+          status: 'missing_evidence',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks readiness for critical behavior scenario evidence gaps', async () => {
+    const testDir = join(process.cwd(), '.test-verify-critical-behavior')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'missing_evidence',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('behavior_evidence_incomplete')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
   test('supports accepting current verification failures via flag and persists acceptance state', async () => {
     const testDir = join(process.cwd(), '.test-verify-accept-failures')
     await rm(testDir, { recursive: true, force: true })
@@ -242,11 +348,13 @@ describe('verify command', () => {
     const acceptanceState = await loadAcceptanceState(testDir)
 
     expect(result).toContain('- status: ready')
-    expect(result).toContain('- reason_codes: changes_workspace_missing')
+    expect(result).toContain('context_alignment_missing')
+    expect(result).toContain('changes_workspace_missing')
     expect(result).not.toContain('### 失败后的可选操作')
     expect(acceptanceState?.acceptedFailures).toBe(true)
     expect(acceptanceState?.verifyResult?.readiness).toBe(VerifyReadinessStatus.Ready)
     expect(acceptanceState?.verifyResult?.reasonCodes).toContain('changes_workspace_missing')
+    expect(acceptanceState?.verifyResult?.reasonCodes).toContain('context_alignment_missing')
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -298,7 +406,8 @@ describe('verify command', () => {
     )
 
     expect(result).toContain('- status: ready')
-    expect(result).toContain('- reason_codes: changes_workspace_missing')
+    expect(result).toContain('context_alignment_missing')
+    expect(result).toContain('changes_workspace_missing')
     expect(result).not.toContain('### 失败后的可选操作')
 
     await rm(testDir, { recursive: true, force: true })
@@ -348,6 +457,28 @@ describe('verify command', () => {
     expect(result).toContain('- reason_codes: all_checks_passed')
     expect(result).toContain('plan_exists ℹ️')
     expect(result).toContain('issue_clarification_exists ✅')
+    expect(result).toContain('context_alignment ✅')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('issue mode with issue-clarification.md and no plan does not report missing active plan file', async () => {
+    const testDir = join(process.cwd(), '.test-verify-issue-no-plan-context-alignment')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-issue'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-issue', 'issue-clarification.md'), '# clarification', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createIssueAcceptanceState('demo-issue'))
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-issue')
+
+    expect(result).not.toContain('Missing evidence: active plan file')
+    expect(result).not.toContain('Missing evidence: context alignment artifact')
+    expect(result).toContain('context_alignment ✅')
+    expect(result).toContain('plan_exists ℹ️')
+    expect(result).toContain('- status: ready')
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -414,5 +545,167 @@ describe('verify command', () => {
     expect(result).not.toContain('- status: ready')
 
     await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('strips OpenFlow command tokens from feature parameter', () => {
+    // Regression test for the mangled feature name bug
+    expect(stripOpenFlowCommandTokens('auto-slash-command-openflow-command-openflow-verify')).toBe('')
+    expect(stripOpenFlowCommandTokens('openflow-verify')).toBe('')
+    expect(stripOpenFlowCommandTokens('my-feature')).toBe('my-feature')
+    expect(stripOpenFlowCommandTokens('phone-change-sync-optimization')).toBe('phone-change-sync-optimization')
+    expect(stripOpenFlowCommandTokens('openflow-verify-my-feature')).toBe('my-feature')
+    expect(stripOpenFlowCommandTokens('auto-slash-command-my-feature')).toBe('my-feature')
+  })
+
+  test('resolves feature from session active feature when no explicit feature is given', async () => {
+    const testDir = join(process.cwd(), '.test-verify-session-resolution')
+    await rm(testDir, { recursive: true, force: true })
+
+    // Set up plans directory with a "wrong" (stale) plan
+    const plansDir = join(testDir, '.sisyphus', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(join(plansDir, 'stale-feature.md'), '# stale', 'utf-8')
+
+    // Set up the session active feature index pointing to the correct feature
+    const featureDir = join(testDir, '.sisyphus', 'feature')
+    await mkdir(featureDir, { recursive: true })
+    await writeFile(
+      join(featureDir, 'active.json'),
+      JSON.stringify({
+        bySessionID: {
+          'test-session-123': {
+            feature: 'correct-feature',
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }),
+      'utf-8',
+    )
+    // Create the feature session file (required by loadAndCleanActiveFeatureIndex)
+    await writeFile(
+      join(featureDir, 'correct-feature.json'),
+      JSON.stringify({ workflowState: 'in_progress', currentQuestionIndex: 0, answers: [] }),
+      'utf-8',
+    )
+
+    // Set up workspace for correct-feature
+    await mkdir(join(testDir, 'docs', 'changes', 'correct-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'correct-feature', 'design.md'), '# Design', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('correct-feature'))
+
+    // Without sessionID → falls back to filesystem (stale-feature)
+    const resultNoSession = await handleVerify(
+      createContext(testDir, { quality: [], security: [] }),
+    )
+    expect(resultNoSession).toContain('Feature: stale-feature')
+
+    // With sessionID → resolves to correct-feature from session index
+    const resultWithSession = await handleVerify(
+      createContext(testDir, { quality: [], security: [] }),
+      undefined,
+      undefined,
+      undefined,
+      'test-session-123',
+    )
+    expect(resultWithSession).toContain('Feature: correct-feature')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('sanitizes mangled feature parameter and falls back to session active feature', async () => {
+    const testDir = join(process.cwd(), '.test-verify-mangled-sanitize')
+    await rm(testDir, { recursive: true, force: true })
+
+    // Set up session active feature
+    const featureDir = join(testDir, '.sisyphus', 'feature')
+    await mkdir(featureDir, { recursive: true })
+    await writeFile(
+      join(featureDir, 'active.json'),
+      JSON.stringify({
+        bySessionID: {
+          'test-session-456': {
+            feature: 'phone-change-sync-optimization',
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }),
+      'utf-8',
+    )
+    await writeFile(
+      join(featureDir, 'phone-change-sync-optimization.json'),
+      JSON.stringify({ workflowState: 'in_progress', currentQuestionIndex: 0, answers: [] }),
+      'utf-8',
+    )
+
+    // Set up workspace
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'plans', 'phone-change-sync-optimization.md'),
+      '# plan',
+      'utf-8',
+    )
+    await mkdir(join(testDir, 'docs', 'changes', 'phone-change-sync-optimization'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'phone-change-sync-optimization', 'design.md'), '# Design', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('phone-change-sync-optimization'))
+
+    // Pass the mangled feature name — should be stripped to empty, then fall back to session
+    const result = await handleVerify(
+      createContext(testDir, { quality: [], security: [] }),
+      'auto-slash-command-openflow-command-openflow-verify',
+      undefined,
+      undefined,
+      'test-session-456',
+    )
+    expect(result).toContain('Feature: phone-change-sync-optimization')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('persists explicit verify result under the target feature even when acceptance state belongs to a different feature', async () => {
+    const testDir = join(process.cwd(), '.test-verify-feature-binding')
+    await rm(testDir, { recursive: true, force: true })
+
+    // Create acceptance state for a STALE feature (simulating leftover state from
+    // a prior workflow that was never cleaned up)
+    await saveAcceptanceState(testDir, {
+      feature: 'stale-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    })
+
+    // Set up workspace for the TARGET feature
+    const plansDir = join(testDir, '.sisyphus', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(join(plansDir, 'target-feature.md'), '# target', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'target-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'target-feature', 'design.md'), '# Design', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    // Verify the TARGET feature explicitly
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'target-feature')
+
+    // The verify result should reference the target feature
+    expect(result).toContain('Feature: target-feature')
+
+    // Acceptance state should now belong to the target feature, NOT the stale one
+    const acceptanceState = await loadAcceptanceState(testDir)
+    expect(acceptanceState?.feature).toBe('target-feature')
+    expect(acceptanceState?.verifyResult?.readiness).toBe(VerifyReadinessStatus.Ready)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('strips markdown backtick residue from feature parameter', () => {
+    expect(stripOpenFlowCommandTokens('`openflow-verify`')).toBe('')
+    expect(stripOpenFlowCommandTokens('`my-feature`')).toBe('my-feature')
+    expect(stripOpenFlowCommandTokens('```openflow-verify```')).toBe('')
+    expect(stripOpenFlowCommandTokens('```my-feature```')).toBe('my-feature')
+    expect(stripOpenFlowCommandTokens('`phone-change-sync-optimization`')).toBe('phone-change-sync-optimization')
   })
 })

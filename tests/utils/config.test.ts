@@ -10,7 +10,7 @@ describe('loadConfig', () => {
   test('should return merged config when valid input', () => {
     const config = loadConfig({
       openflow: {
-        brainstorming: {
+        feature: {
           enabled: true,
           trigger_mode: 'always',
           closure: {
@@ -26,9 +26,9 @@ describe('loadConfig', () => {
         },
       },
     })
-    expect(config.brainstorming.enabled).toBe(true)
-    expect(config.brainstorming.trigger_mode).toBe('always')
-    expect(config.brainstorming.closure.auto_transition).toBe(false)
+    expect(config.feature.enabled).toBe(true)
+    expect(config.feature.trigger_mode).toBe('always')
+    expect(config.feature.closure.auto_transition).toBe(false)
     expect(config.tdd.enabled).toBe(true)
     expect(config.verification.in_plan).toBe(true)
     expect(config.archive.enabled).toBe(true)
@@ -36,8 +36,8 @@ describe('loadConfig', () => {
   })
 
   test('should warn and return default config for invalid input', () => {
-    const config = loadConfig({ openflow: { brainstorming: { enabled: 'invalid' } } })
-    expect(config.brainstorming.enabled).toBe(defaultConfig.brainstorming.enabled)
+    const config = loadConfig({ openflow: { feature: { enabled: 'invalid' } } })
+    expect(config.feature.enabled).toBe(defaultConfig.feature.enabled)
     expect(config.tdd.enabled).toBe(true)
     expect(config.verification.in_plan).toBe(true)
     expect(config.archive.enabled).toBe(true)

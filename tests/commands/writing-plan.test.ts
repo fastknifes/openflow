@@ -120,17 +120,104 @@ describe('writing-plan skill content', () => {
   })
 })
 
-describe('writing-plan format contract', () => {
-  test('parsePlanTasks recognizes ## Tasks with checkbox items', () => {
-    const fixture = [
-      '## Tasks',
-      '',
-      '- [ ] Create src/foo.ts with foo function',
-      '- [ ] Add test for foo in tests/foo.test.ts',
-      '- [ ] Wire foo into main export',
-    ].join('\n')
+describe('writing-plan dual-path contract', () => {
+  test('command packet reports dual output paths: docs/changes/ primary and .sisyphus/plans/ OMO copy', async () => {
+    const root = join(process.cwd(), '.test-wp-dual-path')
+    await rm(root, { recursive: true, force: true })
 
-    const tasks = parsePlanTasks(fixture)
-    expect(tasks.length).toBeGreaterThan(0)
+    const result = await handleWritingPlan(createCtx(root), 'test-contract-feature')
+
+    expect(result).toContain('## OpenFlow Writing Plan Packet')
+    expect(result).toContain('test-contract-feature')
+
+    // Both paths present in the Plan Output Paths section
+    const planPathsSection = result.substring(
+      result.indexOf('### Plan Output Paths'),
+      result.indexOf('### Plan Format Rules'),
+    )
+
+    // Primary path uses docs/changes/ pattern (may be within absolute path)
+    expect(planPathsSection).toContain('Primary')
+    expect(planPathsSection).toContain('docs')
+    expect(planPathsSection).toContain('changes')
+    expect(planPathsSection).toContain('test-contract-feature')
+    expect(planPathsSection).toContain('plan.md')
+
+    // OMO copy uses .sisyphus/plans/ pattern (may be within absolute path)
+    expect(planPathsSection).toContain('OMO')
+    expect(planPathsSection).toContain('.sisyphus')
+    expect(planPathsSection).toContain('plans')
+    expect(planPathsSection).toContain('test-contract-feature.md')
+
+    // Both paths mention initial content identity between copies and execution-state divergence.
+    expect(planPathsSection).toContain('identical')
+    expect(planPathsSection).toContain('initial saved content')
+    expect(planPathsSection).toContain('may diverge')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('command packet uses ## Tasks in format examples, not ## TODOs', async () => {
+    const root = join(process.cwd(), '.test-wp-tasks-header')
+    await rm(root, { recursive: true, force: true })
+
+    const result = await handleWritingPlan(createCtx(root), 'contract-tasks')
+
+    // ## Tasks must appear in the format example
+    expect(result).toContain('## Tasks')
+    // ## TODOs must not be promoted
+    expect(result).not.toContain('## TODOs')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('command packet does not contain forbidden subagent-dispatch wording', async () => {
+    const root = join(process.cwd(), '.test-wp-no-forbidden')
+    await rm(root, { recursive: true, force: true })
+
+    const result = await handleWritingPlan(createCtx(root), 'forbidden-check')
+
+    // These phrases must not appear in the command packet
+    const forbidden = [
+      'maximum parallel execution',
+      'one file per task',
+      'dispatch each same-wave task as a subagent',
+    ]
+    for (const phrase of forbidden) {
+      expect(result).not.toContain(phrase)
+    }
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('command packet includes openflow-quality-gate final verification instruction', async () => {
+    const root = join(process.cwd(), '.test-wp-quality-gate')
+    await rm(root, { recursive: true, force: true })
+
+    const result = await handleWritingPlan(createCtx(root), 'quality-gate-check')
+
+    // The quality gate must be referenced as the final verification authority
+    // This may be in the skill content, command packet, or both
+    // For the command packet contract: the handoff note asserts execution handoff,
+    // and the enhancer/verification path includes quality-gate.
+    // At minimum, the packet must not instruct bypassing the quality gate.
+    const lowerResult = result.toLowerCase()
+    expect(lowerResult).not.toContain('skip quality gate')
+    expect(lowerResult).not.toContain('/openflow-harden')
+    expect(lowerResult).not.toContain('/openflow-verify')
+    // Packet should reference that quality gate handles verification
+    // (This assertion may be RED if the packet doesn't yet include quality-gate reference)
+    expect(lowerResult).toContain('quality')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('skill clarifies dual-save identity only applies before execution state diverges', () => {
+    const skill = getWritingPlanSkill()
+
+    expect(skill.content).toContain('identical at initial save time')
+    expect(skill.content).toContain('may diverge')
+    expect(skill.content).toContain('execution-state copy')
+    expect(skill.content).toContain('checked tasks or progress notes')
   })
 })

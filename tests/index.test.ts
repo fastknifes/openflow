@@ -42,7 +42,17 @@ describe('OpenFlowPlugin', () => {
       throw new Error('Expected plugin.tool to be defined')
     }
 
-    expect(Object.keys(plugin.tool)).toEqual(['openflow-writing-plan'])
+    expect(Object.keys(plugin.tool).sort()).toEqual([
+          'openflow-archive',
+          'openflow-feature',
+           'openflow-init',
+           'openflow-issue',
+          'openflow-migrate-docs',
+           'openflow-quality-gate',
+           'openflow-writing-plan',
+        ].sort())
+    // Negative-scope: openflow-reflect must NOT be registered as a plugin tool
+    expect(Object.keys(plugin.tool)).not.toContain('openflow-reflect')
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()
@@ -67,17 +77,21 @@ describe('OpenFlowPlugin', () => {
 
     const verifyOutput = createChatOutput('/openflow-verify')
     await plugin['chat.message']?.({ sessionID: 'session-verify' } as never, verifyOutput)
-    expect(firstOutputText(verifyOutput)).toContain('## Verify')
-    expect(firstOutputText(verifyOutput)).toContain('### Evidence')
-    expect(firstOutputText(verifyOutput)).toContain('### Readiness')
+    expect(firstOutputText(verifyOutput)).toContain('deprecated')
+    expect(firstOutputText(verifyOutput)).toContain('openflow-quality-gate')
 
-    const brainstormOutput = createChatOutput('/openflow-brainstorm user-login', 'session-brainstorm')
-    await plugin['chat.message']?.({ sessionID: 'session-brainstorm' } as never, brainstormOutput)
-    expect(firstOutputText(brainstormOutput)).toContain('Brainstorm Question')
+    const hardenOutput = createChatOutput('/openflow-harden')
+    await plugin['chat.message']?.({ sessionID: 'session-harden' } as never, hardenOutput)
+    expect(firstOutputText(hardenOutput)).toContain('deprecated')
+    expect(firstOutputText(hardenOutput)).toContain('openflow-quality-gate')
+
+    const featureOutput = createChatOutput('/openflow-feature user-login', 'session-feature')
+    await plugin['chat.message']?.({ sessionID: 'session-feature' } as never, featureOutput)
+    expect(firstOutputText(featureOutput)).toContain('Feature Question')
 
     const nextConfig = {
       openflow: {
-        brainstorming: {
+        feature: {
           trigger_mode: 'always',
         },
       },
@@ -92,21 +106,34 @@ describe('OpenFlowPlugin', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('dispatches command-file expanded openflow slash commands through chat.message', async () => {
+    const root = join(process.cwd(), '.test-plugin-command-file-dispatch')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+
+    const featureOutput = createChatOutput('OpenFlow command: /openflow-feature user-login', 'session-command-file')
+    await plugin['chat.message']?.({ sessionID: 'session-command-file' } as never, featureOutput)
+    expect(firstOutputText(featureOutput)).toContain('Feature Question')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('progresses brainstorm across explicit slash command flow and completes with final document', async () => {
     const root = join(process.cwd(), '.test-plugin-brainstorm-resume')
     await rm(root, { recursive: true, force: true })
 
     const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
 
-    const first = createChatOutput('/openflow-brainstorm user-login', 'plugin-session')
+    const first = createChatOutput('/openflow-feature user-login', 'plugin-session')
     await plugin['chat.message']?.({ sessionID: 'plugin-session' } as never, first)
     expect(firstOutputText(first)).toContain('这个功能主要要解决什么问题？')
 
     const second = createChatOutput('支持新场景', 'plugin-session')
     await plugin['chat.message']?.({ sessionID: 'plugin-session' } as never, second)
-    expect(firstOutputText(second)).toContain('这个功能的主要使用者是谁？')
+    expect(firstOutputText(second)).toContain('这次需求更接近哪一种范围？')
 
-    for (const answer of ['内部开发者', 'new-feature', '风险最小']) {
+    for (const answer of ['new-feature']) {
       const step = createChatOutput(answer, 'plugin-session')
       await plugin['chat.message']?.({ sessionID: 'plugin-session' } as never, step)
     }
@@ -114,14 +141,16 @@ describe('OpenFlowPlugin', () => {
     const final = createChatOutput('兼容现有系统', 'plugin-session')
     await plugin['chat.message']?.({ sessionID: 'plugin-session' } as never, final)
 
-    expect(firstOutputText(final)).toContain('Design document generated')
+    expect(firstOutputText(final)).toContain('Feature Design Complete')
+    expect(firstOutputText(final)).toContain('design.md')
+    expect(firstOutputText(final)).toContain('behavior.md')
 
     const changeDirs = await readdir(join(root, 'docs', 'changes'))
     const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
     await expect(access(generatedFile)).resolves.toBeNull()
     const content = await readFile(generatedFile, 'utf-8')
     expect(content).toContain('支持新场景')
-    expect(content).toContain('内部开发者')
+    expect(content).toContain('兼容现有系统')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -131,12 +160,12 @@ describe('OpenFlowPlugin', () => {
     await rm(root, { recursive: true, force: true })
 
     const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
-    const start = createChatOutput('/openflow-brainstorm user-login', 'plugin-session-resume')
+    const start = createChatOutput('/openflow-feature user-login', 'plugin-session-resume')
     await plugin['chat.message']?.({ sessionID: 'plugin-session-resume' } as never, start)
 
     const resumed = createChatOutput('支持新场景', 'plugin-session-resume')
     await plugin['chat.message']?.({ sessionID: 'plugin-session-resume' } as never, resumed)
-    expect(firstOutputText(resumed)).toContain('这个功能的主要使用者是谁？')
+    expect(firstOutputText(resumed)).toContain('这次需求更接近哪一种范围？')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -153,7 +182,17 @@ describe('OpenFlowPlugin', () => {
       throw new Error('Expected plugin.tool to be defined')
     }
 
-    expect(Object.keys(plugin.tool)).toEqual(['openflow-writing-plan'])
+    expect(Object.keys(plugin.tool).sort()).toEqual([
+          'openflow-archive',
+          'openflow-feature',
+           'openflow-init',
+           'openflow-issue',
+          'openflow-migrate-docs',
+           'openflow-quality-gate',
+           'openflow-writing-plan',
+        ].sort())
+    // Negative-scope: openflow-reflect must NOT be registered as a plugin tool
+    expect(Object.keys(plugin.tool)).not.toContain('openflow-reflect')
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()
@@ -233,6 +272,46 @@ describe('OpenFlowPlugin', () => {
     expect(content).toContain('# OpenFlow')
     expect(content).toContain('<!-- OPENFLOW DOCS GUIDE:BEGIN -->')
     expect(content).toContain('<!-- OPENFLOW DOCS GUIDE:END -->')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('executes openflow-feature tool with natural-language feature input', async () => {
+    const root = join(process.cwd(), '.test-plugin-feature-tool-natural-language')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    const featureTool = plugin.tool?.['openflow-feature']
+    if (!featureTool) {
+      throw new Error('Expected openflow-feature tool to be registered')
+    }
+
+    const result = await featureTool.execute({ feature: '帮我写一个登录功能' }, { sessionID: 'session-feature-tool-natural-language' } as never)
+
+    expect(result).toContain('Feature Question')
+    expect(result).not.toContain('Feature name is required')
+    expect(result).not.toContain('/openflow-feature feature-')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('executes openflow-feature tool with no argument when session has active feature', async () => {
+    const root = join(process.cwd(), '.test-plugin-feature-tool-noarg')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    if (!plugin.tool?.['openflow-feature']) {
+      throw new Error('Expected openflow-feature tool to be registered')
+    }
+
+    const start = createChatOutput('/openflow-feature user-login', 'session-feature-tool-noarg')
+    await plugin['chat.message']?.({ sessionID: 'session-feature-tool-noarg' } as never, start)
+
+    const result = await plugin.tool['openflow-feature'].execute({}, { sessionID: 'session-feature-tool-noarg' } as never)
+
+    expect(result).toContain('Feature Question')
+    expect(result).not.toContain('Feature name is required')
+    expect(result).not.toContain('/openflow-feature feature-')
 
     await rm(root, { recursive: true, force: true })
   })

@@ -3,6 +3,10 @@ import { escapeMarkdown } from '../utils/security.js'
 
 export function handleStatus(ctx: OpenFlowContext): string {
   const config = ctx.config
+  const featureWorkflowConfig = (config as unknown as Record<string, {
+    enabled: boolean
+    trigger_mode: string
+  }>)['feature']!
 
   const enhancedPlansStr =
     ctx.enhancedPlans.size > 0
@@ -18,14 +22,14 @@ export function handleStatus(ctx: OpenFlowContext): string {
 ### Configuration
 | Phase | Enabled |
 |-------|---------|
-| Brainstorming | ${config.brainstorming.enabled ? '✅' : '❌'} |
+| Feature | ${featureWorkflowConfig.enabled ? '✅' : '❌'} |
 | TDD Expansion | ${config.tdd.enabled ? '✅' : '❌'} |
 | Verification | ${config.verification.in_plan ? '✅' : '❌'} |
 | Archive | ${config.archive.enabled ? '✅' : '❌'} |
 | Writing Plan | ${config.writingPlan.enabled ? '✅' : '❌'} |
 
-### Brainstorm Trigger
-- mode: ${escapeMarkdown(config.brainstorming.trigger_mode)}
+### Feature Trigger
+- mode: ${escapeMarkdown(featureWorkflowConfig.trigger_mode)}
 - behavior: standalone command with one-question workflow
 
 ### Enhanced Plans

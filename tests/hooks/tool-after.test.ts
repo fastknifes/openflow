@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createToolAfterHook } from '../../src/hooks/tool-after.js'
+import { enhancePlan } from '../../src/plan/enhancer.js'
 import { loadAcceptanceState, saveAcceptanceState } from '../../src/utils/acceptance-state.js'
 import type { OpenFlowContext } from '../../src/types.js'
 import { defaultConfig } from '../../src/types.js'
@@ -43,7 +44,7 @@ describe('tool-after hook', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('generates PRD and decisions by semantic bundle decision', async () => {
+  test('generates PRD without placeholder decisions by semantic bundle decision', async () => {
     const root = join(process.cwd(), '.test-tool-after-bundle')
     await rm(root, { recursive: true, force: true })
 
@@ -68,8 +69,7 @@ describe('tool-after hook', () => {
     const requirementContent = await readFile(join(root, 'docs', 'changes', feature, 'prd.md'), 'utf-8')
     expect(requirementContent).toContain('Product Requirements Document')
 
-    const decisionsContent = await readFile(join(root, 'docs', 'changes', feature, 'decisions.md'), 'utf-8')
-    expect(decisionsContent).toContain('Decision Summary')
+    await expect(readFile(join(root, 'docs', 'changes', feature, 'decisions.md'), 'utf-8')).rejects.toThrow()
 
     await rm(root, { recursive: true, force: true })
   })
@@ -160,6 +160,39 @@ describe('tool-after hook', () => {
 
     const state = await loadAcceptanceState(root)
     expect(state?.pendingDocUpdates).toHaveLength(0)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('enhances docs/changes/YYYY-MM-DD-feature/plan.md on write', async () => {
+    const root = join(process.cwd(), '.test-tool-after-change-plan')
+    await rm(root, { recursive: true, force: true })
+
+    const feature = 'test-feature'
+    const changePlanDir = join(root, 'docs', 'changes', feature)
+    await mkdir(changePlanDir, { recursive: true })
+    const changePlanPath = join(changePlanDir, 'plan.md')
+
+    const plan = `# Test Feature Plan
+## TODOs
+
+- [ ] Implement feature
+`
+
+    await writeFile(changePlanPath, plan, 'utf-8')
+
+    const ctx = createContext(root)
+    const hook = createToolAfterHook(ctx)
+
+    await hook(
+      { tool: 'write', sessionID: 'session-change-plan', callID: 'call-change-plan', args: { filePath: changePlanPath } },
+      { title: '', output: '', metadata: {} }
+    )
+
+    // Plan should be enhanced with verification section
+    const enhanced = await readFile(changePlanPath, 'utf-8')
+    expect(enhanced).toContain('## Verification Phase')
+    expect(enhanced).toContain('openflow-quality-gate')
 
     await rm(root, { recursive: true, force: true })
   })

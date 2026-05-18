@@ -1,26 +1,27 @@
 import type { Hooks } from '@opencode-ai/plugin'
+import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
 import type { OpenFlowContext } from '../types.js'
-import { handleBrainstorm } from '../commands/brainstorm.js'
-import { handleArchive, handleInit, handleStatus, handleConfig, handleVerify, handleMigrateDocs, handleHarden, handleIssue } from '../commands/index.js'
-import { handleChange } from '../commands/change.js'
-import { readDesignContextPacket } from '../commands/writing-plan.js'
-import { normalizeBrainstormSession, isAwaitingFormalAnswer } from '../phases/brainstorm/state-machine.js'
+import { handleFeature } from '../commands/feature.js'
+import { normalizeFeatureSession, isAwaitingFormalAnswer } from '../phases/feature/state-machine.js'
 import { createAcceptanceHook } from './acceptance.js'
-import { getHardenSuggestion } from './acceptance-prompt.js'
 import {
   appendGuardMessage,
-  clearRecentBrainstormCompletion,
+  clearRecentFeatureCompletion,
   detectClosureReady,
   decideTrigger,
   extractMessageText,
-  getActiveBrainstormFeature,
-  getRecentCompletedBrainstormFeature,
+  getActiveFeatureSession,
+  getRecentCompletedFeature,
   getMessageRole,
   hasDesignDoc,
-} from './brainstorm-workflow.js'
-import { findActiveFeature } from '../utils/feature-resolver.js'
+} from './feature-workflow.js'
+import { getContractRuntime } from '../contracts/runtime.js'
+import { dispatchOpenFlowCommand, extractOpenFlowCommand } from './chat-command-dispatch.js'
+import { findActiveIssueWorkspace } from './issue-workspace.js'
 
 const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive']
+const ISSUE_ACTIVE_NOTICE_TITLE = '## OpenFlow: Issue Investigation Active'
 
 function isCompletionMessage(message: string): boolean {
   const lower = message.toLowerCase()
@@ -38,211 +39,77 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
 
     const message = extractMessageText(rawOutput)
     if (!message) return
+    if (looksLikeInternalMessage(message)) return
 
-    // OpenFlow slash-command dispatch — intercept BEFORE continuation/suggestion logic
-    if (message.trim().startsWith('/openflow-')) {
-      const trimmed = message.trim()
+    if (await dispatchOpenFlowCommand(ctx, input, output, message)) return
 
-      // /openflow-brainstorm <feature>
-      const brainstormMatch = trimmed.match(/^\/openflow-brainstorm(?:\s+(.+))?$/)
-      if (brainstormMatch) {
-        const feature = brainstormMatch[1]?.trim()
-        try {
-          const result = await handleBrainstorm(ctx, feature || undefined, undefined, input)
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
+    const activeIssueWorkspace = await findActiveIssueWorkspace(ctx.directory)
+    if (activeIssueWorkspace) {
+      if (!hasNotice(output, ISSUE_ACTIVE_NOTICE_TITLE)) {
+        appendGuardMessage(output, `${ISSUE_ACTIVE_NOTICE_TITLE}
+
+Active issue workspace detected: \`${activeIssueWorkspace.workspacePath}\`.
+
+Feature-design and feature-harden suggestions are suppressed while issue context is active.
+
+Recommended issue flow:
+- Continue gathering evidence with \`/openflow-issue <problem> --continue\`
+- If the fix is already complete, record it with \`/openflow-issue <problem> --resolve\`
+- Then invoke the \`openflow-quality-gate\` skill to verify readiness`)
       }
-
-      // /openflow-change <feature> "<description>"
-      const changeMatch = trimmed.match(/^\/openflow-change\s+(\S+)(?:\s+("[^"]*"|'[^']*'))?$/)
-      if (changeMatch) {
-        const feature = changeMatch[1]?.trim()
-        const desc = changeMatch[2]?.replace(/^["']|["']$/g, '').trim()
-        try {
-          const result = await handleChange(ctx, feature!, desc || undefined)
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
-      }
-
-      // /openflow-verify <feature>
-      const verifyMatch = trimmed.match(/^\/openflow-verify(?:\s+(.+))?$/)
-      if (verifyMatch) {
-        const feature = verifyMatch[1]?.trim()
-        const result = await handleVerify(ctx, feature || undefined)
-        appendGuardMessage(output, result)
-        return
-      }
-
-      // /openflow-archive <feature>
-      const archiveMatch = trimmed.match(/^\/openflow-archive(?:\s+(.+))?$/)
-      if (archiveMatch) {
-        const feature = archiveMatch[1]?.trim() || undefined
-        try {
-          const result = await handleArchive(ctx, feature)
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
-      }
-
-      // /openflow-init
-      if (trimmed === '/openflow-init') {
-        try {
-          const result = await handleInit(ctx)
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
-      }
-
-      // /openflow-status
-      if (trimmed === '/openflow-status') {
-        const result = handleStatus(ctx)
-        appendGuardMessage(output, result)
-        return
-      }
-
-      // /openflow-config
-      if (trimmed === '/openflow-config') {
-        const result = handleConfig(ctx)
-        appendGuardMessage(output, result)
-        return
-      }
-
-      // /openflow-migrate-docs [--sourceDir <path>] [--targetDir <path>] [--dryRun] [--answer <text>]
-      if (trimmed.startsWith('/openflow-migrate-docs')) {
-        const migrateArgs: Record<string, string | boolean> = {}
-        let migrateKey: string | null = null
-        for (const token of trimmed.slice('/openflow-migrate-docs'.length).trim().split(/\s+/).filter(Boolean)) {
-          if (token.startsWith('--')) {
-            migrateKey = token.slice(2)
-            migrateArgs[migrateKey] = true
-          } else if (migrateKey) {
-            migrateArgs[migrateKey] = token
-            migrateKey = null
-          }
-        }
-        try {
-          const parsedMigrateArgs: { sourceDir?: string; targetDir?: string; dryRun?: boolean; answer?: string } = {}
-          if (typeof migrateArgs.sourceDir === 'string') parsedMigrateArgs.sourceDir = migrateArgs.sourceDir
-          if (typeof migrateArgs.targetDir === 'string') parsedMigrateArgs.targetDir = migrateArgs.targetDir
-          parsedMigrateArgs.dryRun = migrateArgs.dryRun === true || migrateArgs.dryRun === 'true'
-          if (typeof migrateArgs.answer === 'string') parsedMigrateArgs.answer = migrateArgs.answer
-          const result = await handleMigrateDocs(ctx, parsedMigrateArgs)
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
-      }
-
-      // /openflow-writing-plan <feature>
-      const writingPlanMatch = trimmed.match(/^\/openflow-writing-plan(?:\s+(.+))?$/)
-      if (writingPlanMatch) {
-        const feature = writingPlanMatch[1]?.trim()
-        try {
-          const resolvedFeature = feature || await findActiveFeature(ctx)
-          if (!resolvedFeature) {
-            appendGuardMessage(output, 'Feature name is required. Usage: /openflow-writing-plan <feature-name>')
-            return
-          }
-          const contextPacket = await readDesignContextPacket(ctx.directory, resolvedFeature)
-          const result = contextPacket
-            ? `## Writing Plan Context\n\nFeature: \`${resolvedFeature}\`\n\n${contextPacket}`
-            : `No design context found for feature \`${resolvedFeature}\`. Run \`/openflow-brainstorm ${resolvedFeature}\` first.`
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
-      }
-
-      // /openflow-harden <feature> [--full] [--mode <mode>]
-      const hardenMatch = trimmed.match(/^\/openflow-harden(?:\s+(.+))?$/)
-      if (hardenMatch) {
-        const hardenArgs = hardenMatch[1]?.trim() ?? ''
-        const hardenFeature = hardenArgs.split(/\s+--/)[0]?.trim()
-        const full = hardenArgs.includes('--full')
-        try {
-          const result = await handleHarden(ctx, hardenFeature || undefined, { full })
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
-      }
-
-      // /openflow-issue <feature-or-description>
-      const issueMatch = trimmed.match(/^\/openflow-issue(?:\s+(.+))?$/)
-      if (issueMatch) {
-        const feature = issueMatch[1]?.trim()
-        try {
-          const result = await handleIssue(ctx, feature || undefined)
-          appendGuardMessage(output, result)
-        } catch (err) {
-          appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-        }
-        return
-      }
-
-      // Unknown /openflow-* command — pass through
+      return
     }
 
     await acceptanceHook({ sessionID: input.sessionID, message })
 
-    // Suggest /openflow-harden for complex features after implementation
-    const acceptanceState = await import('../utils/acceptance-state.js').then(m => m.loadAcceptanceState(ctx.directory))
-    if (acceptanceState?.phase === 'acceptance' && acceptanceState.feature) {
-      const hardenSuggestion = await getHardenSuggestion(ctx, acceptanceState.feature)
-      if (hardenSuggestion) {
-        appendGuardMessage(output, hardenSuggestion)
+    // Dispatch session events to Guardian
+    if (ctx.config.guardian?.enabled) {
+      try {
+        const runtime = getContractRuntime()
+        if (runtime.isStarted && isCompletionMessage(message)) {
+          await runtime.dispatchSessionEvent({ type: 'session_end', sessionId: input.sessionID })
+        }
+      } catch {
+        // Non-blocking
       }
     }
 
-    if (!ctx.config.brainstorming.enabled) {
+    if (!ctx.config.feature.enabled) {
       return
     }
 
-    const activeFeature = await getActiveBrainstormFeature(ctx.directory, input.sessionID)
+    const activeFeature = await getActiveFeatureSession(ctx.directory, input.sessionID)
     if (activeFeature && !(await hasDesignDoc(ctx, activeFeature))) {
       if (looksLikeDirectCommand(message) || isCompletionMessage(message)) {
         return
       }
 
-      const activeSession = await loadActiveBrainstormSession(ctx.directory, activeFeature)
+      const activeSession = await loadActiveFeatureSession(ctx.directory, activeFeature)
       if (!activeSession || !isAwaitingFormalAnswer(activeSession)) {
         return
       }
 
       if (looksLikeFeatureSwitch(message, activeFeature)) {
-        // Let new-feature detection continue below instead of hijacking the old brainstorm.
+        // Let new-feature detection continue below instead of hijacking the old feature session.
       } else {
-        const continuation = await handleBrainstorm(ctx, undefined, message, input)
+        const continuation = await handleFeature(ctx, undefined, message, input)
         appendGuardMessage(output, continuation)
         return
       }
     }
 
-    if (!ctx.config.brainstorming.auto_trigger) {
+    if (!ctx.config.feature.auto_trigger) {
       return
     }
 
-    const recentCompletedFeature = await getRecentCompletedBrainstormFeature(ctx.directory, input.sessionID)
+    const recentCompletedFeature = await getRecentCompletedFeature(ctx.directory, input.sessionID)
     if (recentCompletedFeature) {
-      if (looksLikePostBrainstormAction(message, recentCompletedFeature)) {
+      if (looksLikePostFeatureAction(message, recentCompletedFeature)) {
         return
       }
 
-      if (!looksLikePostBrainstormAction(message, recentCompletedFeature)) {
-        await clearRecentBrainstormCompletion(ctx.directory, input.sessionID)
+      if (!looksLikePostFeatureAction(message, recentCompletedFeature)) {
+        await clearRecentFeatureCompletion(ctx.directory, input.sessionID)
       }
     }
 
@@ -261,25 +128,23 @@ OpenFlow keeps this prompt non-blocking.`)
     }
 
     const closureDecision = detectClosureReady(ctx, message)
-    if (closureDecision.isClosureReady && ctx.config.brainstorming.closure.auto_transition) {
-      const decision = decideTrigger(ctx, rawInput, rawOutput, message)
-      const featureHint = decision.feature ?? '<feature-name>'
-
-		appendGuardMessage(output, `## OpenFlow: Brainstorm Closure Ready
+    if (closureDecision.isClosureReady && ctx.config.feature.closure.auto_transition) {
+		appendGuardMessage(output, `## OpenFlow: Feature Design Closure Ready
 
 Detected ${closureDecision.level} closure signal(s): ${closureDecision.matchedSignals.map(s => `\`${s}\``).join(', ')}.
 
-Next step: continue the standalone brainstorm flow until design generation completes.
+Next step: continue the standalone feature design flow until design generation completes.
 
 Recommended entrypoint:
 
-\`\`\`text
-/openflow-brainstorm ${featureHint}
+		\`\`\`text
+/openflow-feature
 \`\`\`
 
 Generation policy:
-- Design is generated automatically when the required answers are complete.
-- OpenFlow advances one question at a time through the brainstorm skill.`)
+- OpenFlow can derive the internal feature name from session context or natural language.
+- OpenFlow asks one useful clarification only when it changes the design direction.
+- If you want to proceed early, ask for a draft and assumptions will be marked separately.`)
       return
     }
 
@@ -288,15 +153,17 @@ Generation policy:
 
     if (await hasDesignDoc(ctx, decision.feature)) return
 
-		appendGuardMessage(output, `## OpenFlow: Brainstorm Suggested
+		appendGuardMessage(output, `## OpenFlow: Feature Design Suggested
 
-Feature \`${decision.feature}\` does not have design docs yet.
+This request looks like it may need OpenFlow design docs before implementation.
 
 Recommended next step before implementation:
 
 \`\`\`
-/openflow-brainstorm ${decision.feature}
+/openflow-feature
 \`\`\`
+
+Run it in the same session and continue in natural language; OpenFlow will derive the internal feature name.
 
 OpenFlow only suggests this step. It does not block research, reading, or implementation tools.`)
   }
@@ -306,7 +173,20 @@ OpenFlow only suggests this step. It does not block research, reading, or implem
 
 function looksLikeDirectCommand(message: string): boolean {
   const trimmed = message.trim()
-  return trimmed.startsWith('/openflow-') || trimmed.includes('skill(name="openflow-brainstorm"') || trimmed.includes("skill(name='openflow-brainstorm'")
+  return Boolean(extractOpenFlowCommand(trimmed)) || trimmed.includes('skill(name="openflow-feature"') || trimmed.includes("skill(name='openflow-feature'")
+}
+
+function looksLikeInternalMessage(message: string): boolean {
+  return /<\/?(?:system-reminder|auto-slash-command|command-message|omo_internal_initiator)\b/i.test(message)
+    || /\[ALL BACKGROUND TASKS COMPLETE\]/i.test(message)
+}
+
+function hasNotice(output: Record<string, unknown>, noticeTitle: string): boolean {
+  const parts = Array.isArray(output.parts) ? output.parts : []
+  return parts.some((part) => {
+    const rawPart = part as Record<string, unknown>
+    return rawPart.type === 'text' && typeof rawPart.text === 'string' && rawPart.text.includes(noticeTitle)
+  })
 }
 
 function looksLikeFeatureSwitch(message: string, activeFeature: string): boolean {
@@ -318,7 +198,7 @@ function looksLikeFeatureSwitch(message: string, activeFeature: string): boolean
   return !normalized.includes(activeFeature.toLowerCase())
 }
 
-function looksLikePostBrainstormAction(message: string, feature: string): boolean {
+function looksLikePostFeatureAction(message: string, feature: string): boolean {
   const normalized = message.toLowerCase()
   if (normalized.includes(feature.toLowerCase())) {
     return true
@@ -327,14 +207,14 @@ function looksLikePostBrainstormAction(message: string, feature: string): boolea
   return /(实现|开始做|开始开发|编码|落地|archive|归档|verify|验证|start-work|ulw-loop|implement|build|code)/i.test(message)
 }
 
-async function loadActiveBrainstormSession(directory: string, feature: string) {
+async function loadActiveFeatureSession(directory: string, feature: string) {
   try {
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
-    const filePath = path.join(directory, '.sisyphus', 'brainstorm', `${feature}.json`)
+    const filePath = path.join(directory, '.sisyphus', 'feature', `${feature}.json`)
     const content = await fs.readFile(filePath, 'utf-8')
-    return normalizeBrainstormSession(feature, JSON.parse(content) as unknown)
+    return normalizeFeatureSession(feature, JSON.parse(content) as unknown)
   } catch {
     return undefined
   }
 }
+
+

@@ -36,7 +36,7 @@ Start with:
 ## Guardrails
 
 - Do not modify \`docs/current/\` or \`docs/archive/\` from this workflow.
-- Do not use this command for archived features; start a new \`/openflow-brainstorm\` instead.
+- Do not use this command for archived features; start a new \`/openflow-feature\` instead.
 - Do not skip verification after changing docs or code.
 - Keep diffs minimal and scoped to the changed requirement.
 

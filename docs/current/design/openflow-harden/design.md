@@ -4,6 +4,8 @@
 **Feature**: openflow-harden
 **状态**: Design
 
+> Update 2026-05-13: User-facing workflow has moved to the AI-callable `openflow-quality-gate` Skill (ADR-004). The harden capability remains relevant as the risk-based adversarial review stage inside the quality gate, but `/openflow-harden` is no longer the normal manual workflow entrypoint.
+
 ---
 
 ## 1. 问题陈述
@@ -19,6 +21,8 @@ verify 不负责深度代码审查。它回答的是"是否就绪进入 archive"
 ---
 
 ## 2. 设计目标
+
+> Note: The original design target was an independent optional command. Today, the harden capability is an internal risk-driven adversarial review stage inside `openflow-quality-gate`. The design goals below describe the capability's internal behavior.
 
 添加一个独立可选命令 `/openflow-harden`，在 implement 和 verify 之间提供对抗式质量加固。
 
@@ -53,7 +57,11 @@ verify 不负责深度代码审查。它回答的是"是否就绪进入 archive"
 
 ## 3. 命令形态
 
+> 以下内容描述的是 harden 能力的原始设计。作为正常用户工作流入口，`/openflow-harden` 已被 `openflow-quality-gate` Skill 替代（详见顶部更新通知）。该能力作为风险驱动的对抗性审查阶段，仍然在 quality gate 内部被自动调用。
+
 ### 3.1 入口
+
+> Deprecated: This command is no longer the user-facing entrypoint. The quality-gate skill internally delegates to harden for high-risk changes. The example below shows historical usage.
 
 ```text
 /openflow-harden <feature>
@@ -67,7 +75,7 @@ verify 不负责深度代码审查。它回答的是"是否就绪进入 archive"
 | simple | 单文件 ≤50 行、无明显逻辑分支、无状态变化 | 单轮 reviewer，不启动 executor |
 | complex | 多文件有逻辑分支、涉及状态/权限/数据流、公共接口变更 | 完整多轮对抗 |
 
-用户可强制 full mode：`/openflow-harden <feature> --full`
+用户可强制 full mode（历史用法，现已由 quality-gate 内部自动触发）：`/openflow-harden <feature> --full`
 
 ### 3.2 参数
 
@@ -218,11 +226,13 @@ Reviewer 只能基于以下材料提出 findings：
 
 ## 9. 与 verify/archive 关系
 
+> 以下流程图展示了独立命令形态下的工作流。当前正常路径为 `implement → openflow-quality-gate → archive`，harden 与 verify 作为 quality gate 内部的子步骤被自动调度。
+
 ```text
 implement
-  → /openflow-harden    对抗式加固（可选）
+  → /openflow-harden    对抗式加固（可选，已集成至 quality-gate）
     → pass / pass_with_risks / needs_human
-  → /openflow-verify    证据与 readiness
+  → /openflow-verify    证据与 readiness（已集成至 quality-gate）
     → ready / ready_with_doc_updates / not_ready / needs_decision
   → /openflow-archive   canonicalization
 ```
@@ -242,6 +252,8 @@ harden 不输出 readiness。harden 完成后提示用户重新运行 verify。
 ---
 
 ## 11. 状态流转
+
+> Deprecated: This state flow describes the historical command behavior. Today, the harden stage is invoked internally by `openflow-quality-gate` and uses these same states, but users no longer interact with this command directly.
 
 ```text
 /openflow-harden <feature>
@@ -266,13 +278,15 @@ harden 不输出 readiness。harden 完成后提示用户重新运行 verify。
 
 ## 12. 命令语义边界
 
+> Note: harden is now an internal capability of `openflow-quality-gate`, and verify is the internal evidence collection stage. This table shows historical roles.
+
 | 命令 | 回答 | 输出 |
 |------|------|------|
 | brainstorm | intent 是什么 | design / prd / requirements |
 | plan | 怎么实现 | tasks / implementation plan |
 | implement | 实现是否正确完成 | code changes |
-| **harden** | 实现是否经得起对抗审查 | pass / hardened evidence |
-| verify | 证据是否足够进入 archive | readiness status |
+| **harden** (internal) | 实现是否经得起对抗审查 | pass / hardened evidence |
+| verify (internal) | 证据是否足够进入 archive | readiness status |
 | archive | 是否正式固化 | canonical status + mapper |
 
 ---
@@ -298,4 +312,4 @@ harden 不输出 readiness。harden 完成后提示用户重新运行 verify。
 
 ## 15. 一句话总结
 
-`/openflow-harden` 是 implement 和 verify 之间的可选对抗式加固命令。通过 reviewer 和 executor 的多轮对抗，在设计文档约束下发现并修复隐藏的阻塞问题，直到实现经得起反复攻击，或预算/轮次用尽。
+`/openflow-harden` 是 implement 和 verify 之间的可选对抗式加固命令（现已集成至 `openflow-quality-gate`）。通过 reviewer 和 executor 的多轮对抗，在设计文档约束下发现并修复隐藏的阻塞问题，直到实现经得起反复攻击，或预算/轮次用尽。

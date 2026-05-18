@@ -1,6 +1,6 @@
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
-import type { AcceptanceState, FileChangeRecord, DriftItem, PhasedChanges, IssueClassification } from '../../types.js'
+import type { AcceptanceState, FileChangeRecord, DriftItem, GuardianEvidence, PhasedChanges, IssueClassification } from '../../types.js'
 import { escapeMarkdown } from '../../utils/security.js'
 import { logger } from '../../utils/logger.js'
 import { generateCodeMappingTable } from './code-mapper.js'
@@ -21,6 +21,8 @@ export interface ImplementationMapperOptions {
   driftItems?: DriftItem[]
   issueClarificationPath?: string | null
   promotionCandidatePath?: string | null
+  behaviorPath?: string | null
+  guardianEvidence?: GuardianEvidence
 }
 
 export async function generateImplementationMapper(options: ImplementationMapperOptions): Promise<string> {
@@ -51,8 +53,12 @@ export async function generateImplementationMapper(options: ImplementationMapper
     ...(phasedChanges !== undefined ? { phasedChanges } : {}),
   }
   const codeMappingSection = await generateImplementationMappingSection(feature, changes, traceability, codeMappingOptions)
+  const behaviorMappingSection = options.behaviorPath
+    ? await generateBehaviorMappingSection(options.behaviorPath)
+    : null
   const globalDepsSection = formatGlobalDepsSection(driftItems)
   const verificationSection = formatVerificationSection(acceptanceState, phasedChanges, driftItems)
+  const guardianSection = formatGuardianEvidenceSection(options.guardianEvidence)
 
   let out = `# ${safeFeature} - Implementation Mapper
 
@@ -78,11 +84,21 @@ export async function generateImplementationMapper(options: ImplementationMapper
 ${codeMappingSection}
 `
 
-  const verifyNum = sectionNum(3)
+  if (behaviorMappingSection) {
+    const behaviorNum = sectionNum(3)
+    out += `
+## ${behaviorNum}. 行为到实现映射
+
+${behaviorMappingSection}
+`
+  }
+
+  const verifyNum = sectionNum(behaviorMappingSection ? 4 : 3)
   out += `
 ## ${verifyNum}. 验证与结论
 
 ${verificationSection}
+${guardianSection}
 `
 
   // --- Issue-specific sections (only when mode is "issue" or "mixed") ---
@@ -189,6 +205,112 @@ function formatVerificationEvidence(
   }
 
   return 'no verification evidence recorded'
+}
+
+function formatGuardianEvidenceSection(evidence?: GuardianEvidence): string {
+  if (!evidence) return ''
+  return [
+    '### Drift Guardian Evidence',
+    '',
+    `- Auto-repairs: ${evidence.autoRepairs}`,
+    `- Pending ambiguities: ${evidence.pendingAmbiguities}`,
+    `- Unresolved violations: ${evidence.unresolvedViolations}`,
+    `- Contract source: ${evidence.contractSource}`,
+    '',
+  ].join('\n')
+}
+
+async function generateBehaviorMappingSection(behaviorPath: string): Promise<string> {
+  const rows: BehaviorMappingRow[] = []
+  try {
+    const content = await fs.readFile(behaviorPath, 'utf-8')
+    rows.push(...parseBehaviorMappingRows(content))
+  } catch {
+    return 'Unable to parse behavior document.\n'
+  }
+
+  if (rows.length === 0) {
+    return 'No behavior scenarios found.\n'
+  }
+
+  const header = '| Behavior Scenario | Type | Expected Behavior | Evidence | Code Files | Key Symbols | Notes |'
+  const sep = '|------------------|------|-------------------|----------|------------|-------------|-------|'
+  const lines = rows.map(row => (
+    `| ${escapeMarkdown(row.name)} | ${escapeMarkdown(row.type)} | ${escapeMarkdown(row.expectedBehavior)} | — | — | — | ${escapeMarkdown(row.notes)} |`
+  ))
+  return [header, sep, ...lines].join('\n') + '\n'
+}
+
+interface BehaviorMappingRow {
+  name: string
+  type: 'scenario' | 'boundary'
+  expectedBehavior: string
+  notes: string
+}
+
+function parseBehaviorMappingRows(content: string): BehaviorMappingRow[] {
+  const rows: BehaviorMappingRow[] = []
+  const lines = content.split('\n')
+  let current: {
+    name: string
+    type: 'scenario' | 'boundary'
+    given: string[]
+    when: string[]
+    then: string[]
+  } | null = null
+  let currentStep: 'given' | 'when' | 'then' | null = null
+
+  const pushCurrent = () => {
+    if (!current) return
+    rows.push({
+      name: current.name,
+      type: current.type,
+      expectedBehavior: formatExpectedBehavior(current.given, current.when, current.then),
+      notes: current.type === 'boundary' ? 'Boundary scenario; should-pass evidence.' : 'Critical behavior scenario.',
+    })
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    const heading = line.match(/^###\s+(Scenario|Boundary):\s*(.+)$/i)
+    if (heading) {
+      pushCurrent()
+      current = {
+        type: heading[1]!.toLowerCase() === 'boundary' ? 'boundary' : 'scenario',
+        name: heading[2]!.trim(),
+        given: [],
+        when: [],
+        then: [],
+      }
+      currentStep = null
+      continue
+    }
+
+    if (!current) continue
+
+    const stepHeading = line.match(/^(Given|When|Then):\s*$/i)
+    if (stepHeading) {
+      currentStep = stepHeading[1]!.toLowerCase() as 'given' | 'when' | 'then'
+      continue
+    }
+
+    if (!currentStep || !line.startsWith('-')) continue
+    const item = line.replace(/^[-*]\s*/, '').trim()
+    if (item) current[currentStep].push(item)
+  }
+
+  pushCurrent()
+  return rows
+}
+
+function formatExpectedBehavior(given: string[], when: string[], then: string[]): string {
+  const parts = [
+    given.length > 0 ? `Given ${given.join('; ')}` : '',
+    when.length > 0 ? `When ${when.join('; ')}` : '',
+    then.length > 0 ? `Then ${then.join('; ')}` : '',
+  ].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(' / ') : 'Not specified.'
 }
 
 async function generateImplementationMappingSection(

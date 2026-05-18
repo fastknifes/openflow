@@ -2,13 +2,13 @@
 
 **日期**: 2026-05-08
 **状态**: Accepted
-**适用范围**: OpenFlow 命令的默认注册方式、`openflow-writing-plan` 例外、`chat.message` hook 拦截机制、`src/command-registration.ts`、`src/skills/registration.ts`
+**适用范围**: OpenFlow 命令的默认注册方式、`openflow-writing-plan`、`openflow-brainstorm` 与 `openflow-quality-gate` 例外、`chat.message` hook 拦截机制、`src/command-registration.ts`、`src/skills/registration.ts`
 
 ## 1. 背景
 
 OpenFlow 当前通过两种方式注册命令：
 
-1. **Plugin Tool**（`src/index.ts` 中的 `tool()` API）：注册 `openflow-brainstorm`、`openflow-verify`、`openflow-archive` 等可执行工具
+1. **Plugin Tool**（`src/index.ts` 中的 `tool()` API）：注册 `openflow-feature`、`openflow-archive` 等可执行工具；历史上也注册过 `openflow-verify`
 2. **Skill 注册**（`src/skills/registration.ts` 中的 `registerSkills()`）：将 SKILL.md 写入 `~/.config/opencode/skills/` 目录
 
 ### 1.1 Skill 注册的副作用
@@ -31,9 +31,9 @@ for (const item of yield* skill.all()) {
 ### 1.2 用户反馈的问题
 
 - `openflow-brainstorm` 在检测到 "brainstorm" 关键词时被自动调用
-- `openflow-verify` 在验证/完成语境下被自动调用
+- 历史上 `openflow-verify` 在验证/完成语境下被自动调用
 - 用户期望：交互式/治理类命令仅在用户手动输入 `/openflow-xxx` 时触发，AI 不应自动调用
-- 例外：`openflow-writing-plan` 的职责是为 agent 准备计划编写上下文并指导写入 `.sisyphus/plans/{feature}.md`，需要允许 AI Agent 主动调用
+- 例外：`openflow-writing-plan` 的职责是为 agent 准备计划编写上下文并指导写入 `.sisyphus/plans/{feature}.md`，需要允许 AI Agent 主动调用；`openflow-brainstorm` 提供对话式设计探索引导（多方案对比、渐进式澄清），同样需要保留 Skill 注册以允许 AI Agent 在设计阶段主动发起探索；`openflow-quality-gate` 是 AI 完成代码后的质量门，必须允许 AI Agent 主动调用
 
 ## 2. 技术分析
 
@@ -71,28 +71,28 @@ OMO 的 `auto-slash-command/hook.ts` 通过 `chat.message` hook 拦截 `/command
 
 ## 3. 决策
 
-**OpenFlow 命令默认从 Skill 注册改为 Command 文件注册，配合 `chat.message` hook 拦截实现执行；`openflow-writing-plan` 作为可被 Agent 调用的计划编写入口，保留 Skill 注册。**
+**OpenFlow 命令默认从 Skill 注册改为 Command 文件注册，配合 `chat.message` hook 拦截实现执行；`openflow-writing-plan` 作为可被 Agent 调用的计划编写入口，保留 Skill 注册；`openflow-brainstorm` 作为对话式设计探索入口，同样保留 Skill 注册；`openflow-quality-gate` 作为 AI 完成代码后的质量门，也必须注册为 Skill。**
 
 ### 3.1 注册方式变更
 
 | 组件 | 变更前 | 变更后 |
 |------|--------|--------|
 | Tool 注册（`tool()` API） | ✅ 保留 | ✅ 保留 |
-| Skill 注册（`registerSkills()`） | ✅ 写入 SKILL.md | ⚠️ 仅注册 `openflow/writing-plan`，其他 OpenFlow 命令不注册为 Skill |
-| Command 注册 | ❌ 仅清理旧文件 | ✅ 新增 `registerCommands()`，写入 `.opencode/commands/*.md`，但不写入 `openflow-writing-plan.md` |
+| Skill 注册（`registerSkills()`） | ✅ 写入 SKILL.md | ⚠️ 仅注册 `openflow/writing-plan`、`openflow/brainstorm` 和 `openflow-quality-gate`，其他 OpenFlow 命令不注册为 Skill |
+| Command 注册 | ❌ 仅清理旧文件 | ✅ 新增 `registerCommands()`，写入 `.opencode/commands/*.md`，但不写入 `openflow-writing-plan.md`、`openflow-brainstorm.md` 和 `openflow-quality-gate.md` |
 | `chat.message` hook | ❌ 无拦截 | ✅ 新增：检测 `/openflow-*` 模式，调用对应 tool handler |
 
 ### 3.2 实现架构
 
 ```
-用户输入 /openflow-brainstorm <feature>
+用户输入 /openflow-feature <feature>
   → chat.message hook 拦截
     → 解析命令名和参数
-    → 调用 handleBrainstorm(ctx, feature)
+    → 调用 handleFeature(ctx, feature)
     → 返回结果
 ```
 
-同时，`.opencode/commands/openflow-brainstorm.md` 文件提供命令元数据（描述、参数提示），确保该命令出现在 `/` 弹出菜单中。
+同时，`.opencode/commands/openflow-feature.md` 文件提供命令元数据（描述、参数提示），确保该命令出现在 `/` 弹出菜单中。
 
 ### 3.3 命令文件格式
 
@@ -100,41 +100,44 @@ OMO 的 `auto-slash-command/hook.ts` 通过 `chat.message` hook 拦截 `/command
 
 ```markdown
 ---
-description: "OpenFlow brainstorm for design clarification"
+description: "OpenFlow feature for design clarification"
 ---
 
 ## Command Instructions
 
-Start the OpenFlow brainstorm workflow for the specified feature.
-Use the `openflow-brainstorm` tool to begin.
+Start the OpenFlow feature workflow for the specified feature.
+Use the `openflow-feature` tool to begin.
 ```
 
 前端 YAML 的 `description` 字段驱动 `/` 弹出菜单中的命令描述。
 
 ### 3.4 覆盖的命令与例外
 
-除 `openflow-writing-plan` 外，现有 OpenFlow 命令均适用 Command 文件注册：
+除 `openflow-writing-plan`、`openflow-brainstorm` 和 `openflow-quality-gate` 外，现有 OpenFlow 命令均适用 Command 文件注册：
 
 | 命令 | Command 文件 | Handler |
 |------|-------------|---------|
-| `openflow-brainstorm` | `brainstorm.md` | `handleBrainstorm` |
-| `openflow-verify` | `verify.md` | `handleVerify` |
+| `openflow-feature` | `feature.md` | `handleFeature` |
 | `openflow-archive` | `archive.md` | `handleArchive` |
 | `openflow-init` | `init.md` | `handleInit` |
 | `openflow-status` | `status.md` | `handleStatus` |
 | `openflow-config` | `config.md` | `handleConfig` |
 | `openflow-migrate-docs` | `migrate-docs.md` | `handleMigrateDocs` |
 
-`openflow-writing-plan` 不写入 Command 文件，而是注册为 `openflow/writing-plan` Skill。该 Skill 会出现在 `<available_skills>` 中，使 agent 可以在需要生成开发计划时主动调用内部 `openflow-writing-plan` tool，读取计划上下文后写入 `.sisyphus/plans/{feature}.md`。
+`openflow-writing-plan` 和 `openflow-brainstorm` 不写入 Command 文件，而是分别注册为 `openflow/writing-plan` 和 `openflow/brainstorm` Skill。`openflow/writing-plan` 会出现在 `<available_skills>` 中，使 agent 可以在需要生成开发计划时主动调用内部 `openflow-writing-plan` tool，读取计划上下文后写入 `.sisyphus/plans/{feature}.md`。`openflow/brainstorm` 提供对话式设计探索引导（多方案对比、渐进式澄清），作为 Skill 注册后 agent 可在设计阶段主动发起探索性对话帮助用户明确需求。
+
+`openflow-quality-gate` 也不写入 Command 文件，而是注册为 AI-callable Skill。它是实现完成后的质量门：AI 在完成代码或 bug 修复后主动调用该 Skill，由 Skill 决定是否运行 harden，并执行 evidence-aware verify。详见 ADR-004。
 
 ## 4. 理由
 
-1. **防止 AI 自动触发治理类命令**：Command 文件（`source: "command"`）不进入 `<available_skills>`，AI 无法基于关键词或语义自动触发 brainstorm/verify/archive 等交互式命令
+1. **防止 AI 自动触发治理类命令**：Command 文件（`source: "command"`）不进入 `<available_skills>`，AI 无法基于关键词或语义自动触发 feature/archive 等交互式命令。`openflow-quality-gate` 是例外，因为它的设计目标就是让 AI 在代码完成后自动触发质量门。
 2. **保留用户手动调用**：Command 文件出现在 `/` 弹出菜单，用户可手动输入 `/openflow-xxx` 触发
 3. **保留可执行逻辑**：`tool()` 注册仍然存在，`chat.message` hook 拦截后可直接调用 handler，不依赖 AI 中间层
 4. **兼容现有工具链**：不需要修改 OpenCode 或 OMO 源码，完全通过插件 hook 实现
-5. **保留计划编写自动化**：`openflow-writing-plan` 是 agent 工作流入口，不是用户交互式治理命令；作为 Skill 注册能让 agent 按需生成计划
-6. **清理死代码**：`command-registration.ts` 中的 `successfulRegistrations` 和 `registrationInFlight` 死状态可一并清理
+5. **保留对话式设计探索**：`openflow-brainstorm` 提供对话式设计探索引导（多方案对比、渐进式澄清），与结构化命令 `/openflow-feature` 互补；作为 Skill 注册让 agent 可在设计阶段主动发起探索性对话
+6. **保留计划编写自动化**：`openflow-writing-plan` 是 agent 工作流入口，不是用户交互式治理命令；作为 Skill 注册能让 agent 按需生成计划
+7. **保留质量门自动化**：`openflow-quality-gate` 是 agent 完成代码后的质量门入口；作为 Skill 注册能让 agent 在 native OpenCode 或 OMO 执行后主动运行 harden + verify
+8. **清理死代码**：`command-registration.ts` 中的 `successfulRegistrations` 和 `registrationInFlight` 死状态可一并清理
 
 ## 5. 影响范围
 
@@ -142,12 +145,12 @@ Use the `openflow-brainstorm` tool to begin.
 
 | 文件 | 变更 |
 |------|------|
-| `src/command-registration.ts` | 新增 `registerCommands(ctx)`，写入 `.opencode/commands/*.md`；排除 `openflow-writing-plan`；清理死状态 |
-| `src/index.ts` | 调用 `registerCommands()`；仅为 `openflow-writing-plan` 调用 `registerSkills()`；新增 `chat.message` hook 拦截逻辑 |
+| `src/command-registration.ts` | 新增 `registerCommands(ctx)`，写入 `.opencode/commands/*.md`；排除 `openflow-writing-plan` 和 `openflow-brainstorm`；清理死状态 |
+| `src/index.ts` | 调用 `registerCommands()`；为 `openflow-writing-plan` 和 `openflow-brainstorm` 调用 `registerSkills()`；新增 `chat.message` hook 拦截逻辑 |
 | `src/hooks/chat-message.ts` | 新增 `/openflow-*` 模式检测和 handler 分发逻辑 |
-| `src/skills/registry.ts` | 仅暴露 `openflow/writing-plan` Skill，避免其他命令进入 `<available_skills>` |
-| `tests/skills/registration.test.ts` | 更新为测试仅注册 `openflow/writing-plan` Skill |
-| `tests/index-runtime-registration.test.ts` | 更新为测试 Command 注册路径与 writing-plan Skill 例外 |
+| `src/skills/registry.ts` | 仅暴露 `openflow/writing-plan` 和 `openflow/brainstorm` Skill，避免其他命令进入 `<available_skills>` |
+| `tests/skills/registration.test.ts` | 更新为测试注册 `openflow/writing-plan` 和 `openflow/brainstorm` Skill |
+| `tests/index-runtime-registration.test.ts` | 更新为测试 Command 注册路径与 writing-plan 和 brainstorm Skill 例外 |
 
 ### 5.2 不受影响的部分
 
@@ -162,7 +165,7 @@ Use the `openflow-brainstorm` tool to begin.
 
 - 变更仅涉及 OpenFlow 插件内部的注册方式，不改变命令执行逻辑
 - 不修改 OpenCode 或 OMO 源码
-- 非 writing-plan 的 Skill 文件移除后，已生成的 SKILL.md 缓存文件会在下次插件加载时被清理
+- 非 writing-plan 和 brainstorm 的 Skill 文件移除后，已生成的 SKILL.md 缓存文件会在下次插件加载时被清理
 - 回退简单：将目标命令重新加入 `COMMANDS` 或 `src/skills/registry.ts` 即可
 
 ## 6. 执行
@@ -191,8 +194,8 @@ Use the `openflow-brainstorm` tool to begin.
 ### 6.2 验收标准
 
 - [ ] 所有 `/openflow-*` 命令出现在 OpenCode 的 `/` 弹出菜单
-- [ ] AI 不再自动调用 `openflow-brainstorm`、`openflow-verify` 等命令
-- [ ] 用户手动输入 `/openflow-brainstorm <feature>` 后正确执行对应 handler
+- [ ] AI 不再自动调用 `openflow-feature`、历史 `openflow-verify` 等交互式命令；`openflow-quality-gate` 作为 ADR-004 例外可被 AI 主动调用
+- [ ] 用户手动输入 `/openflow-feature <feature>` 后正确执行对应 handler
 - [ ] 所有现有测试通过
 - [ ] 新增测试覆盖 `/` 拦截和 Command 写入路径
 

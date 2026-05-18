@@ -4,10 +4,10 @@ import type { CurrentPromotionSuggestion } from '../../types.js'
 import { createSafePath } from '../../utils/security.js'
 
 interface PromotionAreaConfig {
-  area: 'design' | 'requirements'
-  archiveFile: 'design.md' | 'prd.md'
+  area: 'design' | 'requirements' | 'behavior'
+  archiveFile: 'design.md' | 'prd.md' | 'behavior.md'
   currentBaseDir: string
-  currentFileName: 'design.md' | 'prd.md'
+  currentFileName: 'design.md' | 'prd.md' | 'behavior.md'
   currentFilePattern: RegExp
 }
 
@@ -44,6 +44,13 @@ const PROMOTION_AREAS: PromotionAreaConfig[] = [
     currentBaseDir: path.join('docs', 'current', 'requirements'),
     currentFileName: 'prd.md',
     currentFilePattern: /^(?:prd|\d{8}-prd)\.md$/i,
+  },
+  {
+    area: 'behavior',
+    archiveFile: 'behavior.md',
+    currentBaseDir: path.join('docs', 'current', 'spec'),
+    currentFileName: 'behavior.md',
+    currentFilePattern: /^(?:behavior|\d{8}-behavior)\.md$/i,
   },
 ]
 
@@ -119,14 +126,7 @@ export async function buildPromotionSuggestions(
       continue
     }
 
-    if (!sourceExists && directTargetExists) {
-      suggestions.push({
-        type: 'REMOVE',
-        targetArea: area.area,
-        targetPath: directTargetPath,
-        reason: `${area.area} does not exist in archive but exists in current`,
-      })
-    }
+
   }
 
   return suggestions

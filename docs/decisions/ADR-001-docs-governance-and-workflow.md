@@ -9,7 +9,7 @@
 OpenFlow 当前已经具备较强的工作流增强能力：
 
 - 基于 `oh-my-openagent` 提供的多代理、需求澄清、计划探索、委派执行能力运行
-- 通过 `/openflow/brainstorm` 提供设计前置与文档生成
+- 通过 `/openflow-feature` 提供设计前置与文档生成
 - 在计划阶段注入 TDD 与验证要求
 - 通过 Verify 阶段建立 evidence 与 readiness，判断变更是否具备进入 closure 的条件
 - 在归档阶段完成 canonicalization、current promotion、实现映射、代码映射和需求归档
@@ -62,7 +62,7 @@ OpenFlow 的正确定位应为：
 
 `Superpowers` 的有效启发主要在于：
 
-- 在实现前先做 brainstorming
+- 在实现前先做设计探索
 - 设计批准后再进入写计划与子代理执行
 - 强调 TDD、验证与 evidence-driven workflow
 
@@ -114,7 +114,7 @@ OpenFlow 的文档体系应整体偏向 `OpenSpec-lite`：
 
 OpenFlow 应被定义为：
 
-> 一个建立在 `oh-my-openagent` 宿主能力之上的文档优先工作流插件，负责把 brainstorm、设计、需求、验收、归档和追溯关系沉淀为可持续维护的知识结构。
+> 一个建立在 `oh-my-openagent` 宿主能力之上的文档优先工作流插件，负责把 设计探索、设计、需求、验收、归档和追溯关系沉淀为可持续维护的知识结构。
 
 简化表达：
 

@@ -18,7 +18,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "node scripts/run-tests.mjs",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
@@ -33,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/fastknifes/openflow.git"
+    "url": "git+https://github.com/fastknifes/openflow.git"
   },
   "dependencies": {
     "zod": "^3.22.0"

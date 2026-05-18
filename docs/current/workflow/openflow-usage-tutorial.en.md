@@ -6,7 +6,7 @@
 
 This guide is for users who have OpenFlow installed but still need practical answers to questions like:
 
-- When should I use `brainstorm`?
+- When should I use `/openflow-feature`?
 - When should I use `issue`?
 - Do planning and execution require omo?
 - When should I run `harden`, `verify`, and `archive`?
@@ -79,24 +79,24 @@ If you do not want to read the entire guide first, follow one of these two paths
 2. Create the design workspace
 
 ```text
-/openflow-brainstorm demo-feature
+/openflow-feature demo-feature
 ```
 
-3. Implement the feature
+3. Generate an implementation plan (optional but recommended)
+
+```text
+/openflow-writing-plan demo-feature
+```
+
+4. Implement the feature
 
 - With omo: use `Prometheus + /startwork`
 - Without omo: use OpenCode native `plan / build`
 
-4. Harden complex changes
+5. Run the quality gate after implementation
 
 ```text
-/openflow-harden demo-feature
-```
-
-5. Verify
-
-```text
-/openflow-verify demo-feature
+openflow-quality-gate
 ```
 
 6. Archive after readiness passes
@@ -117,11 +117,11 @@ If you do not want to read the entire guide first, follow one of these two paths
 
 - continue investigation
 - implement a fix
-- escalate into `/openflow-brainstorm`
+- escalate into `/openflow-feature`
 
 3. If code changes happen, still return to the main chain:
 
-`harden -> verify -> archive`
+`openflow-quality-gate -> archive`
 
 ---
 
@@ -132,7 +132,7 @@ If you do not want to read the entire guide first, follow one of these two paths
 Use:
 
 ```text
-/openflow-brainstorm <feature>
+/openflow-feature <feature>
 ```
 
 Use it for:
@@ -183,7 +183,7 @@ Ask these questions in order.
 ### Question 1: Is this a feature or a problem?
 
 - **I need to add or change a defined feature**
-  - Use `/openflow-brainstorm <feature>`
+  - Use `/openflow-feature <feature>`
 - **I see something wrong but I do not yet know whether it is a bug**
   - Use `/openflow-issue <issue>`
 
@@ -192,23 +192,25 @@ Ask these questions in order.
 - **Yes, I need to bring external docs into OpenFlow**
   - Use `/openflow-migrate-docs --sourceDir <source-docs-dir>`
 
-### Question 3: Has implementation already happened?
+### Question 3: Is this a requirement change during active development?
+
+- **Yes, requirements changed for a feature that is in progress (not yet archived)**
+  - Use `/openflow-change <feature> "<change description>"`
+
+### Question 4: Has implementation already happened?
 
 - **Not yet**
   - Continue with planning and execution
-- **Yes, and the change is risky or cross-cutting**
-  - Run `/openflow-harden <feature>`
 - **Yes, and I want to know if I can claim completion**
-  - Run `/openflow-verify <feature>`
-- **Verify is done and I want to make it canonical**
+  - Ask the AI to invoke `openflow-quality-gate`
+- **Quality gate is done and I want to make it canonical**
   - Run `/openflow-archive <feature>`
 
 Short memory rule:
 
-- `brainstorm` = design first
+- `feature` = design first
 - `issue` = clarify first
-- `harden` = stabilize complex implementation
-- `verify` = produce evidence and readiness
+- `quality-gate` = automatically decide harden and produce evidence/readiness
 - `archive` = freeze and promote
 - `migrate-docs` = import existing docs
 
@@ -216,32 +218,71 @@ Short memory rule:
 
 ## 7. Complete feature workflow
 
+This walks through a complete feature from idea to archive, showing exactly what to type and what happens at each step.
+
 ### Step 1: Initialize
 
 ```text
 /openflow-init
 ```
 
-### Step 2: Run brainstorm
+### Step 1.5 (Optional): Brainstorm when requirements are unclear
+
+If your requirements are fuzzy and need exploration before formalizing:
 
 ```text
-/openflow-brainstorm user-coupon-filter
+/openflow-brainstorm user coupon list needs channel filtering
+```
+
+The AI discusses approaches, weighs trade-offs, and clarifies scope conversationally. No formal documents are generated. When sufficient convergence is reached, the AI summarizes key decisions and suggests running `/openflow-feature`.
+
+> **Skip when**: UI changes, bug fixes, or clearly-scoped features — go directly to Step 2.
+
+### Step 2: Run feature design
+
+```text
+/openflow-feature user-coupon-filter
 ```
 
 Expected outcome:
-
-- OpenFlow advances one brainstorm question at a time
+- OpenFlow advances one feature design question at a time
 - A dated workspace appears under `docs/changes/YYYY-MM-DD-user-coupon-filter/`
-- Typical outputs: `design.md`, `proposal.md`, `decisions.md`, `prd.md`
+- Typical outputs: `design.md`, `behavior.md` (if behavior changes), `proposal.md`, `decisions.md`, `prd.md`
 
-### Step 3: Plan and execute
+### Step 3: Generate the implementation plan
 
-You have two valid paths.
+Once the design is clear, generate a structured development plan:
 
-#### Path 1: With omo
+```text
+/openflow-writing-plan user-coupon-filter
+```
 
-- Generate the plan with `Prometheus`
-- Execute with `/startwork`
+What this does:
+- Reads design constraints from `docs/changes/*/design.md`
+- Generates a parser-compatible plan using bounded work packages (not unlimited parallel decomposition)
+- Saves to both `docs/changes/*/plan.md` and `.sisyphus/plans/user-coupon-filter.md` (dual-save)
+- Warns if the plan exceeds reasonable budget
+- **Stops after saving — does not auto-start implementation**
+
+### Step 4: Implement
+
+You have two valid execution paths.
+
+#### Path 1: With omo (recommended)
+
+If you have [oh-my-openagent (omo)](https://github.com/nicepkg/oh-my-openagent):
+
+1. **Plan already generated**: Step 3's `/openflow-writing-plan` already saved the plan to `.sisyphus/plans/user-coupon-filter.md`
+2. **Switch to Prometheus**: Prometheus is omo's execution agent. Switch to it in OpenCode — it reads your plan file automatically
+3. **Execute**: Run `/start-work` — omo dispatches tasks to sub-agents according to the plan
+
+```text
+[Step 3 done: /openflow-writing-plan saved the plan]
+          ↓
+Switch to Prometheus (omo's execution agent)
+          ↓
+/start-work        ← reads .sisyphus/plans/*.md and begins execution
+```
 
 #### Path 2: With native OpenCode plan/build
 
@@ -250,26 +291,15 @@ You have two valid paths.
 
 OpenFlow does not require omo. Its main job is still documentation governance, constraint enforcement, verification, and archive.
 
-### Step 4: Run harden for complex changes
+### Step 5: Run the quality gate
 
 ```text
-/openflow-harden user-coupon-filter
-```
-
-Or, for a heavier run:
-
-```text
-/openflow-harden user-coupon-filter --full --mode deep
-```
-
-### Step 5: Run verify
-
-```text
-/openflow-verify user-coupon-filter
+openflow-quality-gate
 ```
 
 Read the output carefully:
 
+- whether harden was required
 - `Evidence`
 - `Readiness`
 - `status`
@@ -300,7 +330,7 @@ docs/archive/YYYY-MM-DD-user-coupon-filter/
 
 ## 8. Investigating an uncertain issue
 
-If your input is not “build a feature” but “something seems wrong,” do not jump straight to brainstorm.
+If your input is not “build a feature” but “something seems wrong,” do not jump straight to feature design.
 
 ### Step 1: Start with issue clarification
 
@@ -328,15 +358,30 @@ Focus on:
 Typical outcomes:
 
 - `bugfix` -> implement the fix
-- `behavior_change` -> escalate into `/openflow-brainstorm`
+- `behavior_change` -> escalate into `/openflow-feature`
 - `doc_ambiguity` -> ask for user clarification or decision
 - `cannot_determine` -> gather more evidence
 
-### Step 3: If it becomes an implementation task, return to the main chain
+### Step 3: Use `--resolve` to enter fix flow directly
+
+If classification confirms a bugfix and you want to skip back to the implementation chain, you can add `--resolve`:
 
 ```text
-/openflow-harden login-endpoint-stability
-/openflow-verify login-endpoint-stability
+/openflow-issue "login endpoint returns 500 intermittently" --env staging --resolve
+```
+
+This will:
+
+- automatically generate `issue-resolution.md` and `promotion-candidate.md`
+- route the fix through `openflow-quality-gate`
+- apply risk-based harden and evidence-aware verify without prompting
+
+If the issue turns out to need design work instead, drop `--resolve` and escalate into `/openflow-feature`.
+
+### Step 4: If it becomes an implementation task, return to the main chain
+
+```text
+openflow-quality-gate
 /openflow-archive login-endpoint-stability
 ```
 
@@ -382,6 +427,7 @@ Deletion of originals is never automatic.
 ### Mistake 1: Treating `issue` like “fix bug now”
 
 Wrong. `issue` is for clarification, investigation, and triage first.
+`--resolve` now exists to enter fix mode after classification, but the core point remains: issue's FIRST job is clarify and triage. `--resolve` is for AFTER classification.
 
 ### Mistake 2: Treating `verify` like “run a few tests”
 
@@ -406,11 +452,10 @@ Wrong. OpenFlow cooperates well with omo but also works as a standalone governan
 If today is your first day using OpenFlow, this is the simplest path:
 
 1. Run `/openflow-init`
-2. Run `/openflow-brainstorm demo-feature`
+2. Run `/openflow-feature demo-feature`
 3. Implement through omo or native OpenCode plan/build
-4. Run `/openflow-harden demo-feature` if the change is not trivial
-5. Run `/openflow-verify demo-feature`
-6. Run `/openflow-archive demo-feature` after readiness passes
+4. Have the AI invoke `openflow-quality-gate`
+5. Run `/openflow-archive demo-feature` after readiness passes
 
 If you are investigating a problem instead of building a feature, replace step 2 with:
 
@@ -447,14 +492,14 @@ This section explains each command in a practical reference style: syntax, param
 - the project is adopting OpenFlow for the first time
 - the guide block should be refreshed
 
-### 12.2 `/openflow-brainstorm <feature>`
+### 12.2 `/openflow-feature <feature>`
 
 **Purpose**: Create a design clarification workspace for a clear feature or change.
 
 **Usage**:
 
 ```text
-/openflow-brainstorm user-coupon-filter
+/openflow-feature user-coupon-filter
 ```
 
 **Parameters**:
@@ -463,7 +508,7 @@ This section explains each command in a practical reference style: syntax, param
 
 **Expected behavior**:
 
-- OpenFlow advances the brainstorm one question at a time
+- OpenFlow advances the feature design one question at a time
 - generates a dated workspace under `docs/changes/`
 - typically produces `design.md`, and sometimes `proposal.md`, `decisions.md`, or `prd.md`
 
@@ -526,6 +571,7 @@ This section explains each command in a practical reference style: syntax, param
 - `--write-doc`: write `issue-clarification.md`
 - `--no-doc`: suppress file output
 - `--continue`: continue a prior clarification
+- `--resolve`: after investigation, automatically generates `issue-resolution.md` and `promotion-candidate.md`. Harden is risk-based and automatic (no user prompt).
 
 **Examples**:
 
@@ -533,73 +579,44 @@ This section explains each command in a practical reference style: syntax, param
 /openflow-issue "wrong data displayed in dashboard panel" --readonly
 /openflow-issue "config drift detected in staging" --env staging --write-doc
 /openflow-issue --name api-timeout --continue
+/openflow-issue "payment button invisible on mobile" --resolve
 ```
 
 **Expected behavior**:
 
 - produces expectation, constraints, evidence, semantics, classification, and next-action guidance
+- automatically searches historical similar issues (from `docs/archive/` and `docs/changes/`) and shows hints
+- provides a recommended next step based on classification (e.g., use `--resolve` to enter fix flow, or escalate to `/openflow-feature`)
 
-### 12.6 `/openflow-harden <feature>`
+### 12.6 `openflow-quality-gate` Skill
 
-**Purpose**: Perform adversarial quality hardening before verify.
+**Purpose**: AI-callable quality gate after implementation or bug fix completion.
+
+The skill owns two steps:
+
+1. Decide whether risk-based harden is required.
+2. Perform evidence-aware verify.
 
 **Usage**:
 
-```text
-/openflow-harden user-coupon-filter
-```
-
-**Parameters**:
-
-- `--full`: force a full loop except for trivial cases
-- `--mode quick|standard|deep`: input depth
-- `--max-rounds N`: hard limit on rounds
-- `--reviewer-model X`: choose reviewer model
-- `--executor-model X`: choose executor model
-
-**Examples**:
+Usually the implementation agent calls this Skill after code changes:
 
 ```text
-/openflow-harden user-coupon-filter
-/openflow-harden user-coupon-filter --full --mode deep
-/openflow-harden user-coupon-filter --max-rounds 3 --mode quick
+openflow-quality-gate
 ```
 
 **Expected behavior**:
 
-- trivial changes may be rejected
-- simple changes usually get one review round
-- complex changes enter a multi-round reviewer/executor loop
+- trivial/simple low-risk changes skip harden but still verify
+- complex/high-risk changes run harden automatically, then verify
+- fresh test/typecheck/lint evidence may be reused
+- missing, stale, or insufficient evidence is rerun
+- missing design or issue docs do not skip verify; semantic alignment is downgraded to limited context
+- readiness and evidence summary are reported before completion is claimed
 
-### 12.7 `/openflow-verify <feature>`
+`/openflow-harden` and `/openflow-verify` are no longer normal manual workflow entrypoints. Their underlying capabilities are coordinated by `openflow-quality-gate`.
 
-**Purpose**: Produce verification evidence and readiness status.
-
-**Usage**:
-
-```text
-/openflow-verify user-coupon-filter
-```
-
-**Visible parameter**:
-
-- `--accept-failures`: explicitly accept current failures
-
-**Examples**:
-
-```text
-/openflow-verify user-coupon-filter
-/openflow-verify user-coupon-filter --accept-failures
-```
-
-**Readiness statuses**:
-
-- `NotReady`
-- `NeedsDecision`
-- `ReadyWithDocUpdates`
-- `Ready`
-
-### 12.8 `/openflow-archive <feature>`
+### 12.7 `/openflow-archive <feature>`
 
 **Purpose**: Freeze a completed change into long-term project knowledge.
 
@@ -660,7 +677,7 @@ This section explains each command in a practical reference style: syntax, param
 **Expected output**:
 
 - current directory
-- whether brainstorming, tdd, verification, archive, and writing-plan are enabled
+- whether feature, tdd, verification, archive, and writing-plan are enabled
 - enhanced plans list
 
 ### 12.11 `/openflow-config`
@@ -675,7 +692,7 @@ This section explains each command in a practical reference style: syntax, param
 
 **Expected output**:
 
-- `brainstorming`
+- `feature`
 - `tdd`
 - `verification`
 - `archive`
@@ -699,7 +716,7 @@ You need to add a new capability:
 ### Step 2: Create the design workspace
 
 ```text
-/openflow-brainstorm user-coupon-channel-filter
+/openflow-feature user-coupon-channel-filter
 ```
 
 Expected workspace:
@@ -735,26 +752,15 @@ Two valid execution paths:
 
 - execute directly from the generated plan using native OpenCode flow
 
-### Step 5: Harden
+### Step 5: Quality gate
 
 ```text
-/openflow-harden user-coupon-channel-filter --mode standard
-```
-
-Higher-risk version:
-
-```text
-/openflow-harden user-coupon-channel-filter --full --mode deep --max-rounds 5
-```
-
-### Step 6: Verify
-
-```text
-/openflow-verify user-coupon-channel-filter
+openflow-quality-gate
 ```
 
 Read carefully:
 
+- whether harden was required
 - `Evidence`
 - `Readiness`
 - `status`
@@ -765,7 +771,7 @@ Interpretation:
 
 - `Ready` -> archive allowed
 - `ReadyWithDocUpdates` -> doc sync needed
-- `NotReady` -> fix and rerun verify
+- `NotReady` -> fix and rerun the quality gate
 - `NeedsDecision` -> resolve the decision first
 
 ### Step 7: Archive
@@ -822,15 +828,14 @@ Focus on:
 Typical outcomes:
 
 - `bugfix` -> implement a fix
-- `behavior_change` -> escalate to `/openflow-brainstorm`
+- `behavior_change` -> escalate to `/openflow-feature`
 - `doc_ambiguity` -> user clarification or decision needed
 - `cannot_determine` -> gather more evidence
 
 ### Step 3: If it becomes implementation work, return to the main chain
 
 ```text
-/openflow-harden login-endpoint-stability
-/openflow-verify login-endpoint-stability
+openflow-quality-gate
 /openflow-archive login-endpoint-stability
 ```
 
@@ -838,11 +843,11 @@ Typical outcomes:
 
 ## 15. FAQ
 
-### Q1: Do I always need brainstorm first?
+### Q1: Do I always need feature design first?
 
 No.
 
-- Use `brainstorm` for new features and clear design changes.
+- Use `/openflow-feature` for new features and clear design changes.
 - Use `issue` when the problem itself is still unclear.
 
 ### Q2: Can I use OpenFlow without omo?
@@ -879,6 +884,12 @@ If the source is large or comes from OpenSpec, Spec Kit, Kiro, Cursor, Trae, or 
 /openflow-migrate-docs --sourceDir <source-docs-dir> --dryRun
 ```
 
+### Q7: When should I use `--resolve`?
+
+Use it after issue clarification confirms a bugfix and you want to enter the fix, verify, and document flow directly.
+`--resolve` automatically generates `issue-resolution.md` and `promotion-candidate.md`, then applies risk-based harden without a user prompt.
+It will not run if you also pass `--readonly`, `--env production`, or `--no-doc`.
+
 ---
 
 ## 16. Command cheat sheet
@@ -886,12 +897,11 @@ If the source is large or comes from OpenSpec, Spec Kit, Kiro, Cursor, Trae, or 
 | Goal | Command |
 |---|---|
 | Initialize the OpenFlow docs guide | `/openflow-init` |
-| Start feature design clarification | `/openflow-brainstorm <feature>` |
+| Start feature design clarification | `/openflow-feature <feature>` |
 | Triage an uncertain problem | `/openflow-issue <issue>` |
 | Apply a requirement change to an active feature | `/openflow-change <feature> "<change description>"` |
 | Generate an implementation plan | `/openflow-writing-plan <feature>` |
-| Harden a risky implementation | `/openflow-harden <feature>` |
-| Produce evidence and readiness | `/openflow-verify <feature>` |
+| Run post-implementation quality gate | `openflow-quality-gate` Skill |
 | Freeze a verified change | `/openflow-archive <feature>` |
 | Migrate a docs tree into OpenFlow | `/openflow-migrate-docs --sourceDir <source-docs-dir>` |
 | View current status | `/openflow-status` |

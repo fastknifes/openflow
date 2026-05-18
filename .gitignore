@@ -29,6 +29,7 @@ coverage/
 .sisyphus/
 
 # Smoke test directories (auto-generated)
+.test-*/
 .pack-smoke/
 .pack-smoke-node/
 .test-tool-after/

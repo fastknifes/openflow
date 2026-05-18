@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleHarden } from '../../src/commands/harden.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
@@ -50,9 +51,8 @@ function createMockClient(responses: string[], tokensPerPrompt = 100) {
 }
 
 async function createGitFixture(name: string, diffKind: 'simple' | 'complex'): Promise<string> {
-  const directory = join(process.cwd(), `.test-harden-command-${name}`)
+  const directory = await mkdtemp(join(tmpdir(), `openflow-harden-command-${name}-`))
   const feature = 'feature-a'
-  await rm(directory, { recursive: true, force: true })
   await mkdir(join(directory, '.sisyphus', 'plans'), { recursive: true })
   await mkdir(join(directory, 'docs', 'changes', feature), { recursive: true })
   await mkdir(join(directory, 'src'), { recursive: true })
@@ -106,6 +106,18 @@ function runGit(directory: string, ...args: string[]): void {
   execFileSync('git', args, { cwd: directory, stdio: 'ignore' })
 }
 
+async function removeFixture(directory: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (attempt === 4) throw error
+      await Bun.sleep(50 * (attempt + 1))
+    }
+  }
+}
+
 describe('handleHarden', () => {
   test('harden disabled in config returns rejected status', async () => {
     const ctx = createContext('/tmp/test-harden', {
@@ -134,61 +146,304 @@ describe('handleHarden', () => {
 
   test('simple feature runs reviewer-only mode and passes when reviewer reports no findings', async () => {
     const directory = await createGitFixture('simple-pass', 'simple')
-    const client = createMockClient(['NO_FINDINGS'])
-    const ctx = createContext(directory, undefined, client)
+    try {
+      const client = createMockClient(['NO_FINDINGS'])
+      const ctx = createContext(directory, undefined, client)
 
-    const result = await handleHarden(ctx, 'feature-a')
+      const result = await handleHarden(ctx, 'feature-a')
 
-    expect(result).toContain('Status: pass')
-    expect(result).toContain('Rounds: 1')
-    expect(client.promptCount).toBe(1)
-
-    await rm(directory, { recursive: true, force: true })
+      expect(result).toContain('Status: pass')
+      expect(result).toContain('Rounds: 1')
+      expect(client.promptCount).toBe(1)
+    } finally {
+      await removeFixture(directory)
+    }
   })
 
   test('complex feature loop passes when reviewer reports no findings', async () => {
     const directory = await createGitFixture('complex-pass', 'complex')
-    const client = createMockClient(['NO_FINDINGS'])
-    const ctx = createContext(directory, undefined, client)
+    try {
+      const client = createMockClient(['NO_FINDINGS'])
+      const ctx = createContext(directory, undefined, client)
 
-    const result = await handleHarden(ctx, 'feature-a')
+      const result = await handleHarden(ctx, 'feature-a')
 
-    expect(result).toContain('Status: pass')
-    expect(result).toContain('Rounds: 1')
-    expect(client.promptCount).toBe(1)
-
-    await rm(directory, { recursive: true, force: true })
+      expect(result).toContain('Status: pass')
+      expect(result).toContain('Rounds: 1')
+      expect(client.promptCount).toBe(1)
+    } finally {
+      await removeFixture(directory)
+    }
   })
 
   test('complex feature returns budget_exhausted when round budget is consumed before convergence', async () => {
     const directory = await createGitFixture('budget', 'complex')
-    const client = createMockClient([
-      'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts proves the bug\nFiles: src/fixture.ts',
-      'Root cause: value changed\nDiff: minimal patch applied\nVerify: rerun tests',
-    ], 2)
-    const ctx = createContext(directory, {
-      harden: { ...defaultConfig.harden, tokenBudgetTotal: 1, maxRounds: 3 },
-    }, client)
+    try {
+      const client = createMockClient([
+        'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts proves the bug\nFiles: src/fixture.ts',
+        'Root cause: value changed\nDiff: minimal patch applied\nVerify: rerun tests',
+      ], 2)
+      const ctx = createContext(directory, {
+        harden: { ...defaultConfig.harden, tokenBudgetTotal: 1, maxRounds: 3 },
+      }, client)
 
-    const result = await handleHarden(ctx, 'feature-a')
+      const result = await handleHarden(ctx, 'feature-a')
 
-    expect(result).toContain('Status: budget_exhausted')
+      expect(result).toContain('Status: budget_exhausted')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
 
-    await rm(directory, { recursive: true, force: true })
+  test('per-round reviewer overage returns budget_exhausted', async () => {
+    const directory = await createGitFixture('per-round-reviewer', 'complex')
+    try {
+      const client = createMockClient([
+        'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts proves the bug\nFiles: src/fixture.ts',
+      ], 200)
+      const ctx = createContext(directory, {
+        harden: { ...defaultConfig.harden, tokenBudgetPerRound: 100, tokenBudgetTotal: 100000 },
+      }, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      expect(result).toContain('Status: budget_exhausted')
+      expect(result).toContain('reviewer')
+      expect(result).toContain('per-round budget')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('per-round executor overage returns budget_exhausted', async () => {
+    const directory = await createGitFixture('per-round-executor', 'complex')
+    try {
+      // Use per-call token counts: reviewer under 200 budget, executor over 200 budget
+      const perCallTokens = [150, 250]
+      let createCount = 0
+      let promptIndex = 0
+      const responses = [
+        'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts proves the bug\nFiles: src/fixture.ts',
+        'Root cause: value changed\nDiff: minimal patch applied\nVerify: rerun tests',
+      ]
+      const client = {
+        get promptCount() { return promptIndex },
+        session: {
+          create: async () => ({ id: `harden-session-${++createCount}` }),
+          prompt: async () => {
+            const idx = promptIndex++
+            const text = responses[idx] ?? 'NO_FINDINGS'
+            return {
+              data: {
+                parts: [{ type: 'text', text }],
+                info: {
+                  tokens: {
+                    input: perCallTokens[idx] ?? 100,
+                    output: 0,
+                    reasoning: 0,
+                    cache: { read: 0, write: 0 },
+                  },
+                },
+              },
+            }
+          },
+        },
+      }
+      const ctx = createContext(directory, {
+        harden: { ...defaultConfig.harden, tokenBudgetPerRound: 200, tokenBudgetTotal: 100000 },
+      }, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      expect(result).toContain('Status: budget_exhausted')
+      expect(result).toContain('executor')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('per-round under budget continues loop', async () => {
+    const directory = await createGitFixture('per-round-under', 'complex')
+    try {
+      const client = createMockClient([
+        'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts proves the bug\nFiles: src/fixture.ts',
+        'Root cause: value changed\nDiff: minimal patch applied\nVerify: rerun tests',
+        'NO_FINDINGS',
+      ], 100)
+      const ctx = createContext(directory, {
+        harden: { ...defaultConfig.harden, tokenBudgetPerRound: 50000, tokenBudgetTotal: 250000 },
+      }, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      expect(result).toContain('Status: pass')
+      expect(result).toContain('Rounds: 2')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('agent prompt payload is direct reviewer content without task invocation wrapper', async () => {
+    const directory = await createGitFixture('prompt-dedup', 'complex')
+    try {
+      const capturedTexts: string[] = []
+      let createCount = 0
+      let promptCount = 0
+      const client = {
+        session: {
+          create: async () => ({ id: `harden-session-${++createCount}` }),
+          prompt: async (options: unknown) => {
+            const payload = options && typeof options === 'object' ? options as { body?: { parts?: Array<{ text?: string }> } } : {}
+            const text = payload.body?.parts?.[0]?.text
+            if (text) capturedTexts.push(text)
+            promptCount += 1
+            return {
+              data: {
+                parts: [{ type: 'text', text: 'NO_FINDINGS' }],
+                info: {
+                  tokens: {
+                    input: 100,
+                    output: 0,
+                    reasoning: 0,
+                    cache: { read: 0, write: 0 },
+                  },
+                },
+              },
+            }
+          },
+        },
+      }
+      const ctx = createContext(directory, undefined, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      expect(result).toContain('Status: pass')
+      expect(promptCount).toBe(1)
+      expect(capturedTexts[0]).not.toContain('task(')
+      expect(capturedTexts[0]).not.toContain('prompt="See detailed prompt below."')
+      expect(capturedTexts[0]).toContain('You are the OpenFlow harden reviewer.')
+      expect(capturedTexts[0].match(/## Git Diff/g)?.length).toBe(1)
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('default harden scopes reviewer diff to files referenced by the feature plan', async () => {
+    const directory = await createGitFixture('scoped-diff', 'complex')
+    try {
+      await writeFile(join(directory, '.sisyphus', 'plans', 'feature-a.md'), [
+        '# Plan',
+        '- Implement harden fixture in `src/fixture.ts`.',
+      ].join('\n'), 'utf-8')
+      await writeFile(join(directory, 'src', 'unrelated.ts'), 'export const unrelated = "base"\n', 'utf-8')
+      runGit(directory, 'add', '.')
+      runGit(directory, '-c', 'user.name=OpenFlow Test', '-c', 'user.email=openflow@example.test', 'commit', '-m', 'add unrelated base')
+      await writeFile(join(directory, 'src', 'fixture.ts'), 'export const value = 3\nexport function scopedChange() { return value }\n', 'utf-8')
+      await writeFile(join(directory, 'src', 'unrelated.ts'), 'export const unrelated = "changed"\nexport function unrelatedChange() { return unrelated }\n', 'utf-8')
+
+      const capturedTexts: string[] = []
+      let createCount = 0
+      const client = {
+        session: {
+          create: async () => ({ id: `harden-session-${++createCount}` }),
+          prompt: async (options: unknown) => {
+            const payload = options && typeof options === 'object' ? options as { body?: { parts?: Array<{ text?: string }> } } : {}
+            const text = payload.body?.parts?.[0]?.text
+            if (text) capturedTexts.push(text)
+            return {
+              data: {
+                parts: [{ type: 'text', text: 'NO_FINDINGS' }],
+                info: {
+                  tokens: {
+                    input: 100,
+                    output: 0,
+                    reasoning: 0,
+                    cache: { read: 0, write: 0 },
+                  },
+                },
+              },
+            }
+          },
+        },
+      }
+      const ctx = createContext(directory, undefined, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      expect(result).toContain('Status: pass')
+      expect(capturedTexts[0]).toContain('src/fixture.ts')
+      expect(capturedTexts[0]).toContain('# omitted: src/unrelated.ts')
+      expect(capturedTexts[0]).not.toContain('unrelatedChange')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('full harden keeps unrelated diff blocks for explicit full review', async () => {
+    const directory = await createGitFixture('full-diff', 'complex')
+    try {
+      await writeFile(join(directory, '.sisyphus', 'plans', 'feature-a.md'), [
+        '# Plan',
+        '- Implement harden fixture in `src/fixture.ts`.',
+      ].join('\n'), 'utf-8')
+      await writeFile(join(directory, 'src', 'unrelated.ts'), 'export const unrelated = "base"\n', 'utf-8')
+      runGit(directory, 'add', '.')
+      runGit(directory, '-c', 'user.name=OpenFlow Test', '-c', 'user.email=openflow@example.test', 'commit', '-m', 'add unrelated base')
+      await writeFile(join(directory, 'src', 'fixture.ts'), 'export const value = 3\nexport function scopedChange() { return value }\n', 'utf-8')
+      await writeFile(join(directory, 'src', 'unrelated.ts'), 'export const unrelated = "changed"\nexport function unrelatedChange() { return unrelated }\n', 'utf-8')
+
+      const capturedTexts: string[] = []
+      let createCount = 0
+      const client = {
+        session: {
+          create: async () => ({ id: `harden-session-${++createCount}` }),
+          prompt: async (options: unknown) => {
+            const payload = options && typeof options === 'object' ? options as { body?: { parts?: Array<{ text?: string }> } } : {}
+            const text = payload.body?.parts?.[0]?.text
+            if (text) capturedTexts.push(text)
+            return {
+              data: {
+                parts: [{ type: 'text', text: 'NO_FINDINGS' }],
+                info: {
+                  tokens: {
+                    input: 100,
+                    output: 0,
+                    reasoning: 0,
+                    cache: { read: 0, write: 0 },
+                  },
+                },
+              },
+            }
+          },
+        },
+      }
+      const ctx = createContext(directory, undefined, client)
+
+      const result = await handleHarden(ctx, 'feature-a', { full: true })
+
+      expect(result).toContain('Status: pass')
+      expect(capturedTexts[0]).toContain('src/fixture.ts')
+      expect(capturedTexts[0]).toContain('src/unrelated.ts')
+      expect(capturedTexts[0]).toContain('unrelatedChange')
+    } finally {
+      await removeFixture(directory)
+    }
   })
 
   test('design ambiguity returns needs_human', async () => {
     const directory = await createGitFixture('ambiguity', 'complex')
-    const client = createMockClient([
-      'Level: design_ambiguity\nDescription: Design does not specify retry behavior\nEvidence: docs/changes/feature-a/design.md has no retry section\nFiles: docs/changes/feature-a/design.md',
-    ])
-    const ctx = createContext(directory, undefined, client)
+    try {
+      const client = createMockClient([
+        'Level: design_ambiguity\nDescription: Design does not specify retry behavior\nEvidence: docs/changes/feature-a/design.md has no retry section\nFiles: docs/changes/feature-a/design.md',
+      ])
+      const ctx = createContext(directory, undefined, client)
 
-    const result = await handleHarden(ctx, 'feature-a')
+      const result = await handleHarden(ctx, 'feature-a')
 
-    expect(result).toContain('Status: needs_human')
-    expect(result).toContain('design ambiguity')
-
-    await rm(directory, { recursive: true, force: true })
+      expect(result).toContain('Status: needs_human')
+      expect(result).toContain('design ambiguity')
+    } finally {
+      await removeFixture(directory)
+    }
   })
 })
