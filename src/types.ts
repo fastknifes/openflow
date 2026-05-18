@@ -87,12 +87,32 @@ export interface GuardianConfig {
 
 export type HardenFindingLevel = 'blocking_bug' | 'spec_violation' | 'regression_risk' | 'test_gap' | 'design_ambiguity' | 'style_or_preference'
 
+export type HardenFindingConfidence = 'high' | 'medium' | 'low'
+
+export type HardenFindingStatus = 'suspected' | 'confirmed' | 'fixed' | 'verified' | 'dismissed' | 'needs_decision'
+
+export type Disposition = 'must_fix' | 'accepted_known_issue' | 'design_divergence' | 'false_positive' | 'needs_decision' | 'superseded'
+
+export interface HardenTraceEntry {
+  round: number
+  agent: string
+  tokens: number
+  result: string
+  timestamp: string
+}
+
 export interface HardenFinding {
   level: HardenFindingLevel
   description: string
   evidence: string
   files: string[]
   lines?: string
+  id?: string
+  normalizedKey?: string
+  confidence?: HardenFindingConfidence
+  status?: HardenFindingStatus
+  disposition?: Disposition
+  repeatCount?: number
 }
 
 export interface HardenRoundResult {
@@ -102,13 +122,16 @@ export interface HardenRoundResult {
   fixDiff?: string
 }
 
-export type HardenStatus = 'pass' | 'pass_with_risks' | 'max_rounds_reached' | 'budget_exhausted' | 'needs_human' | 'rejected'
+export type HardenStatus = 'pass' | 'pass_with_risks' | 'max_rounds_reached' | 'budget_exhausted' | 'needs_human' | 'rejected' | 'review_inconclusive' | 'executor_blocked' | 'known_issues_accepted'
 
 export interface HardenResult {
   status: HardenStatus
   rounds: HardenRoundResult[]
   budgetConsumed: number
   summary: string
+  stopReason?: string
+  trace?: HardenTraceEntry[]
+  acceptedFindingsSummary?: string
 }
 
 export type HardenMode = 'quick' | 'standard' | 'deep'
@@ -443,6 +466,41 @@ export type GovernancePromotionStatus =
   | 'confirmed'
   | 'needs_decision'
   | 'blocked_unapproved'
+
+export type IssueWorkflowStatus =
+  | 'reported'
+  | 'investigating'
+  | 'classified'
+  | 'fixing'
+  | 'verifying'
+  | 'resolved'
+  | 'closed'
+
+export interface IssuePacketEvidence {
+  source: string
+  summary: string
+}
+
+export interface IssuePacket {
+  version: 1
+  slug: string
+  symptom: string
+  environment: 'local' | 'staging' | 'production'
+  status: IssueWorkflowStatus
+  classification: IssueClassification
+  confidence: 'low' | 'medium' | 'high'
+  evidence: IssuePacketEvidence[]
+  hypotheses: string[]
+  rootCause?: string
+  recommendedAction?: string
+  requiredChecks: string[]
+  fixSummary?: string
+  verificationEvidence?: string
+  residualRisk?: string
+  noFixNeededReason?: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface AcceptanceState {
   feature: string
