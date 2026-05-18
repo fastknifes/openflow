@@ -4,6 +4,7 @@ import { ZodError } from 'zod'
 import type { OpenFlowContext } from '../types.js'
 import { ensureChangeWorkspacePath } from '../config.js'
 import { clearRecentFeatureCompletion, markRecentFeatureCompletion } from '../hooks/feature-workflow.js'
+import { evaluateFeatureConvergence, detectFlowSignal } from '../phases/feature/convergence.js'
 import { buildRequirementModel } from '../phases/feature/constraint-derivation.js'
 import { renderDesignDocument } from '../phases/feature/design-renderer.js'
 import { renderBehaviorDocument } from '../phases/feature/behavior-renderer.js'
@@ -12,6 +13,7 @@ import { RequirementModelSchema } from '../phases/feature/requirement-model.js'
 import type { RequirementModel } from '../phases/feature/requirement-model.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
+import { deriveFeatureIdentity, findActiveFeature, findIncompleteFeatureSessions, type DerivedFeatureIdentity, type FeatureSessionCandidate } from '../utils/feature-resolver.js'
 import {
   applyFeatureAnswer,
   FeatureQuestion,
@@ -49,6 +51,11 @@ interface FeatureSessionIndex {
   bySessionID: Record<string, { feature: string; updatedAt: string }>
 }
 
+type FeatureResolution =
+  | { kind: 'resolved'; identity: DerivedFeatureIdentity }
+  | { kind: 'ambiguous'; candidates: FeatureSessionCandidate[] }
+  | { kind: 'missing' }
+
 export async function handleFeature(
   ctx: OpenFlowContext,
   feature?: string,
@@ -59,42 +66,52 @@ export async function handleFeature(
     return 'Feature design phase is disabled in configuration'
   }
 
-  const resolvedFeature = await resolveFeature(ctx.directory, feature, toolContext)
-  if (!resolvedFeature) {
+  const resolvedFeature = await resolveFeature(ctx, feature, toolContext)
+  if (resolvedFeature.kind === 'ambiguous') {
+    return formatFeatureDisambiguation(resolvedFeature.candidates)
+  }
+
+  if (resolvedFeature.kind === 'missing') {
     throw new OpenFlowError(
       ErrorCode.INVALID_INPUT,
-      'Feature name is required. Start with /openflow-feature <feature-name> or continue in the same session.'
+      'Describe the feature idea in natural language, or continue in a session that already has one active feature.'
     )
   }
 
-  const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
+  const sanitizedFeature = sanitizeFeatureName(resolvedFeature.identity.slug)
   let session = await loadFeatureSession(ctx.directory, sanitizedFeature)
+  session = mergeIdentity(session, resolvedFeature.identity)
   await bindSessionToFeature(ctx.directory, toolContext, sanitizedFeature)
   await clearRecentFeatureCompletion(ctx.directory, getToolSessionID(toolContext))
 
   if (session.workflowState === 'completed' && session.generatedDocs.length > 0) {
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, session)
-    return formatGenerationResultAll(sanitizedFeature, session.generatedDocs)
+    return formatGenerationResultAll(sanitizedFeature, session.generatedDocs, session.featureTitle)
   }
 
   if (answer?.trim()) {
     const messageID = getToolMessageID(toolContext)
     if (messageID && session.lastConsumedMessageId === messageID) {
-        const pendingQuestion = getPendingQuestion(session)
-        if (pendingQuestion) {
-          session = markQuestionPrompted(session, pendingQuestion.id)
+        const convergence = evaluateFeatureConvergence(session, answer)
+        if (convergence.kind === 'ask_next' && convergence.question) {
+          session = markQuestionPrompted(session, convergence.question.id)
           await saveFeatureSession(ctx.directory, session)
-          return formatQuestionPrompt(sanitizedFeature, session, pendingQuestion)
+          return formatQuestionPrompt(sanitizedFeature, session, convergence.question, convergence.rationale)
         }
 
-        if (shouldGenerateDesign(session)) {
+        if (shouldGenerateDesign(session) || convergence.kind !== 'ask_next') {
           return finalizeFeature(ctx, session, toolContext)
         }
 
-      return formatGenerationResultAll(sanitizedFeature, session.generatedDocs)
+      return formatGenerationResultAll(sanitizedFeature, session.generatedDocs, session.featureTitle)
     }
 
-    const validationError = validatePendingAnswer(session, answer)
+    const flowSignal = detectFlowSignal(answer)
+    if (flowSignal === 'product-level') {
+      session = { ...session, abstractionPreference: 'product' }
+    }
+
+    const validationError = flowSignal === 'none' ? validatePendingAnswer(session, answer) : undefined
     if (validationError) {
       const pendingQuestion = getPendingQuestion(session)
       if (!pendingQuestion) {
@@ -106,15 +123,44 @@ export async function handleFeature(
       return `${validationError}\n\n${formatQuestionPrompt(sanitizedFeature, session, pendingQuestion)}`
     }
 
-    session = applyFeatureAnswer(session, answer, messageID)
+    if (flowSignal === 'none') {
+      const selectedQuestion = evaluateFeatureConvergence(session, answer).question
+      if (selectedQuestion && selectedQuestion.id !== session.pendingQuestionId) {
+        session = markQuestionPrompted(session, selectedQuestion.id)
+      }
+    }
+
+    if (flowSignal === 'proceed') {
+      const pendingQuestion = getPendingQuestion(session)
+      session = {
+        ...session,
+        draftStatus: 'draft_with_assumptions',
+        skippedQuestionIds: pendingQuestion ? uniqueQuestionIds([...session.skippedQuestionIds, pendingQuestion.id]) : session.skippedQuestionIds,
+        assumptions: uniqueStrings([...session.assumptions, 'The user asked OpenFlow to proceed using current context and assumptions.']),
+        lastConsumedMessageId: messageID ?? session.lastConsumedMessageId,
+      }
+    } else {
+      session = applyFeatureAnswer(session, answer, messageID)
+    }
     await saveFeatureSession(ctx.directory, session)
   }
 
-  if (shouldGenerateDesign(session)) {
+  const convergence = evaluateFeatureConvergence(session, answer)
+  if (convergence.kind === 'ready_to_generate' || convergence.kind === 'draft_with_assumptions' || shouldGenerateDesign(session)) {
+    session = {
+      ...session,
+      workflowState: 'ready_to_generate',
+      promptMode: 'discussion',
+      pendingQuestionId: null,
+      draftStatus: convergence.kind === 'draft_with_assumptions' ? 'draft_with_assumptions' : session.draftStatus,
+      assumptions: uniqueStrings([...session.assumptions, ...convergence.assumptions]),
+      pendingConfirmations: uniqueStrings([...session.pendingConfirmations, ...convergence.pendingConfirmations]),
+    }
+    await saveFeatureSession(ctx.directory, session)
     return finalizeFeature(ctx, session, toolContext)
   }
 
-  const pendingQuestion = getPendingQuestion(session)
+  const pendingQuestion = convergence.question ?? getPendingQuestion(session)
   if (!pendingQuestion) {
     return finalizeFeature(ctx, session, toolContext)
   }
@@ -129,7 +175,7 @@ export async function handleFeature(
     }
   }
 
-  return formatQuestionPrompt(sanitizedFeature, session, pendingQuestion)
+  return formatQuestionPrompt(sanitizedFeature, session, pendingQuestion, convergence.rationale)
 }
 
 async function finalizeFeature(
@@ -140,14 +186,13 @@ async function finalizeFeature(
   const existingGenerated = session.generatedDocs[0]
   if (session.workflowState === 'completed' && existingGenerated) {
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, session)
-    return formatGenerationResultAll(session.feature, session.generatedDocs)
+    return formatGenerationResultAll(session.feature, session.generatedDocs, session.featureTitle, session.requirementModel)
   }
 
   try {
     const requirementModel = await prepareRequirementModel(
-      session.feature,
-      session.answers,
-      buildRequirementModel(session.feature, session.answers)
+      session,
+      buildSessionRequirementModel(session)
     )
     const generatingSession = markGenerating({
       ...session,
@@ -166,12 +211,12 @@ async function finalizeFeature(
         requirementModel: validatedModel,
         generatedDocs: allGeneratedDocs,
       },
-      designPath
+      allGeneratedDocs
     )
     await saveFeatureSession(ctx.directory, completedSession)
     await markRecentFeatureCompletion(ctx.directory, getToolSessionID(toolContext), completedSession.feature)
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, completedSession)
-    return formatGenerationResultAll(session.feature, completedSession.generatedDocs)
+    return formatGenerationResultAll(session.feature, completedSession.generatedDocs, completedSession.featureTitle, validatedModel)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const failedSession = markGenerationFailed(markGenerating(session), message)
@@ -181,11 +226,10 @@ async function finalizeFeature(
 }
 
 async function prepareRequirementModel(
-  feature: string,
-  answers: FeatureSession['answers'],
+  session: FeatureSession,
   seedModel?: RequirementModel,
 ): Promise<RequirementModel> {
-  const baseModel = seedModel ?? buildRequirementModel(feature, answers)
+  const baseModel = seedModel ?? buildSessionRequirementModel(session)
 
   try {
     const enrichedModel = await defaultSynthesizer.synthesize(baseModel)
@@ -219,18 +263,71 @@ async function askSingleQuestion(
   return normalizeInteractiveAnswer(answers[0])
 }
 
-async function resolveFeature(projectDir: string, feature: string | undefined, toolContext: unknown): Promise<string | undefined> {
+async function resolveFeature(ctx: OpenFlowContext, feature: string | undefined, toolContext: unknown): Promise<FeatureResolution> {
   if (feature?.trim()) {
-    return feature.trim()
+    const existingCandidate = await resolveExistingFeatureCandidate(ctx.directory, feature)
+    if (existingCandidate) {
+      return { kind: 'resolved', identity: existingCandidate }
+    }
+
+    return { kind: 'resolved', identity: deriveFeatureIdentity(feature) }
   }
 
   const sessionID = getToolSessionID(toolContext)
-  if (!sessionID) {
-    return undefined
+  if (sessionID) {
+    const index = await loadFeatureSessionIndex(ctx.directory)
+    const activeFeature = index.bySessionID[sessionID]?.feature
+    if (activeFeature) {
+      return { kind: 'resolved', identity: { slug: activeFeature } }
+    }
   }
 
-  const index = await loadFeatureSessionIndex(projectDir)
-  return index.bySessionID[sessionID]?.feature
+  const incompleteSessions = await findIncompleteFeatureSessions(ctx.directory)
+  if (incompleteSessions.length === 1) {
+    const candidate = incompleteSessions[0]!
+    return {
+      kind: 'resolved',
+      identity: {
+        slug: candidate.slug,
+        title: candidate.title,
+        sourceIntent: candidate.sourceIntent,
+      },
+    }
+  }
+
+  if (incompleteSessions.length > 1) {
+    return { kind: 'ambiguous', candidates: incompleteSessions.slice(0, 5) }
+  }
+
+  const activeFeature = await findActiveFeature(ctx)
+  if (activeFeature) {
+    return { kind: 'resolved', identity: { slug: activeFeature } }
+  }
+
+  return { kind: 'missing' }
+}
+
+async function resolveExistingFeatureCandidate(projectDir: string, selection: string): Promise<DerivedFeatureIdentity | undefined> {
+  const normalizedSelection = normalizeSelectionText(selection)
+  if (!normalizedSelection) return undefined
+
+  const candidates = await findIncompleteFeatureSessions(projectDir)
+  const matched = candidates.find((candidate) => {
+    const values = [candidate.slug, candidate.title, candidate.sourceIntent]
+      .map((value) => normalizeSelectionText(value ?? ''))
+      .filter(Boolean)
+
+    return values.some((value) => value === normalizedSelection)
+      || values.some((value) => value.includes(normalizedSelection) || normalizedSelection.includes(value))
+  })
+
+  if (!matched) return undefined
+
+  return {
+    slug: matched.slug,
+    title: matched.title,
+    sourceIntent: matched.sourceIntent,
+  }
 }
 
 async function loadFeatureSession(projectDir: string, feature: string): Promise<FeatureSession> {
@@ -250,6 +347,42 @@ async function saveFeatureSession(projectDir: string, session: FeatureSession): 
   session.updatedAt = new Date().toISOString()
   await fs.mkdir(sessionDir, { recursive: true })
   await fs.writeFile(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
+}
+
+function mergeIdentity(session: FeatureSession, identity: DerivedFeatureIdentity): FeatureSession {
+  return {
+    ...session,
+    featureTitle: session.featureTitle ?? identity.title,
+    sourceIntent: session.sourceIntent ?? identity.sourceIntent,
+  }
+}
+
+function buildSessionRequirementModel(session: FeatureSession): RequirementModel {
+  const answers: FeatureSession['answers'] = { ...session.answers }
+  if (!answers.problem && session.sourceIntent) {
+    answers.problem = session.sourceIntent
+  }
+  const model = buildRequirementModel(session.feature, answers)
+  return RequirementModelSchema.parse({
+    ...model,
+    featureTitle: session.featureTitle,
+    sourceIntent: session.sourceIntent,
+    convergenceStatus: session.draftStatus,
+    assumptions: session.assumptions,
+    pendingConfirmations: session.pendingConfirmations,
+  })
+}
+
+function uniqueQuestionIds(questionIds: FeatureQuestion['id'][]): FeatureQuestion['id'][] {
+  return [...new Set(questionIds)]
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function normalizeSelectionText(value: string): string {
+  return value.trim().toLowerCase().replace(/[`'"\s_-]+/g, '')
 }
 
 function getFeatureSessionPath(projectDir: string, feature: string): string {
@@ -375,7 +508,7 @@ async function generateDesignDocument(
   if (existingGenerated) {
     try {
       await fs.access(existingGenerated)
-      const existingModel = await prepareRequirementModel(session.feature, session.answers, session.requirementModel)
+      const existingModel = await prepareRequirementModel(session, session.requirementModel)
       const existingBehaviorPath = path.join(path.dirname(existingGenerated), 'behavior.md')
       await fs.access(existingBehaviorPath)
       return {
@@ -388,7 +521,7 @@ async function generateDesignDocument(
     }
   }
 
-  const validatedModel = await prepareRequirementModel(session.feature, session.answers, session.requirementModel)
+  const validatedModel = await prepareRequirementModel(session, session.requirementModel)
 
   const workspaceDir = await ensureChangeWorkspacePath(ctx.directory, session.feature)
   const relativeWorkspaceDir = path.relative(ctx.directory, workspaceDir)
@@ -434,41 +567,82 @@ function getToolMessageID(toolContext: unknown): string | undefined {
     : undefined
 }
 
-function formatQuestionPrompt(feature: string, session: FeatureSession, question: FeatureQuestion): string {
+function formatQuestionPrompt(feature: string, session: FeatureSession, question: FeatureQuestion, rationale?: string): string {
   const options = getRecommendedOptions(session, question)
     .map((option) => `- ${escapeMarkdown(option.label)}: ${escapeMarkdown(option.description)}`)
     .join('\n')
 
+  const explanation = rationale ? `
+
+Why this matters: ${escapeMarkdown(rationale)}` : ''
+
   return `## Feature Question
 
-Feature: ${escapeMarkdown(feature)}
+Feature: ${escapeMarkdown(session.featureTitle ?? feature)}
+Internal slug: \`${escapeMarkdown(feature)}\`
 
 ### ${escapeMarkdown(question.header)}
-${escapeMarkdown(question.question)}
+${escapeMarkdown(question.question)}${explanation}
 
 Options:
 ${options}
 
 Reply with your answer through the question picker when available.
-Otherwise continue with \`/openflow-feature ${escapeMarkdown(feature)}\`
-and provide the next answer in the same session.
+Otherwise continue with natural language in the same session. You can also say “跳过” or “先生成草稿”.
 
 Progress:
-- answered ${Object.keys(session.answers).length}/5
+- known facts ${Object.keys(session.answers).length}
 - next question id: \`${escapeMarkdown(question.id)}\``
 }
 
-function formatGenerationResultAll(feature: string, generatedPaths: string[]): string {
+function formatFeatureDisambiguation(candidates: FeatureSessionCandidate[]): string {
+  const options = candidates
+    .map((candidate, index) => `${index + 1}. ${escapeMarkdown(candidate.title ?? candidate.sourceIntent ?? candidate.slug)} (\`${escapeMarkdown(candidate.slug)}\`)`)
+    .join('\n')
+
+  return `## Feature Selection Needed
+
+I found multiple unfinished feature ideas. Which one should /openflow-feature continue?
+
+${options}
+
+Reply with the feature idea or a short natural-language description; you do not need to type a slug.`
+}
+
+function formatGenerationResultAll(feature: string, generatedPaths: string[], title?: string, model?: RequirementModel): string {
   const paths = generatedPaths.length > 0
     ? generatedPaths.map((p) => `- \`${escapeMarkdown(p)}\``).join('\n')
     : '- (no documents generated)'
+  const consensus = model?.problemStatement ?? model?.sourceIntent ?? title ?? feature
+  const assumptions = model?.assumptions?.length
+    ? model.assumptions.map((item) => `- ${escapeMarkdown(item)}`).join('\n')
+    : '- None recorded.'
+  const pending = model?.pendingConfirmations?.length
+    ? model.pendingConfirmations.map((item) => `- ${escapeMarkdown(item)}`).join('\n')
+    : '- None recorded.'
+  const constraints = model?.constraints?.length
+    ? model.constraints.map((constraint) => `- ${escapeMarkdown(constraint.description)}`).join('\n')
+    : '- None recorded.'
 
   return `## Feature Design Complete
 
 Feature: ${escapeMarkdown(feature)}
+${title ? `Title: ${escapeMarkdown(title)}\n` : ''}
+Consensus: ${escapeMarkdown(consensus)}
 
 Generated documents:
-${paths}`
+${paths}
+
+Assumptions:
+${assumptions}
+
+Pending confirmations:
+${pending}
+
+Constraints:
+${constraints}
+
+Suggested next step: review the generated documents, then run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` if you want an implementation plan.`
 }
 
 function formatGenerationFailure(feature: string, message: string): string {

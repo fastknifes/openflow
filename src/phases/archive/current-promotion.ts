@@ -126,14 +126,7 @@ export async function buildPromotionSuggestions(
       continue
     }
 
-    if (!sourceExists && directTargetExists) {
-      suggestions.push({
-        type: 'REMOVE',
-        targetArea: area.area,
-        targetPath: directTargetPath,
-        reason: `${area.area} does not exist in archive but exists in current`,
-      })
-    }
+
   }
 
   return suggestions

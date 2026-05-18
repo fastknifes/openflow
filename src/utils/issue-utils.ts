@@ -1,9 +1,26 @@
 import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
 import { resolveChangeUnitDir } from './change-units.js'
+import type { IssueClassification, IssuePacket, IssueWorkflowStatus } from '../types.js'
 
 export const ISSUE_CLARIFICATION_FILENAME = 'issue-clarification.md'
+export const ISSUE_PACKET_FILENAME = 'issue-packet.json'
 export const PROMOTION_CANDIDATE_FILENAME = 'promotion-candidate.md'
 export const ISSUE_RESOLUTION_FILENAME = 'issue-resolution.md'
+
+const ISSUE_CLASSIFICATIONS: readonly IssueClassification[] = [
+  'bugfix',
+  'data_issue',
+  'config_issue',
+  'environment_issue',
+  'doc_ambiguity',
+  'behavior_change',
+  'cannot_determine',
+]
+
+function isIssueClassification(value: unknown): value is IssueClassification {
+  return typeof value === 'string' && ISSUE_CLASSIFICATIONS.includes(value as IssueClassification)
+}
 
 /**
  * Derive a safe filesystem slug from raw text.
@@ -54,6 +71,81 @@ export function resolveIssueWorkspace(
   const workspacePath = `${ctx.directory}${ctx.directory.endsWith('/') || ctx.directory.endsWith('\\') ? '' : '/'}docs/changes/${workspaceName}`
 
   return { slug, workspacePath }
+}
+
+export function buildIssuePacket(input: {
+  slug: string
+  symptom: string
+  environment?: 'local' | 'staging' | 'production'
+  status?: IssueWorkflowStatus
+  classification?: IssueClassification
+  now?: string
+}): IssuePacket {
+  const now = input.now ?? new Date().toISOString()
+  const classification = input.classification ?? 'cannot_determine'
+
+  return {
+    version: 1,
+    slug: input.slug,
+    symptom: input.symptom || input.slug,
+    environment: input.environment ?? 'local',
+    status: input.status ?? 'reported',
+    classification,
+    confidence: classification === 'cannot_determine' ? 'low' : 'medium',
+    evidence: input.symptom
+      ? [{ source: 'user_report', summary: input.symptom }]
+      : [],
+    hypotheses: classification === 'cannot_determine'
+      ? ['Issue category is not confirmed yet. Gather code, docs, logs, reproduction, or configuration evidence before routing.']
+      : [`Issue classified as ${classification}.`],
+    recommendedAction: classification === 'cannot_determine'
+      ? 'Continue read-only investigation and classify before fixing.'
+      : 'Proceed according to the confirmed classification and verify with openflow-quality-gate.',
+    requiredChecks: ['openflow-quality-gate'],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export async function readIssuePacket(workspacePath: string): Promise<IssuePacket | null> {
+  try {
+    const raw = await fs.readFile(path.join(workspacePath, ISSUE_PACKET_FILENAME), 'utf-8')
+    const parsed = JSON.parse(raw) as Partial<IssuePacket>
+    if (parsed.version !== 1 || !parsed.slug || !isIssueClassification(parsed.classification) || !parsed.status) {
+      return null
+    }
+    const now = new Date().toISOString()
+    const packet: IssuePacket = {
+      version: 1,
+      slug: parsed.slug,
+      symptom: parsed.symptom ?? parsed.slug,
+      environment: parsed.environment ?? 'local',
+      status: parsed.status,
+      classification: parsed.classification,
+      confidence: parsed.confidence ?? (parsed.classification === 'cannot_determine' ? 'low' : 'medium'),
+      evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
+      hypotheses: Array.isArray(parsed.hypotheses) ? parsed.hypotheses : [],
+      requiredChecks: Array.isArray(parsed.requiredChecks) ? parsed.requiredChecks : [],
+      createdAt: parsed.createdAt ?? now,
+      updatedAt: parsed.updatedAt ?? parsed.createdAt ?? now,
+    }
+    if (parsed.rootCause !== undefined) packet.rootCause = parsed.rootCause
+    if (parsed.recommendedAction !== undefined) packet.recommendedAction = parsed.recommendedAction
+    if (parsed.fixSummary !== undefined) packet.fixSummary = parsed.fixSummary
+    if (parsed.verificationEvidence !== undefined) packet.verificationEvidence = parsed.verificationEvidence
+    if (parsed.residualRisk !== undefined) packet.residualRisk = parsed.residualRisk
+    if (parsed.noFixNeededReason !== undefined) packet.noFixNeededReason = parsed.noFixNeededReason
+    return packet
+  } catch {
+    return null
+  }
+}
+
+export async function writeIssuePacket(workspacePath: string, packet: IssuePacket): Promise<string> {
+  await fs.mkdir(workspacePath, { recursive: true })
+  const packetPath = path.join(workspacePath, ISSUE_PACKET_FILENAME)
+  await fs.writeFile(packetPath, `${JSON.stringify(packet, null, 2)}\n`, 'utf-8')
+  return packetPath
 }
 
 export type IssueMode = 'feature' | 'issue' | 'mixed'

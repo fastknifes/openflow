@@ -99,6 +99,10 @@ function createMockErrorHarden(callLog: CallLog): () => Promise<string> {
   }
 }
 
+function createMockHardenStatus(status: string): () => Promise<string> {
+  return async () => `## Harden Result\n\nStatus: ${status}\nRounds: 1\nBudget consumed: 67151\nSummary: mock harden status ${status}`
+}
+
 // ── Fixture factories ──────────────────────────────────────────────────────
 
 async function createGitFixture(name: string, diffKind: 'trivial' | 'multi-file' | 'no-diff'): Promise<string> {
@@ -260,6 +264,43 @@ describe('handleQualityGate', () => {
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
 
+  test('feature-scoped risk ignores unrelated workspace changes', async () => {
+    const directory = await createGitFixture('scoped-risk', 'no-diff')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    await writeFile(join(directory, '.sisyphus', 'plans', `${FEATURE_A}.md`), [
+      '# Plan',
+      '',
+      '- Implement `src/app.ts` only.',
+      '',
+    ].join('\n'), 'utf-8')
+    runGit(directory, 'add', '.sisyphus/plans/feature-a.md')
+    runGit(directory, 'commit', '-m', 'record scoped plan')
+
+    await writeFile(join(directory, 'src', 'app.ts'), 'export const appVersion = "1.0"\n// feature scoped update\n', 'utf-8')
+    await writeFile(join(directory, 'src', 'util.ts'), 'export const helper = () => 84\n', 'utf-8')
+    await writeFile(join(directory, 'src', 'index.ts'), 'export { appVersion } from "./app"\n', 'utf-8')
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(callLog.order).not.toContain('harden')
+    expect(callLog.order).toContain('verify')
+    expect(output).toContain('`low`')
+    expect(output).toContain('- **Changed Files**: 1 file(s)')
+    expect(output).toContain('`src/app.ts`')
+    expect(output).toContain('- **Scoped Out Files**: 2 unrelated file(s) omitted from risk and freshness checks')
+    expect(output).toContain('`src/index.ts`')
+    expect(output).toContain('`src/util.ts`')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
   // ── sessionID propagation: harden receives sessionID from args ─────────────
 
   test('high-risk change passes sessionID through to overrideHarden', async () => {
@@ -411,6 +452,164 @@ describe('handleQualityGate', () => {
 
     // Harden status shows error
     expect(output).toContain('`error`')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('budget-exhausted harden with no findings does not block ready verify output', async () => {
+    const directory = await createGitFixture('harden-budget-blocks-ready', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: budget_exhausted
+Rounds: 1
+Budget consumed: 67151
+Summary: reviewer consumed 67151 tokens in round 1, exceeding per-round budget.
+
+### Round 1
+No findings.`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('`budget_exhausted`')
+    expect(output).not.toContain('Harden Gate')
+    expect(output).toContain('`ready`')
+    expect(output).toContain('ready for archive')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('needs-human harden maps final readiness to needs decision', async () => {
+    const directory = await createGitFixture('harden-needs-human-blocks-ready', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHardenStatus('needs_human'),
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('`needs_human`')
+    expect(output).toContain('Harden Gate')
+    expect(output).toContain('`needs_decision`')
+    expect(output).toContain('Resolve the blocking decision')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('budget_exhausted with unresolved must_fix stays not_ready and reports the blocking finding', async () => {
+    const directory = await createGitFixture('harden-budget-unresolved-must-fix', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: budget_exhausted
+Rounds: 2
+Budget consumed: 120000
+Summary: reviewer hit the token budget with one unresolved blocking finding remaining.
+
+### Findings Summary
+- H-001 | disposition=must_fix | status=confirmed | level=blocking_bug | files=src/app.ts`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('`budget_exhausted`')
+    expect(output).toContain('`not_ready`')
+    expect(output).toContain('unresolved harden finding `H-001` requires fix before archive')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('budget_exhausted with all findings disposed maps to ready_with_doc_updates after verify passes', async () => {
+    const directory = await createGitFixture('harden-budget-all-disposed', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: budget_exhausted
+Rounds: 2
+Budget consumed: 120000
+Summary: token budget ended after all findings received a terminal disposition.
+
+### Findings Summary
+- H-101 | disposition=accepted_known_issue | status=confirmed | archive_effect=doc_update_required | evidence=EV-VERIFY-001
+- H-102 | disposition=false_positive | status=dismissed | archive_effect=non_blocking | evidence=EV-REVIEW-002`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('`budget_exhausted`')
+    expect(output).toContain('`ready_with_doc_updates`')
+    expect(output).toContain('Known Issues')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('max_rounds_reached with unresolved design_divergence maps to needs_decision', async () => {
+    const directory = await createGitFixture('harden-max-rounds-design-divergence', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: max_rounds_reached
+Rounds: 5
+Budget consumed: 180000
+Summary: review stopped at max rounds with one unresolved design divergence.
+
+### Findings Summary
+- H-201 | disposition=design_divergence | status=needs_decision | level=design_ambiguity | files=src/app.ts`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('`max_rounds_reached`')
+    expect(output).toContain('`needs_decision`')
+    expect(output).toContain('Resolve design-divergence finding `H-201` before archive')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('accepted_known_issue with verify pass reports Known Issues and maps to ready_with_doc_updates', async () => {
+    const directory = await createGitFixture('harden-accepted-known-issue', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: pass_with_risks
+Rounds: 2
+Budget consumed: 64000
+Summary: one design divergence was accepted as a known issue after verify evidence passed.
+
+### Findings Summary
+- H-301 | disposition=accepted_known_issue | status=confirmed | archive_effect=doc_update_required | rationale=MVP behavior is acceptable for Wave 1 | evidence=EV-DESIGN-001,EV-VERIFY-001`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('`ready_with_doc_updates`')
+    expect(output).toContain('Known Issues')
+    expect(output).toContain('H-301')
+    expect(output).toContain('EV-DESIGN-001')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -682,4 +881,158 @@ describe('handleQualityGate', () => {
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
+
+  // ── Stale evidence preserves accepted failures ────────────────────────────
+
+  test('stale evidence re-verify preserves acceptedFailures from acceptance state', async () => {
+    const directory = await createGitFixture('stale-accepted', 'trivial')
+    const callLog: CallLog = { order: [] }
+    const capture: { acceptFailures?: boolean } = {}
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    // Save acceptance state with stale evidence AND acceptedFailures: true
+    await saveAcceptanceState(directory, {
+      feature: FEATURE_A,
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+      acceptedFailures: true,
+      readiness: 'ready',
+      verifyResult: {
+        readiness: 'ready' as const,
+        reasonCodes: ['behavior_evidence_incomplete'],
+        evidenceSummary: 'Accepted with stale evidence.',
+        constraintsChecked: ['test'],
+        verifiedAt: '2020-01-01T00:00:00.000Z',
+      },
+      evidenceFreshness: {
+        gitHead: '0000000000000000000000000000000000000000', // stale
+        changedFiles: ['some-other-file.ts'],
+        diffHash: 'deadbeef',
+        recordedAt: '2020-01-01T00:00:00.000Z',
+        evidenceChecks: ['test'],
+        evidenceSummary: 'Old stale evidence.',
+      },
+    })
+
+    // Mock verify that captures acceptFailures
+    const mockVerify = async (_ctx: OpenFlowContext, _feature?: string, acceptFailures?: boolean): Promise<string> => {
+      callLog.order.push('verify')
+      capture.acceptFailures = acceptFailures
+      return [
+        '## Verify',
+        'Feature: mock',
+        '',
+        '### Evidence',
+        '- checks_run:',
+        '  - active_feature_resolution ✅ (mock)',
+        '- observed_behavior_summary: mock stale-accepted verify',
+        '- intended_vs_actual_delta: no delta',
+        '- doc_alignment_summary: mock',
+        '- current_decisions_conflict_summary: no conflicts',
+        '- known_risks_or_missing_evidence: none',
+        '',
+        '### Readiness',
+        '- status: ready',
+        '- reason_codes: all_checks_passed',
+        '- reason: mock passed',
+        '- next_step: proceed',
+        '',
+      ].join('\n')
+    }
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: mockVerify,
+    })
+
+    // Freshness section should indicate stale
+    expect(output).toContain('Evidence Freshness')
+    expect(output).toContain('Stale')
+
+    // Verify was called (stale evidence forces re-run)
+    expect(callLog.order).toContain('verify')
+
+    // acceptFailures was passed as true — preserving the accepted state
+    expect(capture.acceptFailures).toBe(true)
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  // ── Stale evidence without acceptedFailures passes undefined ──────────────
+
+  test('stale evidence without acceptedFailures passes undefined acceptFailures', async () => {
+    const directory = await createGitFixture('stale-no-accepted', 'trivial')
+    const callLog: CallLog = { order: [] }
+    const capture: { acceptFailures?: boolean } = {}
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    // Save acceptance state with stale evidence but NO acceptedFailures
+    await saveAcceptanceState(directory, {
+      feature: FEATURE_A,
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+      readiness: 'ready',
+      verifyResult: {
+        readiness: 'ready' as const,
+        reasonCodes: ['all_checks_passed'],
+        evidenceSummary: 'Old evidence.',
+        constraintsChecked: ['test'],
+        verifiedAt: '2020-01-01T00:00:00.000Z',
+      },
+      evidenceFreshness: {
+        gitHead: '0000000000000000000000000000000000000000',
+        changedFiles: ['old-file.ts'],
+        diffHash: 'cafebabe',
+        recordedAt: '2020-01-01T00:00:00.000Z',
+        evidenceChecks: ['test'],
+        evidenceSummary: 'Old evidence.',
+      },
+    })
+
+    const mockVerify = async (_ctx: OpenFlowContext, _feature?: string, acceptFailures?: boolean): Promise<string> => {
+      callLog.order.push('verify')
+      capture.acceptFailures = acceptFailures
+      return [
+        '## Verify',
+        'Feature: mock',
+        '',
+        '### Evidence',
+        '- checks_run:',
+        '  - active_feature_resolution ✅ (mock)',
+        '- observed_behavior_summary: mock stale verify',
+        '- intended_vs_actual_delta: no delta',
+        '- doc_alignment_summary: mock',
+        '- current_decisions_conflict_summary: no conflicts',
+        '- known_risks_or_missing_evidence: none',
+        '',
+        '### Readiness',
+        '- status: ready',
+        '- reason_codes: all_checks_passed',
+        '- reason: mock passed',
+        '- next_step: proceed',
+        '',
+      ].join('\n')
+    }
+
+    await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: mockVerify,
+    })
+
+    // acceptFailures should be undefined — no previous accept to preserve
+    expect(capture.acceptFailures).toBeUndefined()
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
 })
+
+// type references for TS compiler
+const _typeCheck: QualityGateArgs = { feature: 'test' }
+void _typeCheck

@@ -14,7 +14,7 @@ import {
   type DisposalMode,
   VALID_STAGE_TRANSITIONS,
   STAGE_ORDER,
-} from './types'
+} from './types.js'
 
 // ============================================================================
 // State Creation

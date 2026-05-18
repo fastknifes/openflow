@@ -21,11 +21,20 @@ This skill enables natural, collaborative dialogue for exploring requirements, c
 
 ## How To Brainstorm
 
-1. **Check project context first.** Read \`docs/current/\` and any relevant code before responding. Understand what already exists so suggestions are grounded in reality.
+1. **Ground lightly when needed.** If the user provides sufficient context, respond to that context directly first. Only read docs or code when a concrete factual claim must be verified, or when the discussion depends on current implementation details.
 2. **Ask one question at a time.** Do not overwhelm the user with a long questionnaire. Each answer should naturally lead to the next question.
 3. **Prefer multiple choice.** When possible, offer 2-3 options rather than open-ended prompts. This keeps the dialogue focused and helps the user think concretely.
 4. **Assess scope early.** If the idea is too large for a single feature, help decompose it into smaller, independently valuable pieces.
 5. **Be flexible.** If something does not make sense, go back and clarify. Do not assume — ask.
+
+## Interaction Style
+
+- Start by reflecting the user's proposal and giving an initial judgment.
+- When the user provides a broad proposal, first summarize the architectural judgment across 2-3 key dimensions before narrowing to one follow-up question.
+- Prefer synthesis, trade-off framing, and one focused follow-up question.
+- Do not turn brainstorming into code audit, implementation planning, or verification.
+- Do not launch background agents or exhaustive searches for ordinary brainstorming unless the user explicitly asks for evidence-heavy investigation.
+- If global instructions request exhaustive search, apply them only when the user's current request actually depends on broad evidence gathering.
 
 ## Exploring Approaches
 

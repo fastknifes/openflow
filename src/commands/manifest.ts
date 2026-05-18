@@ -1,0 +1,72 @@
+export interface OpenFlowCommandMetadata {
+  name: string
+  description: string
+}
+
+export const OPENFLOW_TOOL_COMMANDS = {
+  init: {
+    name: 'openflow-init',
+    description: 'Initialize or refresh the root AGENTS.md with OpenFlow docs navigation guide',
+  },
+  writingPlan: {
+    name: 'openflow-writing-plan',
+    description: 'OpenFlow writing-plan command for development plan generation guidance',
+  },
+  feature: {
+    name: 'openflow-feature',
+    description: 'OpenFlow feature command for natural-language design clarification. Starts or continues feature design without requiring a user-provided slug; feature identity is resolved from context or description.',
+  },
+  issue: {
+    name: 'openflow-issue',
+    description: 'OpenFlow issue investigation command. Starts or resumes structured issue packets for uncertain problems before routing to fix, feature, data, config, or environment actions.',
+  },
+  archive: {
+    name: 'openflow-archive',
+    description: 'OpenFlow archive command. Archives a completed feature/issue — copies design docs, generates implementation-mapper.md, promotes current facts, and cleans up build data. Requires verify readiness.',
+  },
+  qualityGate: {
+    name: 'openflow-quality-gate',
+    description: 'Quality Gate executed after code changes or bug fixes. AI should call openflow-quality-gate and not claim completion until readiness is returned.',
+  },
+  migrateDocs: {
+    name: 'openflow-migrate-docs',
+    description: 'Migrate documentation from other workflow tools into OpenFlow docs structure',
+  },
+} as const satisfies Record<string, OpenFlowCommandMetadata>
+
+export const OPENFLOW_COMMAND_FILES: readonly OpenFlowCommandMetadata[] = [
+  OPENFLOW_TOOL_COMMANDS.feature,
+  {
+    name: 'openflow-change',
+    description: 'OpenFlow change command for feature workspace management',
+  },
+  {
+    name: OPENFLOW_TOOL_COMMANDS.init.name,
+    description: 'OpenFlow init command for initializing AGENTS.md with docs guide',
+  },
+  {
+    name: OPENFLOW_TOOL_COMMANDS.archive.name,
+    description: 'OpenFlow archive command for completed features',
+  },
+  {
+    name: 'openflow-status',
+    description: 'OpenFlow status command',
+  },
+  {
+    name: 'openflow-config',
+    description: 'OpenFlow config command',
+  },
+  OPENFLOW_TOOL_COMMANDS.migrateDocs,
+  {
+    name: OPENFLOW_TOOL_COMMANDS.issue.name,
+    description: 'OpenFlow issue clarification and triage command for uncertain problems',
+  },
+]
+
+export const OPENFLOW_REGISTERED_SKILL_NAMES = [
+  'openflow-writing-plan',
+  'openflow-brainstorm',
+  'openflow-quality-gate',
+  'openflow-ai-reflection',
+  'openflow-issue',
+] as const

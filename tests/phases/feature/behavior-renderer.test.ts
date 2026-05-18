@@ -255,6 +255,23 @@ describe('renderBehaviorDocument', () => {
     expect(markdown).toContain('**Problem statement:** Current flow lacks clear completion indicators')
     expect(markdown).toContain('- The target user is: project managers')
   })
+
+  test('omits feature-command-specific rules for unrelated features', () => {
+    const model: RequirementModel = {
+      feature: 'report-export',
+      constraints: [],
+      scopeBoundary: { inScope: ['CSV report export'], outOfScope: [] },
+      acceptanceCriteria: [{ id: 'ac-001', description: 'User downloads a CSV report' }],
+      goals: ['Export reports for finance users'],
+      nonGoals: [],
+    }
+
+    const markdown = renderBehaviorDocument(model)
+
+    expect(markdown).not.toContain('## Feature Command Behavior')
+    expect(markdown).not.toContain('/openflow-feature')
+    expect(markdown).not.toContain('Feature name is too short after sanitization')
+  })
 })
 
 test('rejects implementation-mechanics leakage in generated text', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { handleArchive } from '../../src/commands/archive.js'
-import { defaultConfig, type OpenFlowContext, VerifyReadinessStatus } from '../../src/types.js'
+import { defaultConfig, type AcceptanceState, type OpenFlowContext, VerifyReadinessStatus } from '../../src/types.js'
 import { join } from 'node:path'
 import { mkdir, rm, writeFile, access, readFile, readdir } from 'node:fs/promises'
 import { loadAcceptanceState, saveAcceptanceState } from '../../src/utils/acceptance-state.js'
@@ -17,6 +17,32 @@ function createContext(configOverride?: Partial<typeof defaultConfig>): OpenFlow
     },
     enhancedPlans: new Set<string>(),
   }
+}
+
+type FutureHardenTerminalSummary = {
+  status: string
+  stopReason: string
+  unresolvedMustFixCount: number
+  unresolvedNeedsDecisionCount: number
+  acceptedKnownIssueCount: number
+}
+
+type FutureAcceptedKnownIssueSummary = {
+  findingId: string
+  disposition: 'accepted_known_issue' | 'design_divergence'
+  rationale: string
+  archiveEffect: 'non_blocking' | 'doc_update_required' | 'decision_required'
+  evidenceRefs: string[]
+  verifyStatus: string
+}
+
+type FutureAcceptanceState = AcceptanceState & {
+  hardenTerminalSummary?: FutureHardenTerminalSummary
+  acceptedKnownIssues?: FutureAcceptedKnownIssueSummary[]
+}
+
+async function saveFutureAcceptanceState(testDir: string, state: FutureAcceptanceState): Promise<void> {
+  await saveAcceptanceState(testDir, state as AcceptanceState)
 }
 
 async function resolveArchiveDir(testDir: string, feature: string): Promise<string> {
@@ -545,6 +571,124 @@ describe('archive command', () => {
 
     const archiveDir = await resolveArchiveDir(testDir, feature)
     await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('allows archive when verify passed and accepted known issues are recorded in harden summary', async () => {
+    const feature = 'readiness-accepted-known-issues'
+    const testDir = join(process.cwd(), '.test-archive-readiness-accepted-known-issues')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+    })
+
+    await saveFutureAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+      verifyResult: {
+        readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+        reasonCodes: ['known_issues_accepted'],
+        evidenceSummary: 'Verify passed with one accepted known issue.',
+        constraintsChecked: ['test', 'typecheck'],
+        verifiedAt: '2026-04-21T01:00:00.000Z',
+      },
+      hardenTerminalSummary: {
+        status: 'budget_exhausted',
+        stopReason: 'known_issues_accepted',
+        unresolvedMustFixCount: 0,
+        unresolvedNeedsDecisionCount: 0,
+        acceptedKnownIssueCount: 1,
+      },
+      acceptedKnownIssues: [
+        {
+          findingId: 'H-401',
+          disposition: 'accepted_known_issue',
+          rationale: 'Wave 1 keeps the current MVP divergence and records it for follow-up docs.',
+          archiveEffect: 'doc_update_required',
+          evidenceRefs: ['EV-DESIGN-001', 'EV-VERIFY-001'],
+          verifyStatus: 'ready',
+        },
+      ],
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+    expect(result).toContain('Known issues accepted: ✅')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks archive when harden summary still contains unresolved must-fix findings', async () => {
+    const feature = 'readiness-harden-unresolved-must-fix'
+    const testDir = join(process.cwd(), '.test-archive-harden-unresolved-must-fix')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.Ready,
+    })
+
+    await saveFutureAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+      verifyResult: {
+        readiness: VerifyReadinessStatus.Ready,
+        reasonCodes: ['all_checks_passed'],
+        evidenceSummary: 'Verify passed but harden still has one unresolved must-fix finding.',
+        constraintsChecked: ['test', 'typecheck'],
+        verifiedAt: '2026-04-21T01:00:00.000Z',
+      },
+      hardenTerminalSummary: {
+        status: 'budget_exhausted',
+        stopReason: 'token_budget_exhausted',
+        unresolvedMustFixCount: 1,
+        unresolvedNeedsDecisionCount: 0,
+        acceptedKnownIssueCount: 0,
+      },
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('unresolved harden must-fix findings')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks archive with explicit reason when harden summary requires decision', async () => {
+    const feature = 'readiness-harden-needs-decision'
+    const testDir = join(process.cwd(), '.test-archive-harden-needs-decision')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.Ready,
+    })
+
+    await saveFutureAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+      verifyResult: {
+        readiness: VerifyReadinessStatus.Ready,
+        reasonCodes: ['all_checks_passed'],
+        evidenceSummary: 'Verify passed but harden ended with an unresolved design decision.',
+        constraintsChecked: ['test', 'typecheck'],
+        verifiedAt: '2026-04-21T01:00:00.000Z',
+      },
+      hardenTerminalSummary: {
+        status: 'max_rounds_reached',
+        stopReason: 'needs_decision',
+        unresolvedMustFixCount: 0,
+        unresolvedNeedsDecisionCount: 1,
+        acceptedKnownIssueCount: 0,
+      },
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('harden summary requires decision')
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -1256,6 +1400,209 @@ Enforce synchronous cache invalidation barrier after write commit.
 
     expect(result).toContain('Archive Complete')
     expect(result).toContain(`**Feature**: ${targetFeature}`)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('rollback on mid-pipeline failure leaves no partial archive and preserves source workspace', async () => {
+    const testDir = join(process.cwd(), '.test-archive-rollback')
+    await rm(testDir, { recursive: true, force: true })
+
+    const feature = 'rollback-feature'
+
+    // Create changes workspace with valid design.md
+    const changeDir = join(testDir, 'docs', 'changes', feature)
+    await mkdir(changeDir, { recursive: true })
+    await writeFile(join(changeDir, 'design.md'), '# Design\n\nRollback test design content', 'utf-8')
+
+    // FAILURE INJECTION: create plan.md as a DIRECTORY instead of a file.
+    // When handleArchive reaches fs.copyFile(sourceChangePlanPath, ...),
+    // it will throw EISDIR (or ENOTSUP on some platforms) — a deterministic mid-pipeline failure.
+    // The plan.md path comes from getChangePlansPath() which returns
+    //   <changeWorkspace>/plan.md.
+    // fileExists() uses fs.access() which succeeds on directories, so
+    // changePlanExists will be true, triggering the copyFile that throws.
+    await mkdir(join(changeDir, 'plan.md'), { recursive: true })
+
+    // Create .sisyphus/plans plan file
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', `${feature}.md`), '# Plan\n\nRollback test plan', 'utf-8')
+
+    // Create build data with a file change
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260517-000001'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260517-000001', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/rollback.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    // Save acceptance state with Ready readiness
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-17T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.Ready,
+      pendingDocUpdates: [],
+    })
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    // Run archive — it should throw or fail due to the plan.md directory injection
+    let threw = false
+    try {
+      await handleArchive(ctx, feature)
+    } catch {
+      threw = true
+    }
+
+    // P0: DESIRED behavior — NO archive directory should exist for the feature.
+    // The current code creates the archive dir before copying, so on failure
+    // a partial archive may remain. This assertion will FAIL on current code.
+    const archiveRoot = join(testDir, 'docs', 'archive')
+    let archiveDirExists = false
+    try {
+      const entries = await readdir(archiveRoot, { withFileTypes: true })
+      archiveDirExists = entries.some(e => e.isDirectory() && e.name.includes(feature))
+    } catch {
+      // archiveRoot doesn't exist — that's acceptable
+    }
+    expect(archiveDirExists).toBe(false)
+
+    // DESIRED: The change workspace design.md should still exist (source NOT deleted)
+    await expect(access(join(changeDir, 'design.md'))).resolves.toBeNull()
+
+    // DESIRED: No .staging-* directories remain in the archive root
+    let stagingExists = false
+    try {
+      const entries = await readdir(archiveRoot, { withFileTypes: true })
+      stagingExists = entries.some(e => e.name.startsWith('.staging-'))
+    } catch {
+      // archiveRoot doesn't exist — no staging possible
+    }
+    expect(stagingExists).toBe(false)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('issue-only archive preserves pre-existing current docs when archive has no design/prd', async () => {
+    const testDir = join(process.cwd(), '.test-archive-issue-preserve-current')
+    await rm(testDir, { recursive: true, force: true })
+
+    const feature = 'issue-preserve-current'
+    const changeDir = join(testDir, 'docs', 'changes', feature)
+    await mkdir(changeDir, { recursive: true })
+
+    // Create issue-only workspace — NO design.md, NO prd.md
+    await writeFile(
+      join(changeDir, 'issue-clarification.md'),
+      `# Issue Clarification
+
+### 1. Issue Intake
+Test issue for preserving current docs during archive.
+
+### 2. Requirement Clarification
+The current docs must survive issue-only archive.
+
+### 3. Constraint Clarification
+Do not delete pre-existing current documentation.
+
+### 4. Evidence Investigation
+Verified that current REMOVE generation deletes current docs.
+
+### 5. Semantic Alignment
+Issue archive should not affect pre-existing current state.
+
+### 6. Classification
+bugfix
+
+### 7. Next Action Gate
+Fix the promotion logic to not generate REMOVE for missing sources.
+`,
+      'utf-8'
+    )
+    await writeFile(
+      join(changeDir, 'promotion-candidate.md'),
+      `# Promotion Candidate
+
+## Source Issue
+preserve-current
+
+## Proposed Decision
+Current promotion should not remove docs that exist without a matching archive source.
+`,
+      'utf-8'
+    )
+
+    // Create a PRE-EXISTING current design doc — this exists BEFORE the issue was created
+    const currentDesignDir = join(testDir, 'docs', 'current', 'design', feature)
+    await mkdir(currentDesignDir, { recursive: true })
+    await writeFile(
+      join(currentDesignDir, 'design.md'),
+      '# Existing Current Design\n\nThis document existed before the issue archive and must be preserved.',
+      'utf-8'
+    )
+
+    // Build data
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260517-000002'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260517-000002', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/preserve-current.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8'
+    )
+
+    // Save acceptance state with issue mode and Ready readiness
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-17T00:00:00.000Z',
+      readiness: VerifyReadinessStatus.Ready,
+      pendingDocUpdates: [],
+      mode: 'issue',
+      issueSlug: feature,
+      rawIssue: 'Test issue for preserving current docs',
+      primaryClassification: 'bugfix',
+      classifications: ['bugfix'],
+      governancePromotionStatus: 'candidate_created',
+      issueClarificationPath: join(changeDir, 'issue-clarification.md'),
+      promotionCandidatePath: join(changeDir, 'promotion-candidate.md'),
+      verifyResult: {
+        readiness: VerifyReadinessStatus.Ready,
+        reasonCodes: [],
+        evidenceSummary: 'All tests passed.',
+        constraintsChecked: ['test', 'lint'],
+        verifiedAt: '2026-05-17T01:00:00.000Z',
+      },
+    })
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+      },
+    }
+
+    const result = await handleArchive(ctx, feature)
+
+    // Archive should succeed
+    expect(result).toContain('Archive Complete')
+
+    // P0-B: The pre-existing current design doc MUST still exist.
+    // The current code generates a REMOVE suggestion for design.md because
+    // it exists in current/design/ but NOT in the archive (issue-only has no design.md).
+    // auto_promote_current defaults to true, so the REMOVE is applied,
+    // DELETING the current doc. This assertion will FAIL on current code.
+    await expect(access(join(currentDesignDir, 'design.md'))).resolves.toBeNull()
 
     await rm(testDir, { recursive: true, force: true })
   })

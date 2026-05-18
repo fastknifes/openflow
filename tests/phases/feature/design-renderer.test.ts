@@ -3,20 +3,21 @@ import { createMinimalRequirementModel, resetIdCounter, type RequirementModel } 
 import { renderDesignDocument } from '../../../src/phases/feature/design-renderer.js'
 
 const REQUIRED_HEADINGS = [
+  '## Human Consensus Summary',
+  '## Identity And Assumptions',
   '## Overview',
   '## Problem',
   '## Goals',
   '## Non-Goals',
-  '## Architecture',
+  '## Behavior Alignment',
   '## Design Constraints',
   '## Success Criteria',
-  '## Proposed Design',
   '## Risks And Mitigations',
   '## Testing Strategy',
 ] as const
 
 describe('renderDesignDocument', () => {
-  test('renders a full model with all required sections and architecture details', () => {
+  test('renders a full model with product-level sections and execution constraints', () => {
     const model: RequirementModel = {
       feature: 'design-renderer',
       constraints: [
@@ -51,7 +52,7 @@ describe('renderDesignDocument', () => {
         },
         {
           id: 'ac-002',
-          description: 'Architecture includes expected modules and symbols',
+          description: 'Renderer keeps the design readable without implementation details',
         },
       ],
       goals: ['Produce stable markdown for downstream tooling'],
@@ -91,10 +92,17 @@ describe('renderDesignDocument', () => {
     const markdown = renderDesignDocument(model)
 
     expectHeadingsExactlyOnce(markdown)
-    expect(markdown).toContain('### Component: Render design markdown')
-    expect(markdown).toContain('- Location: src/phases/brainstorm/design-renderer.ts')
-    expect(markdown).toContain('- `renderDesignDocument` (function)')
-    expect(markdown).toContain('- `designRendererContract` (const)')
+    expect(markdown).toContain('## Human Consensus Summary')
+    expect(markdown).toContain('## Identity And Assumptions')
+    expect(markdown).not.toContain('## Architecture')
+    expect(markdown).not.toContain('## Proposed Design')
+    expect(markdown).not.toContain('### Component: Render design markdown')
+    expect(markdown).not.toContain('Files / Modules')
+    expect(markdown).not.toContain('| Renderer emits all required sections in order | See constraints')
+    expect(markdown).toContain('| Renderer emits all required sections in order | Captured as observable product/workflow behavior; implementation structure is deferred until planning. | Medium |')
+    expect(markdown).not.toContain('src/phases/brainstorm/design-renderer.ts')
+    expect(markdown).not.toContain('renderDesignDocument')
+    expect(markdown).not.toContain('designRendererContract')
     expect(markdown).toContain('- [must] Keep the renderer deterministic')
     expect(markdown).toContain('- [should] Keep renderer output easy to scan')
     expect(markdown).toContain('- [ ] Renderer emits all required sections in order')
@@ -108,7 +116,7 @@ describe('renderDesignDocument', () => {
 
     expectHeadingsExactlyOnce(markdown)
     expect(markdown).toContain('Feature: minimal-feature')
-    expect(markdown).toContain('## Architecture\n\nNot specified.')
+    expect(markdown).not.toContain('## Architecture')
     expect(markdown).toContain('- [must] Must be backward compatible')
     expect(markdown).toContain('- [ ] All existing tests pass')
   })
@@ -139,10 +147,9 @@ describe('renderDesignDocument', () => {
     expect(markdown).toContain('## Problem\n\nNot specified.')
     expect(markdown).toContain('## Goals\n\nNot specified.')
     expect(markdown).toContain('## Non-Goals\n\nNot specified.')
-    expect(markdown).toContain('## Architecture\n\nNot specified.')
     expect(markdown).toContain('## Design Constraints\n\nNot specified.')
     expect(markdown).toContain('## Success Criteria\n\n- [ ] Not specified.')
-    expect(markdown).toContain('## Proposed Design\n\nNot specified.')
+    expect(markdown).not.toContain('## Proposed Design')
     expect(markdown).toContain('## Risks And Mitigations\n\nNot specified.')
     expect(markdown).toContain('## Testing Strategy\n\nNot specified.')
   })

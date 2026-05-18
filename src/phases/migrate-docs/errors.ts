@@ -1,4 +1,4 @@
-import { OpenFlowError, ErrorCode } from '../../utils/errors'
+import { OpenFlowError, ErrorCode } from '../../utils/errors.js'
 
 /**
  * Throw a migration-specific error

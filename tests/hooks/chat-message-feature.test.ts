@@ -54,7 +54,9 @@ describe('chat-message feature guidance', () => {
 
     await hook(createInput('session-command'), output)
 
-    expect(firstOutputText(output)).toContain('/openflow-feature feature-')
+    expect(firstOutputText(output)).toContain('Feature Design Suggested')
+    expect(firstOutputText(output)).toContain('/openflow-feature')
+    expect(firstOutputText(output)).not.toContain('/openflow-feature feature-')
     expect(firstOutputText(output)).not.toContain('`/feature ')
 
     await rm(root, { recursive: true, force: true })
@@ -79,6 +81,45 @@ describe('chat-message feature guidance', () => {
     expect(firstOutputText(output)).toContain('docs/changes/2026-05-13-api-500')
     expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
     expect(firstOutputText(output)).not.toContain('/openflow-feature')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('internal system reminders do not trigger feature design suggestions', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-system-reminder')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('<system-reminder>\n[ALL BACKGROUND TASKS COMPLETE]\n</system-reminder>')
+
+    await hook(createInput('session-system-reminder'), output)
+
+    expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
+    expect(firstOutputText(output)).not.toContain('system-reminder-all-backgro')
+    expect(firstOutputText(output)).not.toContain('/openflow-feature')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('active issue workspace notice is not duplicated when notice already exists in the turn', async () => {
+    const root = join(process.cwd(), '.test-chat-issue-mode-dedupe')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, 'docs', 'changes', '2026-05-13-api-500'), { recursive: true })
+    await writeFile(
+      join(root, 'docs', 'changes', '2026-05-13-api-500', 'issue-clarification.md'),
+      '# Issue Clarification\n\n### 1. Issue Intake\nAPI returns 500.',
+      'utf-8',
+    )
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('## OpenFlow: Issue Investigation Active\n\nExisting notice from this turn.')
+
+    await hook(createInput('session-issue-dedupe'), output)
+
+    const combinedText = output.parts.map((part) => ((part as { text?: string }).text) ?? '').join('\n')
+    expect(combinedText.match(/OpenFlow: Issue Investigation Active/g)).toHaveLength(1)
+    expect(combinedText).not.toContain('tool/skill')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -123,14 +164,14 @@ describe('chat-message feature guidance', () => {
 
     await hook(createInput('session-resume'), output)
 
-    expect(firstOutputText(output)).toContain('这个功能的主要使用者是谁？')
+    expect(firstOutputText(output)).toContain('这次需求更接近哪一种范围？')
 
     const saved = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
       answers: Record<string, string>
       pendingQuestionId: string
     }
     expect(saved.answers.problem).toBe('我的回答是内部开发者')
-    expect(saved.pendingQuestionId).toBe('target-users')
+    expect(saved.pendingQuestionId).toBe('scope')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -293,7 +334,8 @@ describe('chat-message feature guidance', () => {
     const output = createOutput('我想实现一个新的功能：支付功能')
     await hook(createInput('session-switch'), output)
 
-    expect(firstOutputText(output)).toContain('/openflow-feature ')
+    expect(firstOutputText(output)).toContain('/openflow-feature')
+    expect(firstOutputText(output)).not.toContain('/openflow-feature ')
     expect(firstOutputText(output)).not.toContain('这个功能的主要使用者是谁？')
 
     await rm(root, { recursive: true, force: true })

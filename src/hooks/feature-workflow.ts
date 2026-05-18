@@ -445,6 +445,7 @@ function normalizeRequestType(value: unknown): RequestType | undefined {
 
 function extractFeature(value?: string): string | undefined {
   if (!value) return undefined
+  if (looksLikeDocPath(value)) return undefined
 
   // 首先尝试模式匹配
   for (const pattern of REQUIREMENT_PATTERNS) {
@@ -481,6 +482,11 @@ function extractFeature(value?: string): string | undefined {
   }
 
   return undefined
+}
+
+function looksLikeDocPath(value: string): boolean {
+  return /(?:^|[\\/])docs[\\/](?:changes|archive|current|design|requirements)(?:[\\/]|$)/i.test(value)
+    || /(?:^|\s)docs[\\/](?:changes|archive|current|design|requirements)(?:[\\/]|\s|$)/i.test(value)
 }
 
 function sanitizeFeatureCandidate(value: string): string | undefined {

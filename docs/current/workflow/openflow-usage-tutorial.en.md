@@ -82,18 +82,24 @@ If you do not want to read the entire guide first, follow one of these two paths
 /openflow-feature demo-feature
 ```
 
-3. Implement the feature
+3. Generate an implementation plan (optional but recommended)
+
+```text
+/openflow-writing-plan demo-feature
+```
+
+4. Implement the feature
 
 - With omo: use `Prometheus + /startwork`
 - Without omo: use OpenCode native `plan / build`
 
-4. Run the quality gate after implementation
+5. Run the quality gate after implementation
 
 ```text
 openflow-quality-gate
 ```
 
-5. Archive after readiness passes
+6. Archive after readiness passes
 
 ```text
 /openflow-archive demo-feature
@@ -186,7 +192,12 @@ Ask these questions in order.
 - **Yes, I need to bring external docs into OpenFlow**
   - Use `/openflow-migrate-docs --sourceDir <source-docs-dir>`
 
-### Question 3: Has implementation already happened?
+### Question 3: Is this a requirement change during active development?
+
+- **Yes, requirements changed for a feature that is in progress (not yet archived)**
+  - Use `/openflow-change <feature> "<change description>"`
+
+### Question 4: Has implementation already happened?
 
 - **Not yet**
   - Continue with planning and execution
@@ -207,11 +218,25 @@ Short memory rule:
 
 ## 7. Complete feature workflow
 
+This walks through a complete feature from idea to archive, showing exactly what to type and what happens at each step.
+
 ### Step 1: Initialize
 
 ```text
 /openflow-init
 ```
+
+### Step 1.5 (Optional): Brainstorm when requirements are unclear
+
+If your requirements are fuzzy and need exploration before formalizing:
+
+```text
+/openflow-brainstorm user coupon list needs channel filtering
+```
+
+The AI discusses approaches, weighs trade-offs, and clarifies scope conversationally. No formal documents are generated. When sufficient convergence is reached, the AI summarizes key decisions and suggests running `/openflow-feature`.
+
+> **Skip when**: UI changes, bug fixes, or clearly-scoped features — go directly to Step 2.
 
 ### Step 2: Run feature design
 
@@ -220,19 +245,44 @@ Short memory rule:
 ```
 
 Expected outcome:
-
 - OpenFlow advances one feature design question at a time
 - A dated workspace appears under `docs/changes/YYYY-MM-DD-user-coupon-filter/`
-- Typical outputs: `design.md`, `proposal.md`, `decisions.md`, `prd.md`
+- Typical outputs: `design.md`, `behavior.md` (if behavior changes), `proposal.md`, `decisions.md`, `prd.md`
 
-### Step 3: Plan and execute
+### Step 3: Generate the implementation plan
 
-You have two valid paths.
+Once the design is clear, generate a structured development plan:
 
-#### Path 1: With omo
+```text
+/openflow-writing-plan user-coupon-filter
+```
 
-- Generate the plan with `Prometheus`
-- Execute with `/startwork`
+What this does:
+- Reads design constraints from `docs/changes/*/design.md`
+- Generates a parser-compatible plan using bounded work packages (not unlimited parallel decomposition)
+- Saves to both `docs/changes/*/plan.md` and `.sisyphus/plans/user-coupon-filter.md` (dual-save)
+- Warns if the plan exceeds reasonable budget
+- **Stops after saving — does not auto-start implementation**
+
+### Step 4: Implement
+
+You have two valid execution paths.
+
+#### Path 1: With omo (recommended)
+
+If you have [oh-my-openagent (omo)](https://github.com/nicepkg/oh-my-openagent):
+
+1. **Plan already generated**: Step 3's `/openflow-writing-plan` already saved the plan to `.sisyphus/plans/user-coupon-filter.md`
+2. **Switch to Prometheus**: Prometheus is omo's execution agent. Switch to it in OpenCode — it reads your plan file automatically
+3. **Execute**: Run `/start-work` — omo dispatches tasks to sub-agents according to the plan
+
+```text
+[Step 3 done: /openflow-writing-plan saved the plan]
+          ↓
+Switch to Prometheus (omo's execution agent)
+          ↓
+/start-work        ← reads .sisyphus/plans/*.md and begins execution
+```
 
 #### Path 2: With native OpenCode plan/build
 
@@ -241,7 +291,7 @@ You have two valid paths.
 
 OpenFlow does not require omo. Its main job is still documentation governance, constraint enforcement, verification, and archive.
 
-### Step 4: Run the quality gate
+### Step 5: Run the quality gate
 
 ```text
 openflow-quality-gate
@@ -256,7 +306,7 @@ Read the output carefully:
 - `reason_codes`
 - `next_step`
 
-### Step 5: Archive
+### Step 6: Archive
 
 Only after readiness allows it:
 

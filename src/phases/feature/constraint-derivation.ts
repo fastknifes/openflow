@@ -324,7 +324,7 @@ function deriveGoals(feature: string, answers: Answers): string[] {
 function deriveNonGoals(answers: Answers): string[] {
   const scope = normalizeAnswer(answers.scope)
   const nonGoals = [
-    'Unrelated modules or workflows',
+    'Unrelated product areas or workflows',
     scope === 'new-feature' ? 'Reworking existing behavior beyond what the new feature needs' : '',
     scope === 'enhancement' ? 'Full redesign of the surrounding feature area' : '',
     scope === 'refactor' ? 'Introducing net-new product behavior as part of the refactor' : '',

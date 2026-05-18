@@ -11,6 +11,8 @@ import type {
   OpenFlowContext,
 } from '../types.js'
 import { classifyFindings, compressInput, gradeComplexity } from '../utils/harden-utils.js'
+import { normalizeFinding } from '../utils/harden-ledger.js'
+import { computeChangedFilesSet, computeDiffHash, hasMaterialChange } from '../utils/harden-diff.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { appendOmittedDiffManifest, extractDiffBlockPaths, scopeDiffToFeature } from '../utils/diff-scope.js'
@@ -42,6 +44,16 @@ interface FormattedHardenTraceEntry extends HardenTraceEntry {
 interface FormattedHardenResult extends HardenResult {
   sessionID?: string
   trace?: FormattedHardenTraceEntry[]
+}
+
+interface DiffScopeContext {
+  directory: string
+  sanitizedFeature: string
+  planPath: string
+  designPaths: string[]
+  planContent: string
+  designContent: string
+  full: boolean
 }
 
 let activeModels: { reviewerModel?: string; executorModel?: string } = {}
@@ -145,18 +157,33 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
       rounds: [{ round: 1, findings }],
       budgetConsumed: review.tokens,
       summary: summarizeReviewOutcome(findings, grouped.actionable.length, grouped.ambiguous.length, grouped.nonBlocking.length),
+      stopReason: grouped.ambiguous.length > 0
+        ? 'review_inconclusive'
+        : grouped.actionable.length > 0
+          ? 'actionable_findings'
+          : findings.length > 0
+            ? 'non_blocking_only'
+            : 'no_findings',
       sessionID: hardenSessionID,
       trace,
     })
   }
 
   const hardenSessionID = await createHardenSession(ctx, sanitizedFeature, currentSessionID)
+  const diffScopeContext: DiffScopeContext = {
+    directory: ctx.directory,
+    sanitizedFeature,
+    planPath,
+    designPaths: designLookup.paths,
+    planContent,
+    designContent: designLookup.content,
+    full: Boolean(args?.full),
+  }
 
   const result = await runAdversarialLoop(
     ctx,
     planSummary,
-    designLookup.content,
-    reviewerDiffStr,
+    diffScopeContext,
     {
       maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds,
       tokenBudget: ctx.config.harden.tokenBudgetTotal,
@@ -172,8 +199,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
 async function runAdversarialLoop(
   ctx: OpenFlowContext,
   planSummary: string,
-  designContent: string,
-  diffStr: string,
+  diffScopeContext: DiffScopeContext,
   args: { maxRounds: number; tokenBudget: number; tokenBudgetPerRound: number; mode: string },
   sessionID: string,
 ): Promise<FormattedHardenResult> {
@@ -184,8 +210,7 @@ async function runAdversarialLoop(
   let priorFindings: HardenFinding[] = []
   let fixReport = ''
   let nonBlockingRounds = 0
-  let rollingDiff = compressInput(diffStr, 24000)
-  const reviewContext = compressInput(buildPlanSummary(planSummary, designContent), 16000)
+  const reviewContext = compressInput(planSummary, 16000)
 
   for (let round = 1; round <= args.maxRounds; round++) {
     if (budgetConsumed >= args.tokenBudget) {
@@ -194,11 +219,14 @@ async function runAdversarialLoop(
         rounds,
         budgetConsumed,
         summary: `token budget exhausted after ${rounds.length} round(s) in ${args.mode} mode.`,
+        stopReason: 'budget_exhausted',
         sessionID,
         trace,
       }
     }
 
+    const freshScopedDiff = readScopedReviewerDiff(diffScopeContext)
+    const rollingDiff = compressInput(freshScopedDiff.reviewerDiff, 24000)
     const reviewerPrompt = buildReviewerPrompt(reviewContext, rollingDiff, priorFindings, fixReport)
     const review = await runAgentTask(
       ctx,
@@ -220,6 +248,7 @@ async function runAdversarialLoop(
         rounds,
         budgetConsumed,
         summary: `reviewer consumed ${review.tokens} tokens in round ${round}, exceeding per-round budget of ${args.tokenBudgetPerRound}.`,
+        stopReason: 'budget_exhausted',
         sessionID,
         trace,
       }
@@ -232,6 +261,7 @@ async function runAdversarialLoop(
         rounds,
         budgetConsumed,
         summary: `reviewer reported ${grouped.ambiguous.length} design ambiguity finding(s) in round ${round}.`,
+        stopReason: 'review_inconclusive',
         sessionID,
         trace,
       }
@@ -244,6 +274,7 @@ async function runAdversarialLoop(
         rounds,
         budgetConsumed,
         summary: `reviewer found no actionable issues after ${round} round(s).`,
+        stopReason: 'no_findings',
         sessionID,
         trace,
       }
@@ -259,6 +290,7 @@ async function runAdversarialLoop(
           rounds,
           budgetConsumed,
           summary: 'two consecutive rounds reported only non-blocking or design-ambiguity findings.',
+          stopReason: 'non_blocking_only',
           sessionID,
           trace,
         }
@@ -266,29 +298,30 @@ async function runAdversarialLoop(
 
       priorFindings = findings
       fixReport = 'No blocking fixes applied; reviewer reported only non-blocking issues.'
-      rollingDiff = compressInput(`${rollingDiff}\n\n${review.text}`, 24000)
       continue
     }
 
     nonBlockingRounds = 0
     const actionableFindings = grouped.actionable
-    for (const finding of actionableFindings) {
-      const key = normalizeFinding(finding)
-      findingCounts.set(key, (findingCounts.get(key) ?? 0) + 1)
-      if ((findingCounts.get(key) ?? 0) >= 2) {
-        rounds.push({ round, findings })
-        return {
-          status: 'needs_human',
-          rounds,
-          budgetConsumed,
-          summary: `same finding repeated at least twice by round ${round}; human intervention required.`,
-          sessionID,
-          trace,
-        }
+    const currentFindingKeys = [...new Set(actionableFindings.map(finding => normalizeFinding(finding)))]
+    for (const existingKey of [...findingCounts.keys()]) {
+      if (!currentFindingKeys.includes(existingKey)) {
+        findingCounts.delete(existingKey)
       }
     }
 
-    const filePaths = collectScopedFilePaths(actionableFindings, rollingDiff)
+    const repeatedKeys: string[] = []
+    for (const key of currentFindingKeys) {
+      findingCounts.set(key, (findingCounts.get(key) ?? 0) + 1)
+      if ((findingCounts.get(key) ?? 0) >= 2) {
+        repeatedKeys.push(key)
+      }
+    }
+
+    const filePaths = collectScopedFilePaths(actionableFindings, freshScopedDiff.diff)
+    const beforeDiffSnapshot = readGitDiff(ctx.directory)
+    const beforeHash = computeDiffHash(beforeDiffSnapshot)
+    const beforeFiles = computeChangedFilesSet(beforeDiffSnapshot)
     const executorPrompt = buildExecutorPrompt(actionableFindings, reviewContext, filePaths)
     const execution = await runAgentTask(
       ctx,
@@ -299,6 +332,10 @@ async function runAdversarialLoop(
     )
     budgetConsumed += execution.tokens
     trace.push(buildTraceEntry(round, 'deep', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'fix_applied'))
+    const afterDiffSnapshot = readGitDiff(ctx.directory)
+    const afterHash = computeDiffHash(afterDiffSnapshot)
+    const afterFiles = computeChangedFilesSet(afterDiffSnapshot)
+    const materialChange = hasMaterialChange(beforeHash, afterHash, beforeFiles, afterFiles)
 
     if (execution.tokens > args.tokenBudgetPerRound) {
       rounds.push({ round, findings, fixReport: execution.text })
@@ -307,6 +344,7 @@ async function runAdversarialLoop(
         rounds,
         budgetConsumed,
         summary: `executor consumed ${execution.tokens} tokens in round ${round}, exceeding per-round budget of ${args.tokenBudgetPerRound}.`,
+        stopReason: 'budget_exhausted',
         sessionID,
         trace,
       }
@@ -314,11 +352,37 @@ async function runAdversarialLoop(
 
     if (containsExecutorFailureSignal(execution.text)) {
       rounds.push({ round, findings, fixReport: execution.text })
+      if (!materialChange) {
+        return {
+          status: 'executor_blocked',
+          rounds,
+          budgetConsumed,
+          summary: `executor reported a blocking failure in round ${round} without producing a material change.`,
+          stopReason: 'executor_blocked',
+          sessionID,
+          trace,
+        }
+      }
+
       return {
         status: 'needs_human',
         rounds,
         budgetConsumed,
         summary: `executor reported a blocking failure in round ${round}.`,
+        stopReason: 'executor_failure_signal',
+        sessionID,
+        trace,
+      }
+    }
+
+    if (repeatedKeys.length > 0 && !materialChange) {
+      rounds.push({ round, findings, fixReport: execution.text })
+      return {
+        status: 'review_inconclusive',
+        rounds,
+        budgetConsumed,
+        summary: `same finding repeated at least twice by round ${round} and executor produced no material change.`,
+        stopReason: 'repeated_finding_no_material_fix',
         sessionID,
         trace,
       }
@@ -327,7 +391,6 @@ async function runAdversarialLoop(
     rounds.push({ round, findings, fixReport: execution.text })
     priorFindings = findings
     fixReport = execution.text
-    rollingDiff = compressInput(`${rollingDiff}\n\nLatest fix report:\n${execution.text}`, 24000)
   }
 
   return {
@@ -335,6 +398,7 @@ async function runAdversarialLoop(
     rounds,
     budgetConsumed,
     summary: `maximum rounds reached (${args.maxRounds}) without convergence.`,
+    stopReason: 'max_rounds_reached',
     sessionID,
     trace,
   }
@@ -485,6 +549,30 @@ function readGitDiff(cwd: string): string {
   }
 }
 
+function readScopedReviewerDiff(context: DiffScopeContext): { diff: string; reviewerDiff: string } {
+  const freshDiffStr = readGitDiff(context.directory)
+  const freshScope = context.full
+    ? { diff: freshDiffStr, omittedPaths: [] }
+    : scopeDiffToFeature(
+        context.directory,
+        context.sanitizedFeature,
+        freshDiffStr,
+        context.planPath,
+        context.designPaths,
+        context.planContent,
+        context.designContent,
+      )
+
+  const reviewerDiff = freshScope.omittedPaths.length > 0
+    ? appendOmittedDiffManifest(freshScope.diff, freshScope.omittedPaths)
+    : freshScope.diff
+
+  return {
+    diff: freshScope.diff,
+    reviewerDiff,
+  }
+}
+
 async function createHardenSession(
   ctx: OpenFlowContext,
   feature: string,
@@ -624,14 +712,6 @@ function toNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-function normalizeFinding(finding: HardenFinding): string {
-  return [
-    finding.level,
-    finding.description.trim().toLowerCase(),
-    [...finding.files].sort().join(','),
-  ].join('|')
-}
-
 function collectScopedFilePaths(findings: HardenFinding[], diffStr: string): string[] {
   const paths = new Set<string>()
 
@@ -736,6 +816,7 @@ function formatHardenResult(result: FormattedHardenResult): string {
   return `## Harden Result
 
 Status: ${result.status}
+Stop reason: ${escapeMarkdown(result.stopReason ?? 'unknown')}
 Rounds: ${result.rounds.length}
 Budget consumed: ${result.budgetConsumed}
 Summary: ${escapeMarkdown(result.summary)}${sessionBlock}${traceBlock}${roundBlocks}`

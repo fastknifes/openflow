@@ -67,6 +67,66 @@ describe('plan parser', () => {
       const tasks = parsePlanTasks(plan)
       expect(tasks.length).toBe(2)
     })
+
+    // Contract: parser must support ## Tasks (new) AND ## TODOs (legacy)
+    test('should recognize ## Tasks header (contract)', () => {
+      const plan = `# Test Plan
+
+## Tasks
+
+- [ ] Task 1: Implement feature with concrete paths
+- [ ] Task 2: Add tests and verification
+- [ ] Task 3: Wire into main export
+`
+      const tasks = parsePlanTasks(plan)
+      expect(tasks.length).toBe(3)
+      expect(tasks[0]?.title).toBe('Task 1: Implement feature with concrete paths')
+      expect(tasks[1]?.title).toBe('Task 2: Add tests and verification')
+      expect(tasks[2]?.title).toBe('Task 3: Wire into main export')
+    })
+
+    test('should recognize ## Tasks with checkbox items (contract)', () => {
+      const fixture = [
+        '## Tasks',
+        '',
+        '- [ ] 1. Create src/foo.ts with foo function',
+        '- [ ] 2. Add test for foo in tests/foo.test.ts',
+        '- [ ] 3. Wire foo into main export',
+      ].join('\n')
+
+      const tasks = parsePlanTasks(fixture)
+      expect(tasks.length).toBeGreaterThan(0)
+    })
+
+    // Preserve: parser must continue supporting legacy ## TODOs for backward compatibility
+    test('should still parse legacy ## TODOs with checkbox items', () => {
+      const fixture = [
+        '## TODOs',
+        '',
+        '- [ ] Create src/foo.ts with foo function',
+        '- [ ] Add test for foo in tests/foo.test.ts',
+      ].join('\n')
+
+      const tasks = parsePlanTasks(fixture)
+      expect(tasks.length).toBe(2)
+    })
+
+    test('should stop at Success Criteria when using ## Tasks header', () => {
+      const plan = `# Test Plan
+
+## Tasks
+
+- [ ] Task 1: Implement feature
+- [ ] Task 2: Add tests
+
+## Success Criteria
+
+- [ ] All tests pass
+- [ ] Code reviewed
+`
+      const tasks = parsePlanTasks(plan)
+      expect(tasks.length).toBe(2)
+    })
   })
 
   describe('classifyTaskType', () => {

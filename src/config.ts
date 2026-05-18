@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import { z } from 'zod'
 import type { OpenFlowConfig, SecurityCheckType, QualityCheckType } from './types.js'
 import { defaultConfig } from './types.js'
 import { validateConfigPath } from './utils/security.js'
@@ -26,26 +27,103 @@ const CHANGE_ARTIFACT_FILENAMES: Readonly<Record<ChangeArtifactKind, string>> = 
   behavior: 'behavior.md',
 })
 
-const VALID_SECURITY_CHECKS: readonly SecurityCheckType[] = ['secret', 'vuln', 'dependency']
-const VALID_QUALITY_CHECKS: readonly QualityCheckType[] = ['lint', 'typecheck', 'test', 'format']
+const VALID_SECURITY_CHECKS = ['secret', 'vuln', 'dependency'] as const satisfies readonly SecurityCheckType[]
+const VALID_QUALITY_CHECKS = ['lint', 'typecheck', 'test', 'format'] as const satisfies readonly QualityCheckType[]
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string')
-}
+const configPathSchema = z.string().refine((value) => {
+  try {
+    validateConfigPath(value)
+    return true
+  } catch {
+    return false
+  }
+})
 
-function isValidSecurityChecks(value: unknown): value is SecurityCheckType[] {
-  if (!isStringArray(value)) return false
-  return value.every(item => (VALID_SECURITY_CHECKS as readonly string[]).includes(item))
-}
+const nonEmptyStringArraySchema = z.array(z.string()).min(1)
 
-function isValidQualityChecks(value: unknown): value is QualityCheckType[] {
-  if (!isStringArray(value)) return false
-  return value.every(item => (VALID_QUALITY_CHECKS as readonly string[]).includes(item))
-}
+const adapterConfigSchema = z.object({
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  timeout: z.number().min(1).optional(),
+  onMissing: z.enum(['skip', 'fail']).optional(),
+}).partial()
 
-function isNonEmptyStringArray(value: unknown): value is string[] {
-  return isStringArray(value) && value.length > 0
-}
+const openFlowConfigOverrideSchema: z.ZodType<Record<string, unknown>> = z.object({
+  feature: z.object({
+    enabled: z.boolean().optional(),
+    output_dir: configPathSchema.optional(),
+    auto_trigger: z.boolean().optional(),
+    trigger_mode: z.enum(['smart', 'always', 'never']).optional(),
+    generate_prd: z.boolean().optional(),
+    prd_output_dir: configPathSchema.optional(),
+    closure: z.object({
+      enabled: z.boolean().optional(),
+      auto_transition: z.boolean().optional(),
+      strong_signals: nonEmptyStringArraySchema.optional(),
+      weak_signals: nonEmptyStringArraySchema.optional(),
+      weak_signal_threshold: z.number().min(1).max(10).optional(),
+    }).partial().optional(),
+  }).partial().optional(),
+  tdd: z.object({
+    enabled: z.boolean().optional(),
+    expand_threshold: z.number().min(1).max(100).optional(),
+  }).partial().optional(),
+  verification: z.object({
+    in_plan: z.boolean().optional(),
+    security: z.array(z.enum(VALID_SECURITY_CHECKS)).optional(),
+    quality: z.array(z.enum(VALID_QUALITY_CHECKS)).optional(),
+    auto_fix: z.boolean().optional(),
+    completion_prompt: z.boolean().optional(),
+    allow_accept_failures: z.boolean().optional(),
+    adapters: z.object({
+      secret: adapterConfigSchema.optional(),
+      vuln: adapterConfigSchema.optional(),
+      dependency: adapterConfigSchema.optional(),
+      consistency: z.object({
+        drift_check: z.boolean().optional(),
+        current_constraints: z.boolean().optional(),
+        decisions_constraints: z.boolean().optional(),
+        symbol_level: z.boolean().optional(),
+      }).partial().optional(),
+    }).partial().optional(),
+  }).partial().optional(),
+  archive: z.object({
+    enabled: z.boolean().optional(),
+    output_dir: configPathSchema.optional(),
+    drift_check: z.boolean().optional(),
+    auto_promote_current: z.boolean().optional(),
+  }).partial().optional(),
+  acceptance: z.object({
+    enabled: z.boolean().optional(),
+    trigger_words_zh: nonEmptyStringArraySchema.optional(),
+    trigger_words_en: nonEmptyStringArraySchema.optional(),
+    doc_sync_prompt: z.boolean().optional(),
+    drift_detection: z.boolean().optional(),
+  }).partial().optional(),
+  writingPlan: z.object({
+    enabled: z.boolean().optional(),
+  }).partial().optional(),
+  harden: z.object({
+    enabled: z.boolean().optional(),
+    maxRounds: z.number().min(1).optional(),
+    tokenBudgetPerRound: z.number().min(1).optional(),
+    tokenBudgetTotal: z.number().min(1).optional(),
+    reviewerModel: z.string().optional(),
+    executorModel: z.string().optional(),
+  }).partial().optional(),
+  guardian: z.object({
+    enabled: z.boolean().optional(),
+    auto_start: z.boolean().optional(),
+    auto_fix: z.boolean().optional(),
+    max_retries: z.number().min(1).max(10).optional(),
+    state_dir: configPathSchema.optional(),
+    contract_cache: z.boolean().optional(),
+  }).partial().optional(),
+  executionQualityPolicy: z.object({
+    enabled: z.boolean().optional(),
+    defaultMode: z.enum(['fast', 'balanced', 'strict']).optional(),
+  }).partial().optional(),
+}).partial()
 
 function deepMerge<T extends Record<string, unknown>>(
   target: T,
@@ -81,121 +159,8 @@ function deepMerge<T extends Record<string, unknown>>(
   return result
 }
 
-function validateConfigValue(config: unknown): boolean {
-  if (typeof config !== 'object' || config === null) {
-    return false
-  }
-
-  const c = config as Record<string, unknown>
-
-  if (c.feature !== undefined) {
-    const b = c.feature as Record<string, unknown>
-    if (b.enabled !== undefined && typeof b.enabled !== 'boolean') return false
-    if (b.output_dir !== undefined && typeof b.output_dir !== 'string') return false
-    if (b.auto_trigger !== undefined && typeof b.auto_trigger !== 'boolean') return false
-    if (b.trigger_mode !== undefined && !['smart', 'always', 'never'].includes(String(b.trigger_mode))) return false
-    if (b.generate_prd !== undefined && typeof b.generate_prd !== 'boolean') return false
-    if (b.prd_output_dir !== undefined && typeof b.prd_output_dir !== 'string') return false
-    if (b.closure !== undefined) {
-      const closure = b.closure as Record<string, unknown>
-      if (closure.enabled !== undefined && typeof closure.enabled !== 'boolean') return false
-      if (closure.auto_transition !== undefined && typeof closure.auto_transition !== 'boolean') return false
-      if (closure.strong_signals !== undefined && !isNonEmptyStringArray(closure.strong_signals)) return false
-      if (closure.weak_signals !== undefined && !isNonEmptyStringArray(closure.weak_signals)) return false
-      if (closure.weak_signal_threshold !== undefined && typeof closure.weak_signal_threshold !== 'number') return false
-      if (closure.weak_signal_threshold !== undefined && (closure.weak_signal_threshold as number) < 1) return false
-      if (closure.weak_signal_threshold !== undefined && (closure.weak_signal_threshold as number) > 10) return false
-    }
-    try {
-      if (b.output_dir !== undefined) validateConfigPath(b.output_dir as string)
-      if (b.prd_output_dir !== undefined) validateConfigPath(b.prd_output_dir as string)
-    } catch {
-      return false
-    }
-  }
-
-  if (c.tdd !== undefined) {
-    const t = c.tdd as Record<string, unknown>
-    if (t.enabled !== undefined && typeof t.enabled !== 'boolean') return false
-    if (t.expand_threshold !== undefined && typeof t.expand_threshold !== 'number') return false
-    if (t.expand_threshold !== undefined && (t.expand_threshold as number) < 1) return false
-    if (t.expand_threshold !== undefined && (t.expand_threshold as number) > 100) return false
-  }
-
-  if (c.verification !== undefined) {
-    const v = c.verification as Record<string, unknown>
-    if (v.in_plan !== undefined && typeof v.in_plan !== 'boolean') return false
-    if (v.security !== undefined && !isValidSecurityChecks(v.security)) return false
-    if (v.quality !== undefined && !isValidQualityChecks(v.quality)) return false
-    if (v.auto_fix !== undefined && typeof v.auto_fix !== 'boolean') return false
-    if (v.completion_prompt !== undefined && typeof v.completion_prompt !== 'boolean') return false
-    if (v.adapters !== undefined) {
-      const a = v.adapters as Record<string, unknown>
-      const validOnMissing = ['skip', 'fail']
-      for (const key of ['secret', 'vuln', 'dependency'] as const) {
-        if (a[key] !== undefined) {
-          const adapter = a[key] as Record<string, unknown>
-          if (adapter.command !== undefined && typeof adapter.command !== 'string') return false
-          if (adapter.args !== undefined && !isStringArray(adapter.args)) return false
-          if (adapter.timeout !== undefined && typeof adapter.timeout !== 'number') return false
-          if (adapter.timeout !== undefined && (adapter.timeout as number) < 1) return false
-          if (adapter.onMissing !== undefined && !validOnMissing.includes(String(adapter.onMissing))) return false
-        }
-      }
-      if (a.consistency !== undefined) {
-        const con = a.consistency as Record<string, unknown>
-        for (const key of ['drift_check', 'current_constraints', 'decisions_constraints', 'symbol_level'] as const) {
-          if (con[key] !== undefined && typeof con[key] !== 'boolean') return false
-        }
-      }
-    }
-  }
-
-  if (c.archive !== undefined) {
-    const a = c.archive as Record<string, unknown>
-    if (a.enabled !== undefined && typeof a.enabled !== 'boolean') return false
-    if (a.output_dir !== undefined && typeof a.output_dir !== 'string') return false
-    if (a.drift_check !== undefined && typeof a.drift_check !== 'boolean') return false
-    if (a.auto_promote_current !== undefined && typeof a.auto_promote_current !== 'boolean') return false
-    try {
-      if (a.output_dir !== undefined) validateConfigPath(a.output_dir as string)
-    } catch {
-      return false
-    }
-  }
-
-  if (c.acceptance !== undefined) {
-    const ac = c.acceptance as Record<string, unknown>
-    if (ac.enabled !== undefined && typeof ac.enabled !== 'boolean') return false
-    if (ac.trigger_words_zh !== undefined && !isNonEmptyStringArray(ac.trigger_words_zh)) return false
-    if (ac.trigger_words_en !== undefined && !isNonEmptyStringArray(ac.trigger_words_en)) return false
-    if (ac.doc_sync_prompt !== undefined && typeof ac.doc_sync_prompt !== 'boolean') return false
-    if (ac.drift_detection !== undefined && typeof ac.drift_detection !== 'boolean') return false
-  }
-
-  if (c.writingPlan !== undefined) {
-    const wp = c.writingPlan as Record<string, unknown>
-    if (wp.enabled !== undefined && typeof wp.enabled !== 'boolean') return false
-  }
-
-  if (c.guardian !== undefined) {
-    const g = c.guardian as Record<string, unknown>
-    if (g.enabled !== undefined && typeof g.enabled !== 'boolean') return false
-    if (g.auto_start !== undefined && typeof g.auto_start !== 'boolean') return false
-    if (g.auto_fix !== undefined && typeof g.auto_fix !== 'boolean') return false
-    if (g.max_retries !== undefined && typeof g.max_retries !== 'number') return false
-    if (g.max_retries !== undefined && (g.max_retries as number) < 1) return false
-    if (g.max_retries !== undefined && (g.max_retries as number) > 10) return false
-    if (g.state_dir !== undefined && typeof g.state_dir !== 'string') return false
-    if (g.contract_cache !== undefined && typeof g.contract_cache !== 'boolean') return false
-    try {
-      if (g.state_dir !== undefined) validateConfigPath(g.state_dir as string)
-    } catch {
-      return false
-    }
-  }
-
-  return true
+function validateConfigValue(config: unknown): config is Record<string, unknown> {
+  return openFlowConfigOverrideSchema.safeParse(config).success
 }
 
 export function loadConfig(opencodeConfig?: Record<string, unknown>): OpenFlowConfig {

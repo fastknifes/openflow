@@ -93,7 +93,8 @@ describe('chat-message hook', () => {
 
       expect(output.parts[0]?.type).toBe('text')
       expect((output.parts[0] as { text?: string }).text).toContain('Feature Design Suggested')
-      expect((output.parts[0] as { text?: string }).text).toContain('user-login')
+      expect((output.parts[0] as { text?: string }).text).not.toContain('/openflow-feature user-login')
+      expect((output.parts[0] as { text?: string }).text).toContain('/openflow-feature')
       expect((output.parts[0] as { text?: string }).text).toContain('does not block research')
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -112,7 +113,8 @@ describe('chat-message hook', () => {
       await hook(createInput('session-fallback'), output)
 
       expect((output.parts[0] as { text?: string }).text).toContain('Feature Design Suggested')
-      expect((output.parts[0] as { text?: string }).text).toContain('feature-')
+      expect((output.parts[0] as { text?: string }).text).toContain('/openflow-feature')
+      expect((output.parts[0] as { text?: string }).text).not.toContain('/openflow-feature feature-')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -130,7 +132,8 @@ describe('chat-message hook', () => {
       await hook(createInput('session-add-platform'), output)
 
       expect((output.parts[0] as { text?: string }).text).toContain('Feature Design Suggested')
-      expect((output.parts[0] as { text?: string }).text).toContain('feature-')
+      expect((output.parts[0] as { text?: string }).text).toContain('/openflow-feature')
+      expect((output.parts[0] as { text?: string }).text).not.toContain('/openflow-feature feature-')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -156,7 +159,8 @@ describe('chat-message hook', () => {
       )
 
       expect((output.parts[0] as { text?: string }).text).toContain('Feature Design Suggested')
-      expect((output.parts[0] as { text?: string }).text).toContain('agent-platform')
+      expect((output.parts[0] as { text?: string }).text).not.toContain('/openflow-feature agent-platform')
+      expect((output.parts[0] as { text?: string }).text).toContain('/openflow-feature')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -193,7 +197,8 @@ describe('chat-message hook', () => {
       await hook(createInput('session-closure-ready'), output)
 
       expect((output.parts[0] as { text?: string }).text).toContain('Feature Design Closure Ready')
-      expect((output.parts[0] as { text?: string }).text).toContain('Design is generated automatically')
+      expect((output.parts[0] as { text?: string }).text).toContain('derive the internal feature name')
+      expect((output.parts[0] as { text?: string }).text).toContain('one useful clarification')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -228,10 +233,10 @@ describe('chat-message hook', () => {
 
       await hook(createInput('session-issue'), output)
 
-      // Should dispatch to handleIssue and return clarification report
-      expect((output.parts[0] as { text?: string }).text).toContain('## OpenFlow Issue Clarification')
+      // Should dispatch to handleIssue and return compact issue report
+      expect((output.parts[0] as { text?: string }).text).toContain('## OpenFlow Issue')
       expect((output.parts[0] as { text?: string }).text).toContain('some-problem')
-      expect((output.parts[0] as { text?: string }).text).toContain('### 1. Issue Intake')
+      expect((output.parts[0] as { text?: string }).text).toContain('### Issue')
       // Should not contain feature suggestion
       expect((output.parts[0] as { text?: string }).text).not.toContain('Feature Design Suggested')
       // Should not contain the old placeholder

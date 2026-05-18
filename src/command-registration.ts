@@ -2,22 +2,13 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { logger } from './utils/logger.js'
-
-const COMMANDS: Record<string, string> = {
-  'openflow-feature': 'OpenFlow feature command for feature design clarification',
-  'openflow-change': 'OpenFlow change command for feature workspace management',
-  'openflow-init': 'OpenFlow init command for initializing AGENTS.md with docs guide',
-  'openflow-archive': 'OpenFlow archive command for completed features',
-  'openflow-status': 'OpenFlow status command',
-  'openflow-config': 'OpenFlow config command',
-  'openflow-migrate-docs': 'Migrate documentation from other workflow tools into OpenFlow docs structure',
-  'openflow-issue': 'OpenFlow issue clarification and triage command for uncertain problems',
-}
+import { OPENFLOW_COMMAND_FILES } from './commands/manifest.js'
 
 // Skills that are INTENTIONALLY registered by registerSkills() are excluded
 // from cleanup to prevent a race: registerCommands() deletes them, then
 // registerSkills() immediately recreates them.
 const LEGACY_SKILL_DIRS = [
+  'openflow-feature',
   'openflow-change',
   'openflow-init',
   'openflow-archive',
@@ -28,6 +19,7 @@ const STALE_COMMAND_FILES = [
   'openflow-writing-plan.md',
   'openflow-harden.md',
   'openflow-verify.md',
+  'openflow-brainstorm.md',
 ]
 
 function getGlobalConfigDir(): string {
@@ -74,13 +66,13 @@ export async function registerCommands(): Promise<void> {
   )
 
   await Promise.all(
-    Object.entries(COMMANDS).map(async ([name, description]) => {
+    OPENFLOW_COMMAND_FILES.map(async ({ name, description }) => {
       const content = buildCommandFile(name, description)
       await fs.writeFile(path.join(commandsDir, `${name}.md`), content, 'utf-8')
     })
   )
 
-  logger.info('Commands registered', { count: Object.keys(COMMANDS).length })
+  logger.info('Commands registered', { count: OPENFLOW_COMMAND_FILES.length })
 }
 
 export async function unregisterCommands(): Promise<void> {
@@ -89,7 +81,7 @@ export async function unregisterCommands(): Promise<void> {
   try {
     await Promise.all(
       [
-        ...Object.keys(COMMANDS).map((name) => `${name}.md`),
+        ...OPENFLOW_COMMAND_FILES.map(({ name }) => `${name}.md`),
         ...STALE_COMMAND_FILES,
       ].map((file) => fs.rm(path.join(commandsDir, file), { force: true }))
     )

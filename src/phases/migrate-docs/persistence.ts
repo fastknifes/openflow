@@ -5,12 +5,12 @@
 
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
-import { createSafePath, SecurityError } from '../../utils/security'
+import { createSafePath, SecurityError } from '../../utils/security.js'
 import {
   type MigrationState,
   type MigrationSessionIndex,
   normalizeMigrationState,
-} from './types'
+} from './types.js'
 
 const MIGRATION_DIR = 'docs-migration'
 const INDEX_FILE = 'active.json'

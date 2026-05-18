@@ -69,4 +69,25 @@ describe('init-content constants', () => {
     expect(OPENFLOW_DOCS_GUIDE_BLOCK).toContain(OPENFLOW_MARKER_BEGIN)
     expect(OPENFLOW_DOCS_GUIDE_BLOCK).toContain(OPENFLOW_MARKER_END)
   })
+
+  // P0+P1: corrective-rule guidance in docs guide block
+  test('docs guide block references ai-reflection directory for corrective rules', () => {
+    const block = OPENFLOW_DOCS_GUIDE_BLOCK
+    expect(block).toContain('docs/current/workflow/ai-reflection/')
+  })
+
+  test('docs guide block includes Chinese guidance about checking relevant corrective rules on demand', () => {
+    const block = OPENFLOW_DOCS_GUIDE_BLOCK
+    // Must mention corrective rules (纠正规则) or similar Chinese guidance
+    // referencing that the AI should check existing relevant rules
+    const hasCorrectiveGuidance =
+      block.includes('纠正规则') ||
+      block.includes('反思') ||
+      block.includes('反思记录')
+    expect(hasCorrectiveGuidance).toBe(true)
+
+    // Must still preserve on-demand reading principle — not requiring full read
+    // The existing on-demand language should remain
+    expect(block).toContain('按需')
+  })
 })

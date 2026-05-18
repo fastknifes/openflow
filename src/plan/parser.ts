@@ -85,6 +85,18 @@ export function isImplementationTask(title: string): boolean {
 }
 
 export function extractPlanName(filePath: string): string | null {
-  const match = filePath.match(/plans[\/\\]([^\/\\]+)\.md$/i)
-  return match?.[1] ?? null
+  // .sisyphus/plans/{feature}.md
+  let match = filePath.match(/plans[\/\\]([^\/\\]+)\.md$/i)
+  if (match) return match[1] ?? null
+
+  // docs/changes/YYYY-MM-DD-{feature}/plan.md
+  match = filePath.match(/changes[\/\\]([^\/\\]+)[\/\\]plan\.md$/i)
+  if (match) {
+    const raw = match[1] ?? ''
+    // Strip date prefix from YYYY-MM-DD-feature → feature
+    const stripped = raw.replace(/^\d{4}-\d{2}-\d{2}-/, '')
+    return stripped || raw
+  }
+
+  return null
 }

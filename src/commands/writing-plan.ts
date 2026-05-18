@@ -3,7 +3,7 @@ import * as path from 'node:path'
 import type { RequirementModel } from '../phases/feature/requirement-model.js'
 import type { OpenFlowContext } from '../types.js'
 import { RequirementModelSchema } from '../phases/feature/requirement-model.js'
-import { getDesignCandidatePaths, getPlanPath } from '../config.js'
+import { getChangePlansPath, getDesignCandidatePaths, getPlanPath } from '../config.js'
 import { findLatestDocument } from '../utils/index.js'
 import { logger } from '../utils/logger.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
@@ -20,7 +20,8 @@ export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): 
   }
 
   const designContext = await readDesignContextPacket(ctx.directory, sanitizedFeature)
-  const planPath = getPlanPath(ctx.directory, sanitizedFeature)
+  const primaryPlanPath = await getChangePlansPath(ctx.directory, sanitizedFeature)
+  const omoPlanPath = getPlanPath(ctx.directory, sanitizedFeature)
 
   return `## OpenFlow Writing Plan Packet
 
@@ -29,9 +30,12 @@ export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): 
 ### Design Context
 ${designContext || `> No design documents found for feature \`${escapeMarkdown(sanitizedFeature)}\`. Consider running \`/openflow-feature ${escapeMarkdown(sanitizedFeature)}\` first.`}
 
-### Plan Output Path
+### Plan Output Paths
 
-\`${escapeMarkdown(planPath)}\`
+- **Primary** (change workspace): \`${escapeMarkdown(primaryPlanPath)}\`
+- **OMO copy** (active oh-my-openagent / Prometheus execution is detected OR \`.sisyphus/\` directory exists): \`${escapeMarkdown(omoPlanPath)}\`
+- If both copies are written, the initial saved content must be identical.
+- After execution starts, the \`.sisyphus/plans/\` copy may diverge as OMO / Prometheus records task progress; the \`docs/changes/\` plan remains the canonical planning artifact.
 
 ### Plan Format Rules
 
@@ -50,7 +54,7 @@ Reference to the design workspace and relevant constraints.
 
 ### Parallel Execution Waves
 Tasks grouped by dependency level. Wave 1 has no dependencies; later waves depend on earlier results.
-Waves execute in order; tasks within a wave run in parallel via subagents.
+Same-wave tasks are candidates for parallel execution. Keep same-wave concurrency reasonable (default max 3–4).
 
 ### Dependency Matrix
 | Task | Blocked By | Blocks |
@@ -62,9 +66,10 @@ Waves execute in order; tasks within a wave run in parallel via subagents.
 \`\`\`
 
 - Use \`- [ ]\` for checkbox tasks or \`1.\` for numbered tasks.
-- **Parallel execution**: Group independent tasks into waves. Dispatch each same-wave task as a subagent. Same-wave tasks run in parallel.
+- **Task decomposition**: Group independent tasks into waves. Each task should be a cohesive work package (may span a few closely related files in the same module).
 - **Subagent guidance**: Assign each task a recommended agent category such as \`quick\`, \`writing\`, or \`unspecified-high\`, plus required skills.
 - Each task must include: Agent Profile, Parallelization status, QA Scenarios, and Acceptance Criteria.
+- After drafting, estimate execution units. If > 20 units or same-wave > 4 tasks, merge smaller tasks or increase wave count.
 
 ### Self-Check Checklist
 
@@ -73,15 +78,21 @@ Before writing the plan file, verify:
 - [ ] **No placeholders**: No TBD, TODO, or "implement later" in any task.
 - [ ] **Concrete file paths**: Every task specifies exact file paths to create or modify.
 - [ ] **Verification commands**: Every task includes a runnable command and expected output.
-- [ ] **Task granularity**: No single task describes more than one meaningful file or module.
+- [ ] **Bounded complexity**: No single task describes an unreasonable scope. Tasks may cover a few closely related files.
+- [ ] **Task count proportional to feature**: small 3–5, medium 6–9, large 10–15.
 
 ### Overwrite Warning
 
-> If a plan file already exists at the output path, review it carefully before overwriting. Existing task progress may be lost.
+> If a plan file already exists at either output path, review it carefully before overwriting. Existing task progress may be lost.
+> If the \`.sisyphus/plans/\` copy already has checked tasks, treat it as execution state and do not overwrite it just to restore identity with the primary plan.
 
 ### Execution Handoff Note
 
-**This packet is for plan writing only. Do NOT execute any tasks.** Write the final plan file to the output path above using your normal file write tool, not inside this handler. This ensures existing tool-after hooks can enhance the plan. Execution is handled separately after the plan is reviewed and approved.
+**This packet is for plan writing only. Do NOT execute any tasks.** Write the final plan file to the output paths above using your normal file write tool, not inside this handler. This ensures existing tool-after hooks can enhance the plan. Execution is handled separately after the plan is reviewed and approved.
+
+### OMO / Prometheus Compatibility
+
+This skill does NOT replace or disable any OMO/Prometheus built-in capabilities. Prometheus exploration, brainstorming, and task planning remain fully available. Use this skill to produce the plan artifact, then let Prometheus continue its normal workflow.
 `
 }
 

@@ -30,6 +30,7 @@ import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/se
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { getActiveFeatureSession } from '../hooks/feature-workflow.js'
 import { loadExecutionPolicy } from '../utils/execution-policy.js'
+import { captureCurrentWorkspaceState, createEvidenceFreshnessMetadata } from '../utils/evidence-freshness.js'
 import { detectOmoExecutionFlow } from '../utils/omo-detection.js'
 import {
   readFeatureGuardianState,
@@ -194,7 +195,12 @@ export async function handleVerify(
     verifyResult.decisionType = readiness.decisionType
   }
 
-  await saveVerifyResult(ctx.directory, verifyResult, undefined, sanitizedFeature)
+  const freshnessMetadata = createEvidenceFreshnessMetadata(
+    captureCurrentWorkspaceState(ctx.directory),
+    verifyResult.constraintsChecked,
+    verifyResult.evidenceSummary,
+  )
+  await saveVerifyResult(ctx.directory, verifyResult, freshnessMetadata, sanitizedFeature)
 
   if (readiness.status === VerifyReadinessStatus.NotReady && hasAskQuestion(toolContext)) {
     const selectedOption = await askVerifyFailureQuestion(toolContext)

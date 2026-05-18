@@ -79,6 +79,11 @@ export const VerificationAssertionSchema = z.object({
 
 export const RequirementModelSchema = z.object({
   feature: z.string().min(1),
+  featureTitle: z.string().optional(),
+  sourceIntent: z.string().optional(),
+  convergenceStatus: z.enum(['final', 'draft_with_assumptions']).optional(),
+  assumptions: z.array(z.string()).optional(),
+  pendingConfirmations: z.array(z.string()).optional(),
   constraints: z.array(ConstraintSchema),
   scopeBoundary: ScopeBoundarySchema,
   acceptanceCriteria: z.array(AcceptanceCriterionSchema),

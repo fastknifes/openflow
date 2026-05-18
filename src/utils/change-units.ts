@@ -41,6 +41,16 @@ async function saveIndex(projectDir: string, index: ChangeUnitIndex): Promise<vo
   await fs.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8')
 }
 
+async function directoryExists(projectDir: string, dirName: string): Promise<boolean> {
+  try {
+    const fullPath = createSafePath(projectDir, 'docs', 'changes', dirName)
+    const stats = await fs.stat(fullPath)
+    return stats.isDirectory()
+  } catch {
+    return false
+  }
+}
+
 export async function ensureChangeUnitDir(projectDir: string, feature: string): Promise<string> {
   const sanitizedFeature = sanitizeFeatureName(feature)
   const index = await loadIndex(projectDir)
@@ -60,8 +70,26 @@ export async function resolveChangeUnitDir(projectDir: string, feature: string):
   const sanitizedFeature = sanitizeFeatureName(feature)
   const index = await loadIndex(projectDir)
   const mapped = index.byFeature[sanitizedFeature]?.changeDir
-  if (mapped) return mapped
+  if (mapped && await directoryExists(projectDir, mapped)) return mapped
+  const discovered = await findExistingChangeUnitDir(projectDir, sanitizedFeature)
+  if (discovered) return discovered
   return sanitizedFeature
+}
+
+async function findExistingChangeUnitDir(projectDir: string, sanitizedFeature: string): Promise<string | null> {
+  const changesDir = createSafePath(projectDir, 'docs', 'changes')
+  try {
+    const entries = await fs.readdir(changesDir, { withFileTypes: true })
+    const matches = entries
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+      .filter(name => name === sanitizedFeature || name.endsWith(`-${sanitizedFeature}`))
+      .sort()
+
+    return matches[matches.length - 1] ?? null
+  } catch {
+    return null
+  }
 }
 
 export async function ensureArchiveUnitDir(projectDir: string, feature: string): Promise<string> {

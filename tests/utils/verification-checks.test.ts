@@ -9,11 +9,11 @@ describe('verification-checks', () => {
     expect(output).toContain('- **Dependency Review**: Verify new dependencies are trusted')
   })
 
-  test('formats plan quality checks with checklist', () => {
+  test('formats plan quality checks as procedural guidance', () => {
     const output = formatQualityChecks(['lint', 'typecheck', 'test', 'format'], 'plan')
-    expect(output).toContain('- [ ] **Lint Check**: Run linter')
-    expect(output).toContain('- [ ] **Type Check**: Run type checker')
-    expect(output).toContain('- [ ] **Test Suite**: Run all tests')
-    expect(output).toContain('- [ ] **Format Check**: Run formatter check')
+    expect(output).toContain('- **Lint Check**: Run linter')
+    expect(output).toContain('- **Type Check**: Run type checker')
+    expect(output).toContain('- **Test Suite**: Run all tests')
+    expect(output).toContain('- **Format Check**: Run formatter check')
   })
 })

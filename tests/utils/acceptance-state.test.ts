@@ -17,6 +17,28 @@ import { VerifyDecisionType, VerifyReadinessStatus, type AcceptanceState, type V
 
 const TEST_ROOT = join(process.cwd(), '.test-acceptance-state')
 
+type FutureHardenTerminalSummary = {
+  status: string
+  stopReason: string
+  unresolvedMustFixCount: number
+  unresolvedNeedsDecisionCount: number
+  acceptedKnownIssueCount: number
+}
+
+type FutureAcceptedKnownIssueSummary = {
+  findingId: string
+  disposition: 'accepted_known_issue' | 'design_divergence'
+  rationale: string
+  archiveEffect: 'non_blocking' | 'doc_update_required' | 'decision_required'
+  evidenceRefs: string[]
+  verifyStatus: string
+}
+
+type FutureAcceptanceState = AcceptanceState & {
+  hardenTerminalSummary?: FutureHardenTerminalSummary
+  acceptedKnownIssues?: FutureAcceptedKnownIssueSummary[]
+}
+
 describe('acceptance-state', () => {
   test('save and load round-trip', async () => {
     await rm(TEST_ROOT, { recursive: true, force: true })
@@ -229,6 +251,72 @@ describe('acceptance-state', () => {
     expect(loaded?.promotionApplied).toBe(true)
     expect(loaded?.promotionAppliedAt).toBe('2026-04-21T11:50:00.000Z')
     expect(loaded?.promotionDecidedAt).toBe('2026-04-21T11:48:00.000Z')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('minimal harden terminal summary round-trips through acceptance state', async () => {
+    const root = join(TEST_ROOT, 'harden-terminal-summary-round-trip')
+    await rm(root, { recursive: true, force: true })
+
+    const state: FutureAcceptanceState = {
+      feature: 'harden-summary-demo',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-18T10:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+      hardenTerminalSummary: {
+        status: 'budget_exhausted',
+        stopReason: 'known_issues_accepted',
+        unresolvedMustFixCount: 0,
+        unresolvedNeedsDecisionCount: 0,
+        acceptedKnownIssueCount: 1,
+      },
+    }
+
+    await saveAcceptanceState(root, state as AcceptanceState)
+    const loaded = await loadAcceptanceState(root) as FutureAcceptanceState | null
+
+    expect(loaded).not.toBeNull()
+    expect(loaded?.hardenTerminalSummary).toEqual(state.hardenTerminalSummary)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('accepted known issues summary round-trips through acceptance state', async () => {
+    const root = join(TEST_ROOT, 'accepted-known-issues-round-trip')
+    await rm(root, { recursive: true, force: true })
+
+    const state: FutureAcceptanceState = {
+      feature: 'known-issues-demo',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-18T10:30:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
+      hardenTerminalSummary: {
+        status: 'pass_with_risks',
+        stopReason: 'known_issues_accepted',
+        unresolvedMustFixCount: 0,
+        unresolvedNeedsDecisionCount: 0,
+        acceptedKnownIssueCount: 1,
+      },
+      acceptedKnownIssues: [
+        {
+          findingId: 'H-701',
+          disposition: 'accepted_known_issue',
+          rationale: 'Design divergence is acceptable in Wave 1 and must stay visible in archive.',
+          archiveEffect: 'doc_update_required',
+          evidenceRefs: ['EV-DESIGN-001', 'EV-VERIFY-001'],
+          verifyStatus: 'ready',
+        },
+      ],
+    }
+
+    await saveAcceptanceState(root, state as AcceptanceState)
+    const loaded = await loadAcceptanceState(root) as FutureAcceptanceState | null
+
+    expect(loaded).not.toBeNull()
+    expect(loaded?.acceptedKnownIssues).toEqual(state.acceptedKnownIssues)
 
     await rm(root, { recursive: true, force: true })
   })

@@ -14,14 +14,15 @@ const ANSWERS = {
 } as const
 
 const REQUIRED_SECTIONS = [
+  '## Human Consensus Summary',
+  '## Identity And Assumptions',
   '## Overview',
   '## Problem',
   '## Goals',
   '## Non-Goals',
-  '## Architecture',
+  '## Behavior Alignment',
   '## Design Constraints',
   '## Success Criteria',
-  '## Proposed Design',
   '## Risks And Mitigations',
   '## Testing Strategy',
 ]
@@ -66,10 +67,10 @@ describe('brainstorm integration — constraint-centric pipeline', () => {
     expect(markdown).toContain('- Honor priority: 快速上线')
 
     // Non-goals present
-    expect(markdown).toContain('- Unrelated modules or workflows')
+    expect(markdown).toContain('- Unrelated product areas or workflows')
     expect(markdown).toContain('- Reworking existing behavior beyond what the new feature needs')
 
-    // Scope boundary in Overview and Proposed Design
+    // Scope boundary in Overview
     expect(markdown).toContain(`In scope: ${FEATURE} new-feature`)
     // Overview joins out-of-scope items with semicolons on one line
     expect(markdown).toContain('Nice-to-have additions that delay first delivery')
@@ -184,12 +185,10 @@ describe('brainstorm integration — constraint-centric pipeline', () => {
     expect(markdown).toContain('Integration surfaces may change during rollout')
     expect(markdown).toContain('Version the endpoint')
 
-    // Architecture section reflects enriched symbols
-    expect(markdown).toContain('### Component: Handle dashboard HTTP requests')
-    expect(markdown).toContain('- `DashboardController` (class)')
-
-    // Synthesis field appears in Proposed Design
-    expect(markdown).toContain('Enriched by test synthesizer')
+    // Implementation-oriented enrichment stays in sidecar metadata, not default design prose
+    expect(markdown).not.toContain('### Component: Handle dashboard HTTP requests')
+    expect(markdown).not.toContain('DashboardController')
+    expect(markdown).not.toContain('Enriched by test synthesizer')
 
     // Sidecar roundtrip
     const rehydrated = JSON.parse(JSON.stringify(validatedModel)) as unknown

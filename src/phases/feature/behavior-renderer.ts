@@ -4,8 +4,11 @@ const NOT_SPECIFIED = 'Not specified.'
 
 export function renderBehaviorDocument(model: RequirementModel): string {
   const sections = [
-    `# ${escapeInline(model.feature)} - Observable Behavior`,
+    `# ${escapeInline(model.featureTitle ?? model.feature)} - Observable Behavior`,
     '',
+    renderDraftNotice(model),
+    renderConsensusSummary(model),
+    renderFeatureCommandBehavior(model),
     renderUserContext(model),
     renderTriggerRules(model),
     renderNonTriggerRules(model),
@@ -17,6 +20,72 @@ export function renderBehaviorDocument(model: RequirementModel): string {
   ]
 
   return sections.join('\n').trimEnd() + '\n'
+}
+
+function renderDraftNotice(model: RequirementModel): string {
+  if (model.convergenceStatus !== 'draft_with_assumptions') {
+    return ''
+  }
+
+  return ['> **Draft with Assumptions / 带假设的草稿**', '', 'Assumptions in this behavior document are not confirmed facts.'].join('\n')
+}
+
+function renderConsensusSummary(model: RequirementModel): string {
+  const lines = ['## Human Consensus Summary', '']
+  lines.push(`Feature title: ${escapeInline(model.featureTitle ?? model.feature)}`)
+  lines.push(`Internal slug: ${escapeInline(model.feature)}`)
+  if (model.sourceIntent) lines.push(`Source intent: ${escapeInline(model.sourceIntent)}`)
+  if (model.problemStatement) lines.push(`Problem statement: ${escapeInline(model.problemStatement)}`)
+  return lines.join('\n')
+}
+
+function renderFeatureCommandBehavior(model: RequirementModel): string {
+  if (!isFeatureCommandBehavior(model)) {
+    return ''
+  }
+
+  const lines = ['## Feature Command Behavior', '']
+  lines.push('- `/openflow-feature` may be invoked with no argument when context identifies the feature idea.')
+  lines.push('- Natural-language command arguments are treated as feature intent before slug sanitization.')
+  lines.push('- Meaningful Chinese or mixed-language input must not fail with “Feature name is too short after sanitization”.')
+  lines.push('- Ambiguous feature identity asks one natural-language disambiguation question instead of asking for a slug.')
+
+  const assumptions = model.assumptions ?? []
+  if (assumptions.length > 0) {
+    lines.push('')
+    lines.push('Assumptions:')
+    for (const assumption of assumptions) lines.push(`- ${escapeInline(assumption)}`)
+  }
+
+  const pending = model.pendingConfirmations ?? []
+  if (pending.length > 0) {
+    lines.push('')
+    lines.push('Pending confirmations:')
+    for (const item of pending) lines.push(`- ${escapeInline(item)}`)
+  }
+
+  return lines.join('\n')
+}
+
+function isFeatureCommandBehavior(model: RequirementModel): boolean {
+  const searchable = [
+    model.feature,
+    model.featureTitle,
+    model.sourceIntent,
+    model.problemStatement,
+    ...model.goals,
+    ...model.nonGoals,
+    ...model.scopeBoundary.inScope,
+    ...model.scopeBoundary.outOfScope,
+    ...model.acceptanceCriteria.map((criterion) => criterion.description),
+    ...model.constraints.map((constraint) => constraint.description),
+  ].filter(Boolean).join(' ').toLowerCase()
+
+  return searchable.includes('/openflow-feature')
+    || searchable.includes('openflow-feature')
+    || searchable.includes('feature command')
+    || searchable.includes('natural-language command')
+    || searchable.includes('feature identity')
 }
 
 // ── User Context ──────────────────────────────────────────────────────────

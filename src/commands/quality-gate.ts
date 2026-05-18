@@ -1,17 +1,21 @@
 import { execSync } from 'node:child_process'
+import { statSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
-import type { OpenFlowContext, QualityGateContextKind } from '../types.js'
+import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, OpenFlowContext, QualityGateContextKind } from '../types.js'
 import { VerifyReadinessStatus } from '../types.js'
-import type { EvidenceFreshnessResult } from '../types.js'
+import type { EvidenceFreshnessResult, VerifyResult } from '../types.js'
 import { handleHarden } from './harden.js'
 import { handleVerify } from './verify.js'
+import { getPlanPath } from '../config.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
-import { loadAcceptanceState } from '../utils/acceptance-state.js'
+import { loadAcceptanceState, saveAcceptanceState } from '../utils/acceptance-state.js'
 import { decideQualityGateRisk, type QualityGateRiskInput } from '../utils/risk-assessment.js'
 import { captureCurrentWorkspaceState, classifyEvidenceFreshness } from '../utils/evidence-freshness.js'
+import { buildMinimalSummary } from '../utils/harden-ledger.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { detectMode } from '../utils/issue-utils.js'
+import { collectFeatureScope, filterPathsToFeatureScope, scopeDiffToFeature } from '../utils/diff-scope.js'
 
 export interface QualityGateArgs {
   /** Optional feature name override */
@@ -35,8 +39,36 @@ interface InternalOptions {
   overrideVerify?: (
     ctx: OpenFlowContext,
     feature?: string,
+    acceptFailures?: boolean,
     sessionID?: string,
   ) => Promise<string>
+}
+
+interface HardenFindingSummary {
+  id: string
+  disposition: string
+  status: string
+  level: string
+  files: string
+  raw: string
+  fields: Record<string, string>
+}
+
+interface AcceptedKnownIssueSummary {
+  findingId: string
+  disposition: 'accepted_known_issue' | 'design_divergence'
+  rationale: string
+  archiveEffect: 'non_blocking' | 'doc_update_required' | 'decision_required'
+  evidenceRefs: string[]
+  verifyStatus: string
+}
+
+interface HardenReadinessGateResult {
+  readiness: string
+  blocker: VerifyReadinessStatus | null
+  knownIssues: HardenFindingSummary[]
+  blockingFindings: string[]
+  findings: HardenFindingSummary[]
 }
 
 /**
@@ -74,8 +106,17 @@ export async function handleQualityGate(
   const limitedContext = contextKind === 'limited' || contextKind === 'none'
 
   // ── 3. Capture workspace state (tracked diff + untracked files) ─────────
-  const diffText = readGitDiff(ctx.directory)
-  const untrackedFiles = readGitUntracked(ctx.directory)
+  const fullDiffText = readGitDiff(ctx.directory)
+  const allUntrackedFiles = readGitUntracked(ctx.directory)
+  const scopedWorkspace = await scopeQualityGateWorkspace(
+    ctx.directory,
+    sanitizedFeature,
+    contextKind,
+    fullDiffText,
+    allUntrackedFiles,
+  )
+  const diffText = scopedWorkspace.diffText
+  const untrackedFiles = scopedWorkspace.untrackedFiles
   const diffFiles = extractDiffFiles(diffText)
   // Merge tracked and untracked — both affect risk
   const changedFiles = [...new Set([...diffFiles, ...untrackedFiles])].sort()
@@ -91,7 +132,12 @@ export async function handleQualityGate(
 
   // ── 5. Evidence freshness check ─────────────────────────────────────────
   const acceptanceState = await loadAcceptanceState(ctx.directory)
-  const workspaceState = captureCurrentWorkspaceState(ctx.directory)
+  const workspaceState = buildScopedWorkspaceState(
+    ctx.directory,
+    captureCurrentWorkspaceState(ctx.directory),
+    changedFiles,
+    scopedWorkspace.scoped,
+  )
   const freshnessResult = classifyEvidenceFreshness(acceptanceState, workspaceState)
 
   // ── 6. Harden decision ──────────────────────────────────────────────────
@@ -124,17 +170,31 @@ export async function handleQualityGate(
   let verifyOutput = ''
   try {
     if (internalOpts?.overrideVerify) {
-      verifyOutput = await internalOpts.overrideVerify(ctx, sanitizedFeature, sessionID)
+      // Preserve accepted failures for mock verify too; stale-evidence re-verify
+      // should not silently clear a previous --accept-failures decision.
+      const mockAcceptFailures = acceptanceState?.acceptedFailures === true ? true : undefined
+      verifyOutput = await internalOpts.overrideVerify(ctx, sanitizedFeature, mockAcceptFailures, sessionID)
+    } else if (freshnessResult.status === 'fresh' && acceptanceState?.verifyResult) {
+      verifyOutput = buildVerifyOutputFromResult(acceptanceState.verifyResult, sanitizedFeature)
     } else {
-      verifyOutput = await handleVerify(ctx, sanitizedFeature, undefined, undefined, sessionID)
+      // Preserve accepted failures from a previous explicit --accept-failures
+      // run so that stale-evidence re-verify does not silently clear them.
+      const preserveAccepted = acceptanceState?.acceptedFailures === true ? true : undefined
+      verifyOutput = await handleVerify(ctx, sanitizedFeature, preserveAccepted, undefined, sessionID)
     }
   } catch (err) {
     verifyOutput = `## Verify\n\nError: verify execution failed: ${err instanceof Error ? err.message : String(err)}`
   }
 
   // ── 8. Extract readiness from verify output ─────────────────────────────
-  const readiness = extractReadinessFromOutput(verifyOutput)
+  const hardenGate = applyHardenReadinessGate(extractReadinessFromOutput(verifyOutput), hardenStatus, hardenOutput)
+  const readiness = hardenGate.readiness
   const verifyContent = stripOpenFlowHeader(verifyOutput)
+
+  if (acceptanceState && hardenOutput.trim()) {
+    acceptanceState.hardenSummary = buildHardenSummaryForAcceptanceState(hardenStatus, hardenOutput, hardenGate.findings, readiness)
+    await saveAcceptanceState(ctx.directory, acceptanceState)
+  }
 
   // ── 9. Build markdown report ────────────────────────────────────────────
   return buildQualityGateReport({
@@ -146,9 +206,13 @@ export async function handleQualityGate(
     hardenStatus,
     hardenOutput,
     readiness,
+    hardenReadinessBlocker: getHardenReadinessBlocker(hardenStatus, hardenOutput),
+    knownIssues: hardenGate.knownIssues,
+    blockingFindings: hardenGate.blockingFindings,
     verifyContent,
     freshnessResult,
     changedFiles,
+    omittedFiles: scopedWorkspace.omittedFiles,
     diffLines,
   })
 }
@@ -203,6 +267,143 @@ function countDiffLines(diffText: string): number {
 
 function detectNewExports(diffText: string): boolean {
   return /^\+\s*(export\s+(const|let|var|function|class|interface|type|enum|default)\s+)/um.test(diffText)
+}
+
+interface QualityGateScopedWorkspace {
+  diffText: string
+  untrackedFiles: string[]
+  omittedFiles: string[]
+  scoped: boolean
+}
+
+async function scopeQualityGateWorkspace(
+  projectDir: string,
+  feature: string | undefined,
+  contextKind: QualityGateContextKind,
+  fullDiffText: string,
+  allUntrackedFiles: string[],
+): Promise<QualityGateScopedWorkspace> {
+  if (!feature || contextKind === 'limited' || contextKind === 'none') {
+    return {
+      diffText: fullDiffText,
+      untrackedFiles: allUntrackedFiles,
+      omittedFiles: [],
+      scoped: false,
+    }
+  }
+
+  const planPath = getPlanPath(projectDir, feature)
+  const planContent = await readOptionalFile(planPath)
+  const contextPaths = await findQualityGateContextPaths(projectDir, feature)
+  const contextContent = await readExistingFiles(contextPaths)
+
+  if (!planContent.trim() && !contextContent.trim()) {
+    return {
+      diffText: fullDiffText,
+      untrackedFiles: allUntrackedFiles,
+      omittedFiles: [],
+      scoped: false,
+    }
+  }
+
+  const diffScope = scopeDiffToFeature(projectDir, feature, fullDiffText, planPath, contextPaths, planContent, contextContent)
+  const featureScope = collectFeatureScope(projectDir, feature, planPath, contextPaths, planContent, contextContent)
+  const untrackedScope = filterPathsToFeatureScope(allUntrackedFiles, featureScope)
+  const omittedFiles = [...new Set([...diffScope.omittedPaths, ...untrackedScope.omittedPaths])].sort()
+
+  return {
+    diffText: diffScope.diff,
+    untrackedFiles: untrackedScope.scopedPaths,
+    omittedFiles,
+    scoped: diffScope.omittedPaths.length > 0 || untrackedScope.omittedPaths.length > 0,
+  }
+}
+
+async function findQualityGateContextPaths(projectDir: string, feature: string): Promise<string[]> {
+  const candidates = [
+    join(projectDir, 'docs', 'changes', feature, 'design.md'),
+    join(projectDir, 'docs', 'changes', feature, 'issue-clarification.md'),
+    ...(await tryGetChangeDirPatterns(projectDir, feature)),
+    ...(await tryGetChangeUnitContextPaths(projectDir, feature)),
+  ]
+  const existing: string[] = []
+  const seen = new Set<string>()
+
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) continue
+    seen.add(candidate)
+    try {
+      await fs.access(candidate)
+      existing.push(candidate)
+    } catch { /* not found */ }
+  }
+
+  return existing
+}
+
+async function tryGetChangeUnitContextPaths(projectDir: string, feature: string): Promise<string[]> {
+  try {
+    const changesDir = join(projectDir, 'docs', 'changes')
+    const dirs = await fs.readdir(changesDir)
+    const fileNames = ['design.md', 'issue-clarification.md', 'requirements.md', 'behavior.md', 'plan.md']
+    return dirs
+      .filter(d => d.includes(feature))
+      .flatMap(d => fileNames.map(fileName => join(projectDir, 'docs', 'changes', d, fileName)))
+  } catch {
+    return []
+  }
+}
+
+async function readExistingFiles(filePaths: string[]): Promise<string> {
+  const parts: string[] = []
+  for (const filePath of filePaths) {
+    const content = await readOptionalFile(filePath)
+    if (content.trim()) parts.push(content)
+  }
+  return parts.join('\n\n')
+}
+
+async function readOptionalFile(filePath: string): Promise<string> {
+  try {
+    return await fs.readFile(filePath, 'utf-8')
+  } catch {
+    return ''
+  }
+}
+
+function buildScopedWorkspaceState(
+  projectDir: string,
+  fullState: CurrentWorkspaceState,
+  changedFiles: string[],
+  scoped: boolean,
+): CurrentWorkspaceState {
+  if (!scoped) return fullState
+
+  const result: CurrentWorkspaceState = {
+    gitHead: fullState.gitHead,
+    changedFiles: [...changedFiles].sort(),
+  }
+  const latestChangeTimestamp = findLatestChangeTimestamp(projectDir, changedFiles)
+  if (latestChangeTimestamp !== undefined) {
+    result.latestChangeTimestamp = latestChangeTimestamp
+  }
+  return result
+}
+
+function findLatestChangeTimestamp(projectDir: string, changedFiles: string[]): number | undefined {
+  let latestChangeTimestamp: number | undefined
+  for (const file of changedFiles) {
+    try {
+      const filePath = join(projectDir, file)
+      const mtimeMs = statSync(filePath).mtimeMs
+      if (latestChangeTimestamp === undefined || mtimeMs > latestChangeTimestamp) {
+        latestChangeTimestamp = mtimeMs
+      }
+    } catch {
+      // File may not exist (deleted in working tree) — skip
+    }
+  }
+  return latestChangeTimestamp
 }
 
 // ── Context resolution ─────────────────────────────────────────────────────
@@ -274,6 +475,285 @@ function extractReadinessFromOutput(verifyOutput: string): string {
   return match?.[1] ?? VerifyReadinessStatus.NotReady
 }
 
+function parseFindingsSummary(hardenOutput: string): HardenFindingSummary[] {
+  if (!hardenOutput.includes('### Findings Summary')) {
+    return []
+  }
+
+  const findings: HardenFindingSummary[] = []
+  const lines = hardenOutput.split('\n')
+  let inBlock = false
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed === '### Findings Summary') {
+      inBlock = true
+      continue
+    }
+
+    if (!inBlock) {
+      continue
+    }
+
+    if (trimmed.startsWith('### ')) {
+      break
+    }
+
+    if (!trimmed) {
+      continue
+    }
+
+    if (!trimmed.startsWith('-')) {
+      break
+    }
+
+    const raw = trimmed.slice(1).trim()
+    const parts = raw.split('|').map(part => part.trim()).filter(Boolean)
+    const id = parts[0] ?? ''
+    if (!id) {
+      continue
+    }
+
+    const fields: Record<string, string> = {}
+    for (const part of parts.slice(1)) {
+      const separatorIndex = part.indexOf('=')
+      if (separatorIndex === -1) {
+        continue
+      }
+      const key = part.slice(0, separatorIndex).trim()
+      const value = part.slice(separatorIndex + 1).trim()
+      if (key) {
+        fields[key] = value
+      }
+    }
+
+    findings.push({
+      id,
+      disposition: fields.disposition ?? '',
+      status: fields.status ?? '',
+      level: fields.level ?? '',
+      files: fields.files ?? '',
+      raw,
+      fields,
+    })
+  }
+
+  return findings
+}
+
+function isResolvedFindingStatus(status: string): boolean {
+  return status === 'fixed' || status === 'verified' || status === 'dismissed'
+}
+
+function isUnresolvedMustFix(finding: HardenFindingSummary): boolean {
+  return finding.disposition === 'must_fix' && !isResolvedFindingStatus(finding.status)
+}
+
+function isUnresolvedNeedsDecision(finding: HardenFindingSummary): boolean {
+  return !isResolvedFindingStatus(finding.status)
+    && (finding.disposition === 'design_divergence'
+      || finding.disposition === 'needs_decision'
+      || finding.status === 'needs_decision')
+}
+
+function formatNeedsDecisionFindingMessage(finding: HardenFindingSummary): string {
+  if (finding.disposition === 'design_divergence') {
+    return `Resolve design-divergence finding \`${finding.id}\` before archive`
+  }
+  return `Resolve harden finding \`${finding.id}\` before archive`
+}
+
+function evaluateHardenReadiness(
+  hardenStatus: string | undefined,
+  hardenOutput: string,
+): Omit<HardenReadinessGateResult, 'readiness'> {
+  const findings = parseFindingsSummary(hardenOutput)
+  const unresolvedMustFix = findings.filter(isUnresolvedMustFix)
+  const unresolvedNeedsDecision = findings.filter(isUnresolvedNeedsDecision)
+  const knownIssues = findings.filter(finding => finding.disposition === 'accepted_known_issue')
+  const blockingFindings: string[] = []
+
+  if (unresolvedMustFix.length > 0) {
+    blockingFindings.push(...unresolvedMustFix.map(
+      finding => `unresolved harden finding \`${finding.id}\` requires fix before archive`,
+    ))
+  }
+
+  if (unresolvedMustFix.length === 0 && unresolvedNeedsDecision.length > 0) {
+    blockingFindings.push(...unresolvedNeedsDecision.map(formatNeedsDecisionFindingMessage))
+  }
+
+  let blocker: VerifyReadinessStatus | null = null
+
+  if (unresolvedMustFix.length > 0) {
+    blocker = VerifyReadinessStatus.NotReady
+  } else if (hardenStatus === 'executor_blocked') {
+    blocker = VerifyReadinessStatus.NeedsDecision
+  } else if (unresolvedNeedsDecision.length > 0) {
+    blocker = VerifyReadinessStatus.NeedsDecision
+  } else if (hardenStatus === 'review_inconclusive') {
+    blocker = VerifyReadinessStatus.NeedsDecision
+  } else {
+    switch (hardenStatus) {
+      case undefined:
+      case 'pass':
+      case 'pass_with_risks':
+      case 'skipped':
+      case 'disabled':
+      case 'budget_exhausted':
+      case 'max_rounds_reached':
+      case 'known_issues_accepted':
+        blocker = null
+        break
+      case 'needs_human':
+        blocker = VerifyReadinessStatus.NeedsDecision
+        break
+      case 'error':
+      case 'rejected':
+      case 'unknown':
+      default:
+        blocker = VerifyReadinessStatus.NotReady
+        break
+    }
+  }
+
+  return {
+    blocker,
+    knownIssues,
+    blockingFindings,
+    findings,
+  }
+}
+
+function getHardenReadinessBlocker(
+  hardenStatus: string | undefined,
+  hardenOutput: string,
+): VerifyReadinessStatus | null {
+  return evaluateHardenReadiness(hardenStatus, hardenOutput).blocker
+}
+
+function applyHardenReadinessGate(
+  readiness: string,
+  hardenStatus: string | undefined,
+  hardenOutput: string,
+): HardenReadinessGateResult {
+  const assessment = evaluateHardenReadiness(hardenStatus, hardenOutput)
+  const nextReadiness = assessment.blocker
+    ?? (assessment.knownIssues.length > 0 && readiness === VerifyReadinessStatus.Ready
+      ? VerifyReadinessStatus.ReadyWithDocUpdates
+      : readiness)
+
+  return {
+    readiness: nextReadiness,
+    ...assessment,
+  }
+}
+
+function extractBudgetConsumed(hardenOutput: string): number {
+  const match = hardenOutput.match(/Budget consumed:\s*(\d+)/u)
+  return Number(match?.[1] ?? '0')
+}
+
+function extractHardenSummaryText(hardenOutput: string): string {
+  const match = hardenOutput.match(/Summary:\s*([^\n]+)/u)
+  return match?.[1]?.trim() ?? ''
+}
+
+function normalizeHardenFindingLevel(level: string): HardenFinding['level'] {
+  const allowedLevels: HardenFinding['level'][] = [
+    'blocking_bug',
+    'spec_violation',
+    'regression_risk',
+    'test_gap',
+    'design_ambiguity',
+    'style_or_preference',
+  ]
+  return allowedLevels.includes(level as HardenFinding['level'])
+    ? level as HardenFinding['level']
+    : 'design_ambiguity'
+}
+
+function normalizeHardenStopReason(
+  hardenStatus: string | undefined,
+  findings: HardenFindingSummary[],
+): string {
+  if (findings.some(isUnresolvedMustFix)) {
+    return 'must_fix_remaining'
+  }
+  if (findings.some(isUnresolvedNeedsDecision)) {
+    return 'needs_decision_remaining'
+  }
+  if (findings.some(finding => finding.disposition === 'accepted_known_issue')) {
+    return 'known_issues_accepted'
+  }
+  return hardenStatus ?? 'unknown'
+}
+
+function toHardenResult(hardenStatus: string | undefined, hardenOutput: string, findings: HardenFindingSummary[]): HardenResult {
+  const roundFindings: HardenFinding[] = findings.map((finding) => {
+    const normalizedFinding: HardenFinding = {
+      id: finding.id,
+      level: normalizeHardenFindingLevel(finding.level),
+      description: finding.raw,
+      evidence: finding.fields.evidence ?? '',
+      files: finding.files ? finding.files.split(',').map(file => file.trim()).filter(Boolean) : [],
+    }
+
+    if (finding.disposition) {
+      normalizedFinding.disposition = finding.disposition as NonNullable<HardenFinding['disposition']>
+    }
+    if (finding.status) {
+      normalizedFinding.status = finding.status as NonNullable<HardenFinding['status']>
+    }
+
+    return normalizedFinding
+  })
+
+  return {
+    status: (hardenStatus ?? 'unknown') as HardenStatus,
+    rounds: roundFindings.length > 0 ? [{ round: 1, findings: roundFindings }] : [],
+    budgetConsumed: extractBudgetConsumed(hardenOutput),
+    summary: extractHardenSummaryText(hardenOutput),
+    stopReason: normalizeHardenStopReason(hardenStatus, findings),
+    acceptedFindingsSummary: findings
+      .filter(finding => finding.disposition === 'accepted_known_issue')
+      .map(finding => finding.raw)
+      .join('\n'),
+  }
+}
+
+function buildAcceptedKnownIssuesSummary(findings: HardenFindingSummary[], verifyStatus: string): AcceptedKnownIssueSummary[] {
+  return findings
+    .filter(finding => finding.disposition === 'accepted_known_issue')
+    .map(finding => ({
+      findingId: finding.id,
+      disposition: 'accepted_known_issue',
+      rationale: finding.fields.rationale ?? finding.raw,
+      archiveEffect: finding.fields.archive_effect === 'non_blocking'
+        ? 'non_blocking'
+        : finding.fields.archive_effect === 'decision_required'
+          ? 'decision_required'
+          : 'doc_update_required',
+      evidenceRefs: (finding.fields.evidence ?? '').split(',').map(ref => ref.trim()).filter(Boolean),
+      verifyStatus,
+    }))
+}
+
+function buildHardenSummaryForAcceptanceState(
+  hardenStatus: string | undefined,
+  hardenOutput: string,
+  findings: HardenFindingSummary[],
+  verifyStatus: string,
+): string {
+  const minimalSummary = buildMinimalSummary(toHardenResult(hardenStatus, hardenOutput, findings))
+  const base = JSON.parse(minimalSummary) as Record<string, unknown>
+  const acceptedKnownIssues = buildAcceptedKnownIssuesSummary(findings, verifyStatus)
+  if (acceptedKnownIssues.length > 0) {
+    base.acceptedKnownIssues = acceptedKnownIssues
+  }
+  return JSON.stringify(base)
+}
+
 function stripOpenFlowHeader(output: string): string {
   const lines = output.split('\n')
   let startIdx = 0
@@ -298,9 +778,13 @@ interface QualityGateReportInput {
   hardenStatus?: string
   hardenOutput: string
   readiness: string
+  hardenReadinessBlocker: VerifyReadinessStatus | null
+  knownIssues: HardenFindingSummary[]
+  blockingFindings: string[]
   verifyContent: string
   freshnessResult: EvidenceFreshnessResult
   changedFiles: string[]
+  omittedFiles: string[]
   diffLines: number
 }
 
@@ -314,9 +798,13 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     hardenStatus,
     hardenOutput,
     readiness,
+    hardenReadinessBlocker,
+    knownIssues,
+    blockingFindings,
     verifyContent,
     freshnessResult,
     changedFiles,
+    omittedFiles,
     diffLines,
   } = input
 
@@ -332,6 +820,12 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
       : '- **Changed Files**: none detected',
     changedFiles.length > 0
       ? changedFiles.map(f => `  - \`${escapeMarkdown(f)}\``).join('\n')
+      : '',
+    omittedFiles.length > 0
+      ? `- **Scoped Out Files**: ${omittedFiles.length} unrelated file(s) omitted from risk and freshness checks`
+      : '',
+    omittedFiles.length > 0
+      ? omittedFiles.map(f => `  - \`${escapeMarkdown(f)}\``).join('\n')
       : '',
     '',
   ].filter(Boolean).join('\n')
@@ -355,19 +849,22 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     `- **Status**: \`${hardenStatus ?? 'unknown'}\``,
     hardenStatus === 'skipped' ? '- **Rationale**: change risk is below harden threshold' : '',
     hardenStatus === 'disabled' ? '- **Rationale**: harden is disabled in OpenFlow configuration' : '',
-    hardenStatus && hardenStatus !== 'skipped' && hardenStatus !== 'disabled'
-      ? [
-          '',
-          '<details>',
-          '<summary>Harden Output</summary>',
-          '',
-          hardenOutput,
-          '',
-          '</details>',
-        ].join('\n')
-      : '',
     '',
   ].filter(Boolean).join('\n')
+
+  const hardenTraceSection = hardenStatus && hardenStatus !== 'skipped' && hardenStatus !== 'disabled'
+    ? [
+        '### Harden Trace',
+        '',
+        '<details>',
+        '<summary>Harden Trace</summary>',
+        '',
+        hardenOutput,
+        '',
+        '</details>',
+        '',
+      ].join('\n')
+    : ''
 
   // ── Evidence-Aware Verify section ─────────────────────────────────────
   const freshnessBlock = buildFreshnessBlock(freshnessResult)
@@ -393,9 +890,22 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     '### Readiness',
     '',
     `- **Status**: ${readinessLabel} (\`${readiness}\`)`,
+    hardenReadinessBlocker
+      ? `- **Harden Gate**: ❌ harden status \`${hardenStatus ?? 'unknown'}\` blocks archive readiness despite verify output.`
+      : '',
+    ...blockingFindings.map(finding => `- ${finding}`),
     limitedContext ? '- **Limited Context**: ⚠️ readiness reflects technical verification only — semantic alignment was not possible' : '',
     '',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
+
+  const knownIssuesSection = knownIssues.length > 0
+    ? [
+        '### Known Issues',
+        '',
+        ...knownIssues.map(finding => `- ${finding.raw}`),
+        '',
+      ].join('\n')
+    : ''
 
   // ── Next Step section ─────────────────────────────────────────────────
   let nextStep = ''
@@ -420,8 +930,10 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     contextSection,
     riskSection,
     hardenSection,
+    hardenTraceSection,
     verifySection,
     readinessSection,
+    knownIssuesSection,
     nextStepSection,
     '---',
     '',
@@ -444,4 +956,43 @@ function buildFreshnessBlock(freshness: EvidenceFreshnessResult): string {
       ? freshness.staleDetails.map(d => `  - ${d}`).join('\n')
       : '',
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * Build verify-like markdown output from a stored VerifyResult.
+ * Used when evidence is fresh — the quality gate reuses the
+ * stored result instead of rerunning handleVerify.
+ *
+ * Produces output compatible with extractReadinessFromOutput
+ * (matches `- status:\s*(\S+)`) and stripOpenFlowHeader
+ * (starts with `### Evidence` or `- checks_run`).
+ */
+function buildVerifyOutputFromResult(
+  result: VerifyResult,
+  feature?: string,
+): string {
+  const constraintsList = result.constraintsChecked.length > 0
+    ? result.constraintsChecked.map(c => `  - ${c} ✅ (reused)`).join('\n')
+    : '  - (none recorded)'
+
+  return [
+    '## Verify (reused from fresh acceptance state)',
+    `Feature: ${feature || 'unknown'}`,
+    '',
+    '### Evidence',
+    '- checks_run:',
+    constraintsList,
+    `- observed_behavior_summary: ${result.evidenceSummary}`,
+    '- intended_vs_actual_delta: no delta (reused from fresh evidence)',
+    '- doc_alignment_summary: reused from fresh acceptance state',
+    '- current_decisions_conflict_summary: no conflicts (reused)',
+    '- known_risks_or_missing_evidence: none (reused)',
+    '',
+    '### Readiness',
+    `- status: ${result.readiness}`,
+    `- reason_codes: ${result.reasonCodes.join(', ')}`,
+    '- reason: reused from fresh acceptance state evidence',
+    '- next_step: proceed (reused from fresh evidence)',
+    '',
+  ].join('\n')
 }

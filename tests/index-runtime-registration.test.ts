@@ -23,6 +23,9 @@ describe('OpenFlowPlugin runtime registration', () => {
     const legacySkillDir = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-brainstorm')
     await mkdir(join(legacySkillDir), { recursive: true })
     await writeFile(join(legacySkillDir, 'SKILL.md'), 'legacy skill', 'utf-8')
+    const legacyFeatureSkillDir = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-feature')
+    await mkdir(join(legacyFeatureSkillDir), { recursive: true })
+    await writeFile(join(legacyFeatureSkillDir, 'SKILL.md'), 'legacy feature skill', 'utf-8')
 
     await OpenFlowPlugin(createPluginInput(root) as never)
 
@@ -49,6 +52,10 @@ describe('OpenFlowPlugin runtime registration', () => {
     expect(writingPlanSkillContent).toContain('name: openflow-writing-plan')
     expect(writingPlanSkillContent).toContain('/openflow-writing-plan <feature>')
 
+    // 4b. openflow-feature remains command-only and must not be registered as a skill.
+    const featureSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-feature', 'SKILL.md')
+    await expect(access(featureSkillPath)).rejects.toBeDefined()
+
     // 5. openflow-issue command file is created with correct description
     const issueCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-issue.md')
     const issueCommandContent = await readFile(issueCommandPath, 'utf-8')
@@ -56,6 +63,18 @@ describe('OpenFlowPlugin runtime registration', () => {
     expect(issueCommandContent).toContain('openflow-issue')
     expect(issueCommandContent).toContain('OpenFlow issue clarification and triage command for uncertain problems')
     expect(issueCommandContent).toContain('OpenFlow command: /openflow-issue $ARGUMENTS')
+
+    // 6. Negative-scope: openflow-reflect command file must NOT be created
+    const reflectCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-reflect.md')
+    await expect(access(reflectCommandPath)).rejects.toBeDefined()
+
+    // 7. Negative-scope: openflow-reflect skill directory must NOT be created
+    const reflectSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-reflect', 'SKILL.md')
+    await expect(access(reflectSkillPath)).rejects.toBeDefined()
+
+    // 8. Negative-scope: openflow-ai-reflection is skill-only; no command file
+    const aiReflectionCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-ai-reflection.md')
+    await expect(access(aiReflectionCommandPath)).rejects.toBeDefined()
 
     await rm(root, { recursive: true, force: true })
   })

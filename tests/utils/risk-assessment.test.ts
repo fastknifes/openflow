@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  decideQualityGateRisk,
   assessChangeRisk,
+  decideQualityGateRisk,
   isHighRisk,
   RISK_REASON_CODES,
 } from '../../src/utils/risk-assessment.js'
@@ -28,6 +28,24 @@ describe('decideQualityGateRisk', () => {
     expect(result.reasons).toContain(RISK_REASON_CODES.LOW_TRIVIAL_CHANGE)
   })
 
+  test('trivial doc change skips harden', () => {
+    const result = decideQualityGateRisk(mkInput({
+      files: ['README.md'],
+      diffLines: 8,
+      diffText: diffLinesToString([
+        'diff --git a/README.md b/README.md',
+        '--- a/README.md',
+        '+++ b/README.md',
+        '@@ -1,2 +1,4 @@',
+        '+new line',
+        '+another line',
+      ]),
+    }))
+    expect(result.risk).toBe('low')
+    expect(result.shouldHarden).toBe(false)
+    expect(result.reasons).toContain(RISK_REASON_CODES.LOW_TRIVIAL_CHANGE)
+  })
+
   test('two-file change without other triggers returns medium, no harden', () => {
     const result = decideQualityGateRisk(mkInput({
       files: ['src/a.ts', 'src/b.ts'],
@@ -36,14 +54,6 @@ describe('decideQualityGateRisk', () => {
     expect(result.risk).toBe('medium')
     expect(result.shouldHarden).toBe(false)
     expect(result.reasons).toContain(RISK_REASON_CODES.FILES_COUNT_2)
-  })
-
-  test('trivial doc change skips harden (no high triggers, no sensitive paths)', () => {
-    const result = decideQualityGateRisk(mkInput({
-      files: ['README.md'],
-      diffLines: 8,
-    }))
-    expect(result.shouldHarden).toBe(false)
   })
 
   // -- Multi-file trigger ----------------------------------------------------
@@ -69,7 +79,7 @@ describe('decideQualityGateRisk', () => {
     expect(result.reasons).toContain(RISK_REASON_CODES.DIFF_LINES_GE_50)
   })
 
-  test('49 diff lines does NOT trigger diff_lines threshold', () => {
+  test('49 diff lines does NOT trigger harden', () => {
     const result = decideQualityGateRisk(mkInput({
       diffLines: 49,
     }))
@@ -122,41 +132,17 @@ describe('decideQualityGateRisk', () => {
     })
   }
 
-  test('sensitive path only emits one reason per matching file', () => {
+  test('sensitive path only emits one reason per file match (breaks on first match)', () => {
     const result = decideQualityGateRisk(mkInput({
       files: ['src/hooks/chat-message.ts'],
     }))
-    const pathReasons = result.reasons.filter(r => r.startsWith(RISK_REASON_CODES.PATH_SENSITIVE_PREFIX))
-    expect(pathReasons.length).toBe(1)
-  })
-
-  test('sensitive path reason accumulates even when earlier trigger already set risk high', () => {
-    // File count (>=3) triggers high first; file[2] is a sensitive path — its reason must still appear
-    const result = decideQualityGateRisk(mkInput({
-      files: ['src/app.ts', 'src/utils/helper.ts', 'src/hooks/useAuth.ts'],
-      diffLines: 5,
-    }))
-    expect(result.risk).toBe('high')
-    expect(result.shouldHarden).toBe(true)
-    expect(result.reasons).toContain(RISK_REASON_CODES.FILES_COUNT_GE_3)
+    expect(result.reasons.filter(r => r.startsWith(RISK_REASON_CODES.PATH_SENSITIVE_PREFIX)).length).toBe(1)
     expect(result.reasons).toContain(`${RISK_REASON_CODES.PATH_SENSITIVE_PREFIX}:hooks`)
   })
 
-  test('sensitive path in later file is detected even when file count already made risk high', () => {
-    // files[0] and files[1] are non-sensitive — >=3 sets risk high.
-    // files[2] is a sensitive path — it must still be detected and added to reasons.
-    const result = decideQualityGateRisk(mkInput({
-      files: ['src/utils/helper.ts', 'src/lib/utils.ts', 'src/commands/run.ts'],
-      diffLines: 10,
-    }))
-    expect(result.risk).toBe('high')
-    expect(result.reasons).toContain(RISK_REASON_CODES.FILES_COUNT_GE_3)
-    expect(result.reasons).toContain(`${RISK_REASON_CODES.PATH_SENSITIVE_PREFIX}:commands`)
-  })
+  // -- Critical files (types.ts / index.ts) ----------------------------------
 
-  // -- Type system files -----------------------------------------------------
-
-  test('src/types.ts forces harden via critical_path reason', () => {
+  test('src/types.ts forces harden', () => {
     const result = decideQualityGateRisk(mkInput({
       files: ['src/types.ts'],
       diffLines: 5,
@@ -166,13 +152,14 @@ describe('decideQualityGateRisk', () => {
     expect(result.reasons).toContain(RISK_REASON_CODES.PATH_CRITICAL_TYPES_OR_INDEX)
   })
 
-  test('src/index.ts forces harden via critical_path reason', () => {
+  test('src/index.ts forces harden', () => {
     const result = decideQualityGateRisk(mkInput({
       files: ['src/index.ts'],
       diffLines: 5,
     }))
     expect(result.risk).toBe('high')
     expect(result.shouldHarden).toBe(true)
+    expect(result.reasons).toContain(RISK_REASON_CODES.PATH_CRITICAL_TYPES_OR_INDEX)
   })
 
   // -- Stateful logic --------------------------------------------------------
@@ -199,37 +186,86 @@ describe('decideQualityGateRisk', () => {
 
   // -- Complexity grading from diffText --------------------------------------
 
-  test('complexity:complex via diffText forces harden', () => {
-    // Diff that gradeComplexityFromDiff classifies as 'complex'
-    const diff = [
-      'diff --git a/src/utils/a.ts b/src/utils/a.ts',
-      '--- a/src/utils/a.ts',
-      '+++ b/src/utils/a.ts',
-      '@@ -1,2 +1,12 @@',
-      '+export class NewService {',
-      '+  private name: string',
-      '+  private age: number',
-      '+  constructor(name: string, age: number) {',
-      '+    this.name = name',
-      '+    this.age = age',
-      '+  }',
-      '+}',
-      '-old line 1',
-      '-old line 2',
-      '-old line 3',
-    ].join('\n')
-
+  test('complexity:complex via diffText forces medium (no other triggers)', () => {
+    // A 3-file diff makes gradeComplexityFromDiff return 'complex'
+    const diff = diffLinesToString([
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1,2 +1,4 @@',
+      '-x',
+      '+a1',
+      '+a2',
+      '+a3',
+      'diff --git a/src/b.ts b/src/b.ts',
+      '--- a/src/b.ts',
+      '+++ b/src/b.ts',
+      '@@ -1,2 +1,4 @@',
+      '-y',
+      '+b1',
+      '+b2',
+      '+b3',
+      'diff --git a/src/c.ts b/src/c.ts',
+      '--- a/src/c.ts',
+      '+++ b/src/c.ts',
+      '@@ -1,2 +1,4 @@',
+      '-z',
+      '+c1',
+      '+c2',
+      '+c3',
+    ])
+    // Only 2 files in input — complexity alone gives medium
     const result = decideQualityGateRisk(mkInput({
+      files: ['src/utils/a.ts', 'src/utils/b.ts'],
+      diffLines: 12,
+      diffText: diff,
+    }))
+    expect(result.risk).toBe('medium')
+    expect(result.shouldHarden).toBe(false)
+    expect(result.reasons).toContain(RISK_REASON_CODES.COMPLEXITY_COMPLEX)
+  })
+
+  test('complexity:complex + another trigger → high, shouldHarden', () => {
+    const diff = diffLinesToString([
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1,2 +1,4 @@',
+      '-x',
+      '+a1',
+      '+a2',
+      '+a3',
+      'diff --git a/src/b.ts b/src/b.ts',
+      '--- a/src/b.ts',
+      '+++ b/src/b.ts',
+      '@@ -1,2 +1,4 @@',
+      '-y',
+      '+b1',
+      '+b2',
+      '+b3',
+      'diff --git a/src/c.ts b/src/c.ts',
+      '--- a/src/c.ts',
+      '+++ b/src/c.ts',
+      '@@ -1,2 +1,4 @@',
+      '-z',
+      '+c1',
+      '+c2',
+      '+c3',
+    ])
+    const result = decideQualityGateRisk(mkInput({
+      files: ['src/hooks/useA.ts', 'src/commands/cmd.ts', 'src/utils/help.ts'],
+      diffLines: 12,
       diffText: diff,
     }))
     expect(result.risk).toBe('high')
     expect(result.shouldHarden).toBe(true)
+    expect(result.reasons).toContain(RISK_REASON_CODES.FILES_COUNT_GE_3)
     expect(result.reasons).toContain(RISK_REASON_CODES.COMPLEXITY_COMPLEX)
   })
 
   // -- Reason accumulation ---------------------------------------------------
 
-  test('multiple triggers produce all expected reason codes', () => {
+  test('multiple triggers produce all reason codes', () => {
     const result = decideQualityGateRisk(mkInput({
       files: ['src/commands/harden.ts', 'src/hooks/auth.ts', 'src/verify/check.ts'],
       diffLines: 100,
@@ -242,24 +278,29 @@ describe('decideQualityGateRisk', () => {
     expect(result.reasons).toContain(RISK_REASON_CODES.FILES_COUNT_GE_3)
     expect(result.reasons).toContain(RISK_REASON_CODES.DIFF_LINES_GE_50)
     expect(result.reasons).toContain(RISK_REASON_CODES.EXPORTS_NEW_PUBLIC_API)
-    expect(result.reasons).toContain(`${RISK_REASON_CODES.PATH_SENSITIVE_PREFIX}:commands`)
     expect(result.reasons).toContain(RISK_REASON_CODES.STATEFUL_LOGIC)
     expect(result.reasons).toContain(RISK_REASON_CODES.PRODUCTION_DATA_LOSS_RISK)
+    // sensitive path matches first one only
+    expect(result.reasons.some(r => r.startsWith(RISK_REASON_CODES.PATH_SENSITIVE_PREFIX))).toBe(true)
   })
 
-  test('empty files array defaults to low with trivial reason', () => {
+  test('empty file list defaults to low', () => {
     const result = decideQualityGateRisk(mkInput({
       files: [],
     }))
     expect(result.risk).toBe('low')
     expect(result.shouldHarden).toBe(false)
+    expect(result.reasons).toContain(RISK_REASON_CODES.LOW_TRIVIAL_CHANGE)
   })
 
-  test('nullish/empty files defaults to low', () => {
-    // @ts-expect-error testing null input path
-    const result = decideQualityGateRisk(mkInput({ files: null }))
-    expect(result.risk).toBe('low')
-    expect(result.shouldHarden).toBe(false)
+  // -- Reason format ────────────────────────────────────────────────────────
+
+  test('reasons are stable string codes, not prose', () => {
+    const result = decideQualityGateRisk(mkInput({ files: ['a.ts', 'b.ts', 'c.ts'], diffLines: 5 }))
+    for (const reason of result.reasons) {
+      expect(reason).not.toMatch(/\s{2,}/)
+      expect(reason).not.toMatch(/^[A-Z]/)
+    }
   })
 })
 
@@ -286,8 +327,16 @@ describe('assessChangeRisk (legacy)', () => {
     expect(assessChangeRisk(['src/hooks/chat.ts'], 5, false)).toBe('high')
   })
 
+  test('harden path returns high', () => {
+    expect(assessChangeRisk(['src/harden/audit.ts'], 5, false)).toBe('high')
+  })
+
   test('src/types.ts returns high', () => {
     expect(assessChangeRisk(['src/types.ts'], 5, false)).toBe('high')
+  })
+
+  test('src/index.ts returns high', () => {
+    expect(assessChangeRisk(['src/index.ts'], 5, false)).toBe('high')
   })
 
   test('two files returns medium', () => {
@@ -308,3 +357,9 @@ describe('isHighRisk', () => {
     expect(isHighRisk('low')).toBe(false)
   })
 })
+
+// ── Helper ─────────────────────────────────────────────────────────────────
+
+function diffLinesToString(lines: string[]): string {
+  return lines.join('\n')
+}

@@ -3,8 +3,8 @@ import { escapeMarkdown } from './security.js'
 
 type VerificationFormatMode = 'task' | 'plan'
 
-function formatPrefix(mode: VerificationFormatMode): string {
-  return mode === 'plan' ? '- [ ]' : '-'
+function formatPrefix(_mode: VerificationFormatMode): string {
+  return '-'
 }
 
 function formatSecurityCheck(check: SecurityCheckType, mode: VerificationFormatMode): string {

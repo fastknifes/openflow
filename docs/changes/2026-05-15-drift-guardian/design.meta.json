@@ -1,0 +1,96 @@
+{
+  "feature": "drift-guardian",
+  "constraints": [
+    {
+      "id": "d-0001",
+      "category": "scope",
+      "severity": "should",
+      "description": "兼容现有系统：Drift Guardian 不能破坏现有的 writing-plan、quality-gate、verify、archive/implementation-mapper 的工作流和接口。Guardian evidence 作为 verify 的可选输入",
+      "rationale": "This free-text constraint was provided directly during feature design and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "d-0002",
+      "category": "scope",
+      "severity": "should",
+      "description": "不能改变 verify 的独立裁判地位。contract markers 应复用现有 OpenFlowContract / alignmentItems / BehaviorScenario 结构",
+      "rationale": "This free-text constraint was provided directly during feature design and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "d-0003",
+      "category": "scope",
+      "severity": "should",
+      "description": "不引入新的解析口径。checkpoint mini task 应作为 writing-plan 生成的常规任务插入",
+      "rationale": "This free-text constraint was provided directly during feature design and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "d-0004",
+      "category": "scope",
+      "severity": "should",
+      "description": "不改变 plan 生成的根本逻辑。",
+      "rationale": "This free-text constraint was provided directly during feature design and should be preserved",
+      "verificationMethod": "Review the implementation against the exact stated constraint during design and testing",
+      "sourceQuestionId": "constraints"
+    }
+  ],
+  "scopeBoundary": {
+    "inScope": [
+      "drift-guardian new-feature：这是一个全新功能，虽然会复用 writing-plan、quality-gate、verify、archive/implementation-mapper 等现有流程，但 Drift Guardian 的 contract markers、checkpoint mini task、semantic drift review 和 Guardian evidence 闭环是新的能力。",
+      "Address the stated problem: 采用推荐的闭环方案：文档阶段生成稳定 contract markers；writing-plan 读取 markers 并把 Drift Guardian checkpoint 写成显式 mini task；write/edit 阶段只做文件变更记录和可选确定性轻量检查，不跑 LLM；每个明确 plan milestone/checkpoint task 完成后运行异步语义漂移检查，优先使用 guardian.semantic.model 配置的 OpenCode/OMO 模型名，未配置时 fallback 到 OMO librarian；语义检查只产出 advisory evidence / pending findings，不作为 ready 裁判；quality-gate/verify 重新读取 markers、checkpoint evidence、代码和文档，独立最终判定 readiness；archive/implementation-mapper 使用 marker ID 建立 marker → plan task → checkpoint evidence → verify result → code/evidence 的追溯闭环。"
+    ],
+    "outOfScope": []
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "ac-0001",
+      "description": "drift-guardian addresses the stated problem: 采用推荐的闭环方案：文档阶段生成稳定 contract markers；writing-plan 读取 markers 并把 Drift Guardian checkpoint 写成显式 mini task；write/edit 阶段只做文件变更记录和可选确定性轻量检查，不跑 LLM；每个明确 plan milestone/checkpoint task 完成后运行异步语义漂移检查，优先使用 guardian.semantic.model 配置的 OpenCode/OMO 模型名，未配置时 fallback 到 OMO librarian；语义检查只产出 advisory evidence / pending findings，不作为 ready 裁判；quality-gate/verify 重新读取 markers、checkpoint evidence、代码和文档，独立最终判定 readiness；archive/implementation-mapper 使用 marker ID 建立 marker → plan task → checkpoint evidence → verify result → code/evidence 的追溯闭环。",
+      "category": "problem"
+    },
+    {
+      "id": "ac-0002",
+      "description": "drift-guardian works for the target users: 内部开发者：主要使用者是工程/研发内部开发者，尤其是使用 OpenCode/OpenFlow/OMO 进行 AI 辅助实现、验证和归档的开发者。",
+      "category": "target-users"
+    },
+    {
+      "id": "ac-0003",
+      "description": "drift-guardian implementation reflects the selected priority: 风险最小：优先保证 Drift Guardian 不会误判、不会阻塞 AI 正常执行、不会替代 quality-gate/verify 的最终裁判地位。确定性检查应保守，语义检查只产出 advisory evidence。自动修复仅限可证明唯一合理的小范围修改。",
+      "category": "priority"
+    },
+    {
+      "id": "ac-0004",
+      "description": "drift-guardian respects the stated constraint: 兼容现有系统：Drift Guardian 不能破坏现有的 writing-plan、quality-gate、verify、archive/implementation-mapper 的工作流和接口。Guardian evidence 作为 verify 的可选输入",
+      "category": "constraints"
+    },
+    {
+      "id": "ac-0005",
+      "description": "drift-guardian respects the stated constraint: 不能改变 verify 的独立裁判地位。contract markers 应复用现有 OpenFlowContract / alignmentItems / BehaviorScenario 结构",
+      "category": "constraints"
+    },
+    {
+      "id": "ac-0006",
+      "description": "drift-guardian respects the stated constraint: 不引入新的解析口径。checkpoint mini task 应作为 writing-plan 生成的常规任务插入",
+      "category": "constraints"
+    },
+    {
+      "id": "ac-0007",
+      "description": "drift-guardian respects the stated constraint: 不改变 plan 生成的根本逻辑。",
+      "category": "constraints"
+    }
+  ],
+  "goals": [
+    "Solve: 采用推荐的闭环方案：文档阶段生成稳定 contract markers；writing-plan 读取 markers 并把 Drift Guardian checkpoint 写成显式 mini task；write/edit 阶段只做文件变更记录和可选确定性轻量检查，不跑 LLM；每个明确 plan milestone/checkpoint task 完成后运行异步语义漂移检查，优先使用 guardian.semantic.model 配置的 OpenCode/OMO 模型名，未配置时 fallback 到 OMO librarian；语义检查只产出 advisory evidence / pending findings，不作为 ready 裁判；quality-gate/verify 重新读取 markers、checkpoint evidence、代码和文档，独立最终判定 readiness；archive/implementation-mapper 使用 marker ID 建立 marker → plan task → checkpoint evidence → verify result → code/evidence 的追溯闭环。",
+    "Serve target users: 内部开发者：主要使用者是工程/研发内部开发者，尤其是使用 OpenCode/OpenFlow/OMO 进行 AI 辅助实现、验证和归档的开发者。",
+    "Honor priority: 风险最小：优先保证 Drift Guardian 不会误判、不会阻塞 AI 正常执行、不会替代 quality-gate/verify 的最终裁判地位。确定性检查应保守，语义检查只产出 advisory evidence。自动修复仅限可证明唯一合理的小范围修改。"
+  ],
+  "nonGoals": [
+    "Unrelated modules or workflows"
+  ],
+  "problemStatement": "采用推荐的闭环方案：文档阶段生成稳定 contract markers；writing-plan 读取 markers 并把 Drift Guardian checkpoint 写成显式 mini task；write/edit 阶段只做文件变更记录和可选确定性轻量检查，不跑 LLM；每个明确 plan milestone/checkpoint task 完成后运行异步语义漂移检查，优先使用 guardian.semantic.model 配置的 OpenCode/OMO 模型名，未配置时 fallback 到 OMO librarian；语义检查只产出 advisory evidence / pending findings，不作为 ready 裁判；quality-gate/verify 重新读取 markers、checkpoint evidence、代码和文档，独立最终判定 readiness；archive/implementation-mapper 使用 marker ID 建立 marker → plan task → checkpoint evidence → verify result → code/evidence 的追溯闭环。",
+  "targetUsers": "内部开发者：主要使用者是工程/研发内部开发者，尤其是使用 OpenCode/OpenFlow/OMO 进行 AI 辅助实现、验证和归档的开发者。",
+  "testingStrategy": "Use targeted tests and review to verify: 风险最小：优先保证 Drift Guardian 不会误判、不会阻塞 AI 正常执行、不会替代 quality-gate/verify 的最终裁判地位。确定性检查应保守，语义检查只产出 advisory evidence。自动修复仅限可证明唯一合理的小范围修改。, 兼容现有系统：Drift Guardian 不能破坏现有的 writing-plan、quality-gate、verify、archive/implementation-mapper 的工作流和接口。Guardian evidence 作为 verify 的可选输入, 不能改变 verify 的独立裁判地位。contract markers 应复用现有 OpenFlowContract / alignmentItems / BehaviorScenario 结构, 不引入新的解析口径。checkpoint mini task 应作为 writing-plan 生成的常规任务插入, 不改变 plan 生成的根本逻辑。"
+}

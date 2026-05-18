@@ -105,7 +105,10 @@ export function isHighRisk(risk: string): boolean {
  *  - types.ts or index.ts changed
  *  - stateful logic
  *  - production/data-loss risk
- *  - complexity grading returns 'complex'
+ *
+ * **Elevated risk** (→ medium, no harden by itself):
+ *  - complexity grading returns 'complex' (forces harden only when combined
+ *    with another high trigger)
  */
 export function decideQualityGateRisk(input: QualityGateRiskInput): QualityGateRiskResult {
   const reasons: string[] = []
@@ -131,16 +134,17 @@ export function decideQualityGateRisk(input: QualityGateRiskInput): QualityGateR
     risk = 'high'
   }
 
-  // 4. Sensitive paths — scan every file so reasons accumulate fully
+  // 4. Sensitive paths
   for (const f of files) {
     for (const s of SENSITIVE_PATHS) {
       if (f.includes(s)) {
         const pathLabel = s.replace(/\//g, '')
         reasons.push(`${RISK_REASON_CODES.PATH_SENSITIVE_PREFIX}:${pathLabel}`)
         risk = 'high'
-        break // one sensitive path match per file is enough
+        break // one sensitive path match = high, no need to check more
       }
     }
+    if (risk === 'high') break // early exit if already high from sensitive path
   }
 
   // 5. Critical files (types.ts / index.ts)
@@ -161,14 +165,16 @@ export function decideQualityGateRisk(input: QualityGateRiskInput): QualityGateR
     risk = 'high'
   }
 
-  // 8. Complexity grading from diff text — a hard trigger for complex diffs
+  // 8. Complexity grading from diff text
+  // Complexity alone elevates to medium; combined with another high trigger
+  // it becomes high via that other trigger.
   if (input.diffText) {
     const complexity = gradeComplexityFromDiff(input.diffText)
     if (complexity === 'complex') {
       reasons.push(RISK_REASON_CODES.COMPLEXITY_COMPLEX)
-      risk = 'high'
+      if (risk !== 'high') risk = 'medium'
     }
-    // trivial and simple don't push to harden on their own
+    // trivial and simple don't elevate risk on their own
   }
 
   // 9. Two files with no high triggers → medium

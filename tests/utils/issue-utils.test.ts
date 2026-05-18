@@ -7,7 +7,9 @@ import {
   resolveIssueWorkspace,
   detectMode,
   buildIssueResolution,
+  readIssuePacket,
   ISSUE_CLARIFICATION_FILENAME,
+  ISSUE_PACKET_FILENAME,
   PROMOTION_CANDIDATE_FILENAME,
   ISSUE_RESOLUTION_FILENAME,
   type IssueMode,
@@ -17,6 +19,10 @@ import {
 describe('issue-utils constants', () => {
   test('ISSUE_CLARIFICATION_FILENAME is correct', () => {
     expect(ISSUE_CLARIFICATION_FILENAME).toBe('issue-clarification.md')
+  })
+
+  test('ISSUE_PACKET_FILENAME is correct', () => {
+    expect(ISSUE_PACKET_FILENAME).toBe('issue-packet.json')
   })
 
   test('PROMOTION_CANDIDATE_FILENAME is correct', () => {
@@ -100,6 +106,46 @@ describe('resolveIssueWorkspace', () => {
   test('should handle directory with trailing slash', () => {
     const result = resolveIssueWorkspace({ directory: '/project/root/' }, 'test-issue')
     expect(result.workspacePath).toBe(`/project/root/docs/changes/${result.workspacePath.split('/').pop()}`)
+  })
+})
+
+describe('readIssuePacket', () => {
+  let tmpDir: string
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'issue-packet-test-'))
+  })
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true })
+  })
+
+  test('normalizes missing array fields from partial manual packet', async () => {
+    await fs.writeFile(path.join(tmpDir, ISSUE_PACKET_FILENAME), JSON.stringify({
+      version: 1,
+      slug: 'partial-packet',
+      status: 'classified',
+      classification: 'bugfix',
+    }), 'utf-8')
+
+    const packet = await readIssuePacket(tmpDir)
+
+    expect(packet).not.toBeNull()
+    expect(packet!.evidence).toEqual([])
+    expect(packet!.hypotheses).toEqual([])
+    expect(packet!.requiredChecks).toEqual([])
+    expect(packet!.symptom).toBe('partial-packet')
+  })
+
+  test('rejects packet with invalid classification value', async () => {
+    await fs.writeFile(path.join(tmpDir, ISSUE_PACKET_FILENAME), JSON.stringify({
+      version: 1,
+      slug: 'invalid-packet',
+      status: 'classified',
+      classification: 'definitely_not_valid',
+    }), 'utf-8')
+
+    await expect(readIssuePacket(tmpDir)).resolves.toBeNull()
   })
 })
 

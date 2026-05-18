@@ -107,4 +107,17 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 - `docs/changes/` 用于进行中的 feature/change 工作区，仅在处理当前变更或接手未完成工作时按需查看对应目录。
 - `docs/archive/` 仅用于历史追溯，不作为当前实现的首选依据。
 - 当信息看起来不一致时，按任务类型判断来源：当前事实看 `docs/current/*`，进行中变更看对应 `docs/changes/{YYYY-MM-DD-feature}/*`，全局规则看 `docs/decisions/*`，历史追溯才看 `docs/archive/*`。
+
+## AI 反思
+AI会记录自己犯过的错误, 犯过的错误文件放在 `docs/current/workflow/ai-reflection`
 <!-- OPENFLOW DOCS GUIDE:END -->
+
+## Dependence
+本项目是opencode 的插件, 弱依赖于omo(oh-my-openagent), 如遇到与之相关的问题时，可搜索它们的源码。
+- omo `F:\ai-code\oh-my-openagent`
+- opencode `F:\ai-code\opencode`
+
+
+## 语言
+默认使用用户输入的语言进行回复，生成的文件也应使用相同语言。  
+如果用户使用中文，则所有回复以及生成的文件均使用中文；除非用户明确指定使用英文或其他语言。

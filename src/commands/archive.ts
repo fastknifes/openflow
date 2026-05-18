@@ -57,7 +57,9 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const sourceRequirementsPath = await resolveDocumentArtifact(await getRequirementsCandidatePaths(ctx.directory, sanitizedFeature, ctx.config), /^(?:prd|\d{8}-prd)\.md$/i)
   const sourceChangeWorkspacePath = await getChangeWorkspacePath(ctx.directory, sanitizedFeature)
   const sourceArtifactRoot = sourceDesignPath ? path.dirname(sourceDesignPath) : sourceChangeWorkspacePath
-  const archiveDir = await ensureArchivePath(ctx.directory, sanitizedFeature, ctx.config)
+  const finalArchiveDir = await ensureArchivePath(ctx.directory, sanitizedFeature, ctx.config)
+  const archiveRoot = path.dirname(finalArchiveDir)
+  const stagingDir = buildStagingArchiveDir(archiveRoot, sanitizedFeature)
   const archivedChangeWorkspaceSources = new Set<string>()
 
   const designExists = Boolean(sourceDesignPath)
@@ -84,6 +86,9 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const hasAcceptanceChanges = matchingAcceptanceState !== null && matchingAcceptanceState.pendingDocUpdates.length > 0
   const readiness = matchingAcceptanceState?.readiness
   const useLegacyReadinessFallback = matchingAcceptanceState !== null && readiness === undefined
+  const acceptedKnownIssues = matchingAcceptanceState?.acceptedKnownIssues ?? []
+  const hardenTerminalSummary = matchingAcceptanceState?.hardenTerminalSummary
+  const hasAcceptedKnownIssues = (hardenTerminalSummary?.acceptedKnownIssueCount ?? 0) > 0 || acceptedKnownIssues.length > 0
 
   if (readiness === VerifyReadinessStatus.NotReady || readiness === VerifyReadinessStatus.NeedsDecision) {
     return formatReadinessBlock(sanitizedFeature, readiness)
@@ -96,7 +101,15 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     return formatMissingReadinessBlock(sanitizedFeature, acceptanceStateRaw.feature)
   }
 
-  if (readiness === VerifyReadinessStatus.ReadyWithDocUpdates && matchingAcceptanceState) {
+  if ((hardenTerminalSummary?.unresolvedMustFixCount ?? 0) > 0) {
+    return formatHardenSummaryBlock(sanitizedFeature, 'unresolved harden must-fix findings')
+  }
+
+  if ((hardenTerminalSummary?.unresolvedNeedsDecisionCount ?? 0) > 0) {
+    return formatHardenSummaryBlock(sanitizedFeature, 'harden summary requires decision')
+  }
+
+  if (readiness === VerifyReadinessStatus.ReadyWithDocUpdates && matchingAcceptanceState && !hasAcceptedKnownIssues) {
     const confirmationState = getArchiveDocUpdateConfirmationState(matchingAcceptanceState)
 
     if (!confirmationState.confirmed) {
@@ -131,137 +144,153 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     return formatSecurityVerificationBlock(sanitizedFeature)
   }
 
-  await fs.mkdir(archiveDir, { recursive: true })
-
-  if (sourceDesignPath && await fileExists(sourceDesignPath)) {
-    await fs.copyFile(sourceDesignPath, path.join(archiveDir, 'design.md'))
-    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceDesignPath)
-  }
-
-  if (changePlanExists) {
-    await fs.copyFile(sourceChangePlanPath, path.join(archiveDir, 'plan.md'))
-    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceChangePlanPath)
-  } else if (planExists) {
-    await fs.copyFile(planPath, path.join(archiveDir, 'plan.md'))
-  }
-
-  if (sourceRequirementsPath && await fileExists(sourceRequirementsPath)) {
-    await fs.copyFile(sourceRequirementsPath, path.join(archiveDir, 'prd.md'))
-    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceRequirementsPath)
-  }
-
-  const sourceBehaviorPath = path.join(sourceChangeWorkspacePath, 'behavior.md')
-  if (await fileExists(sourceBehaviorPath)) {
-    await fs.copyFile(sourceBehaviorPath, path.join(archiveDir, 'behavior.md'))
-    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceBehaviorPath)
-  }
-
-  if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
-    await fs.copyFile(issueClarificationSourcePath, path.join(archiveDir, ISSUE_CLARIFICATION_FILENAME))
-    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, issueClarificationSourcePath)
-  }
-
-  if ((archiveMode === 'issue' || archiveMode === 'mixed') && promotionCandidateSourcePath) {
-    await fs.copyFile(promotionCandidateSourcePath, path.join(archiveDir, PROMOTION_CANDIDATE_FILENAME))
-    trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, promotionCandidateSourcePath)
-  }
-
-  if (await fileExists(sourceArtifactRoot)) {
-    const entries = await fs.readdir(sourceArtifactRoot, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isFile()) continue
-      if (!['proposal.md', 'decisions.md'].includes(entry.name)) continue
-      if (entry.name === PROMOTION_CANDIDATE_FILENAME) continue
-      const artifactSourcePath = path.join(sourceArtifactRoot, entry.name)
-      await fs.copyFile(artifactSourcePath, path.join(archiveDir, entry.name))
-      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, artifactSourcePath)
-    }
-  }
-  
-  const implementationMapperOptions: ImplementationMapperOptions = {
-    feature: sanitizedFeature,
-    projectDir: ctx.directory,
-    archiveDir,
-    designPath: sourceDesignPath,
-    requirementsPath: sourceRequirementsPath,
-    designExists,
-    planExists,
-    changes,
-    acceptanceState: matchingAcceptanceState,
-    ...(phasedChanges ? { phasedChanges } : {}),
-    ...(driftItems.length > 0 ? { driftItems } : {}),
-    ...(issueClarificationSourcePath ? { issueClarificationPath: issueClarificationSourcePath } : {}),
-    ...(promotionCandidateSourcePath ? { promotionCandidatePath: promotionCandidateSourcePath } : {}),
-    ...(await fileExists(sourceBehaviorPath) ? { behaviorPath: sourceBehaviorPath } : {}),
-  }
-  
-  await generateAndSaveImplementationMapper(implementationMapperOptions)
-
   let issueResolutionGenerated = false
   let governanceDecisionTargetPath: string | null = null
 
-  if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
-    if (issueResolutionSourcePath) {
-      await fs.copyFile(issueResolutionSourcePath, path.join(archiveDir, ISSUE_RESOLUTION_FILENAME))
-      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, issueResolutionSourcePath)
-    } else {
-      await writeIssueResolution({
-        projectDir: ctx.directory,
-        archiveDir,
-        feature: sanitizedFeature,
-        mode: archiveMode,
-        issueClarificationPath: issueClarificationSourcePath,
-        promotionCandidatePath: promotionCandidateSourcePath,
-        acceptanceState: matchingAcceptanceState,
-        changes,
-      })
+  try {
+    await fs.mkdir(stagingDir, { recursive: true })
+
+    if (sourceDesignPath && await fileExists(sourceDesignPath)) {
+      await fs.copyFile(sourceDesignPath, path.join(stagingDir, 'design.md'))
+      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceDesignPath)
     }
-    issueResolutionGenerated = true
 
-    governanceDecisionTargetPath = await applyGovernancePromotionIfConfirmed(
-      ctx.directory,
+    if (changePlanExists) {
+      await fs.copyFile(sourceChangePlanPath, path.join(stagingDir, 'plan.md'))
+      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceChangePlanPath)
+    } else if (planExists) {
+      await fs.copyFile(planPath, path.join(stagingDir, 'plan.md'))
+    }
+
+    if (sourceRequirementsPath && await fileExists(sourceRequirementsPath)) {
+      await fs.copyFile(sourceRequirementsPath, path.join(stagingDir, 'prd.md'))
+      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceRequirementsPath)
+    }
+
+    const sourceBehaviorPath = path.join(sourceChangeWorkspacePath, 'behavior.md')
+    if (await fileExists(sourceBehaviorPath)) {
+      await fs.copyFile(sourceBehaviorPath, path.join(stagingDir, 'behavior.md'))
+      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceBehaviorPath)
+    }
+
+    if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
+      await fs.copyFile(issueClarificationSourcePath, path.join(stagingDir, ISSUE_CLARIFICATION_FILENAME))
+      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, issueClarificationSourcePath)
+    }
+
+    if ((archiveMode === 'issue' || archiveMode === 'mixed') && promotionCandidateSourcePath) {
+      await fs.copyFile(promotionCandidateSourcePath, path.join(stagingDir, PROMOTION_CANDIDATE_FILENAME))
+      trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, promotionCandidateSourcePath)
+    }
+
+    if (await fileExists(sourceArtifactRoot)) {
+      const entries = await fs.readdir(sourceArtifactRoot, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isFile()) continue
+        if (!['proposal.md', 'decisions.md'].includes(entry.name)) continue
+        if (entry.name === PROMOTION_CANDIDATE_FILENAME) continue
+        const artifactSourcePath = path.join(sourceArtifactRoot, entry.name)
+        await fs.copyFile(artifactSourcePath, path.join(stagingDir, entry.name))
+        trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, artifactSourcePath)
+      }
+    }
+
+    const implementationMapperOptions: ImplementationMapperOptions = {
+      feature: sanitizedFeature,
+      projectDir: ctx.directory,
+      archiveDir: stagingDir,
+      designPath: sourceDesignPath,
+      requirementsPath: sourceRequirementsPath,
+      designExists,
+      planExists,
+      changes,
+      acceptanceState: matchingAcceptanceState,
+      ...(phasedChanges ? { phasedChanges } : {}),
+      ...(driftItems.length > 0 ? { driftItems } : {}),
+      ...(issueClarificationSourcePath ? { issueClarificationPath: issueClarificationSourcePath } : {}),
+      ...(promotionCandidateSourcePath ? { promotionCandidatePath: promotionCandidateSourcePath } : {}),
+      ...(await fileExists(sourceBehaviorPath) ? { behaviorPath: sourceBehaviorPath } : {}),
+    }
+
+    await generateAndSaveImplementationMapper(implementationMapperOptions)
+
+    if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
+      if (issueResolutionSourcePath) {
+        await fs.copyFile(issueResolutionSourcePath, path.join(stagingDir, ISSUE_RESOLUTION_FILENAME))
+        trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, issueResolutionSourcePath)
+      } else {
+        await writeIssueResolution({
+          projectDir: ctx.directory,
+          archiveDir: finalArchiveDir,
+          writeDir: stagingDir,
+          feature: sanitizedFeature,
+          mode: archiveMode,
+          issueClarificationPath: issueClarificationSourcePath,
+          promotionCandidatePath: promotionCandidateSourcePath,
+          acceptanceState: matchingAcceptanceState,
+          changes,
+        })
+      }
+      issueResolutionGenerated = true
+
+      governanceDecisionTargetPath = await applyGovernancePromotionIfConfirmed(
+        ctx.directory,
+        sanitizedFeature,
+        matchingAcceptanceState,
+        promotionCandidateSourcePath,
+      )
+    }
+
+    const promotionSuggestions = await buildPromotionSuggestions({
+      projectDir: ctx.directory,
+      archiveDir: stagingDir,
+      feature: sanitizedFeature,
+    })
+
+    const autoPromoteCurrent = Boolean(ctx.config.archive.auto_promote_current)
+    const promotionResult = autoPromoteCurrent
+      ? await applyPromotionSuggestions({ projectDir: ctx.directory, suggestions: promotionSuggestions })
+      : { applied: [] as CurrentPromotionSuggestion[], skipped: promotionSuggestions }
+
+    // All staged operations succeeded — rename staging to final archive path
+    await fs.mkdir(archiveRoot, { recursive: true })
+    await fs.rename(stagingDir, finalArchiveDir)
+
+    // Post-rename: commit state and cleanup source workspace
+    await markArchivedIfNeeded(ctx, sanitizedFeature, promotionSuggestions, autoPromoteCurrent)
+    await cleanupBuildData(ctx.directory)
+    await cleanupArchivedChangeWorkspaceSources(sourceChangeWorkspacePath, archivedChangeWorkspaceSources)
+
+    return formatArchiveResult(
       sanitizedFeature,
-      matchingAcceptanceState,
-      promotionCandidateSourcePath,
+      finalArchiveDir,
+      designExists,
+      planExists,
+      requirementsExists,
+      hasAcceptanceChanges,
+      changes.length,
+      promotionSuggestions,
+      promotionResult.applied.length,
+      autoPromoteCurrent,
+      matchingAcceptanceState?.phase === 'verification_pending' && !matchingAcceptanceState.verificationCompletedAt,
+      useLegacyReadinessFallback,
+      matchingAcceptanceState?.archiveUsedDocUpdateConfirmPath === true,
+      hasAcceptedKnownIssues,
+      archiveMode,
+      issueClarificationExists,
+      promotionCandidateExists,
+      issueResolutionGenerated,
+      governanceDecisionTargetPath,
     )
+  } catch (error) {
+    // Clean up staging on any failure — leave source workspace untouched
+    try {
+      await fs.rm(stagingDir, { recursive: true, force: true })
+    } catch {
+      // Best effort cleanup
+    }
+    throw error
   }
-
-  const promotionSuggestions = await buildPromotionSuggestions({
-    projectDir: ctx.directory,
-    archiveDir,
-    feature: sanitizedFeature,
-  })
-
-  const autoPromoteCurrent = Boolean(ctx.config.archive.auto_promote_current)
-  const promotionResult = autoPromoteCurrent
-    ? await applyPromotionSuggestions({ projectDir: ctx.directory, suggestions: promotionSuggestions })
-    : { applied: [] as CurrentPromotionSuggestion[], skipped: promotionSuggestions }
-
-  await markArchivedIfNeeded(ctx, sanitizedFeature, promotionSuggestions, autoPromoteCurrent)
-
-  await cleanupBuildData(ctx.directory)
-  await cleanupArchivedChangeWorkspaceSources(sourceChangeWorkspacePath, archivedChangeWorkspaceSources)
-
-  return formatArchiveResult(
-    sanitizedFeature,
-    archiveDir,
-    designExists,
-    planExists,
-    requirementsExists,
-    hasAcceptanceChanges,
-    changes.length,
-    promotionSuggestions,
-    promotionResult.applied.length,
-    autoPromoteCurrent,
-    matchingAcceptanceState?.phase === 'verification_pending' && !matchingAcceptanceState.verificationCompletedAt,
-    useLegacyReadinessFallback,
-    matchingAcceptanceState?.archiveUsedDocUpdateConfirmPath === true,
-    archiveMode,
-    issueClarificationExists,
-    promotionCandidateExists,
-    issueResolutionGenerated,
-    governanceDecisionTargetPath,
-  )
 }
 
 async function cleanupArchivedChangeWorkspaceSources(changeWorkspacePath: string, archivedSources: ReadonlySet<string>): Promise<void> {
@@ -368,6 +397,16 @@ Feature: ${escapeMarkdown(feature)}
 Archive stopped because verification state reports **security failure**.
 
 Please fix security issues first, then rerun archive.`
+}
+
+function formatHardenSummaryBlock(feature: string, reason: 'unresolved harden must-fix findings' | 'harden summary requires decision'): string {
+  return `## Archive Blocked
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive stopped because ${escapeMarkdown(reason)}.
+
+Please resolve the remaining harden findings, then rerun archive.`
 }
 
 function formatReadinessBlock(
@@ -609,6 +648,7 @@ async function applyGovernancePromotionIfConfirmed(
 async function writeIssueResolution(options: {
   projectDir: string
   archiveDir: string
+  writeDir?: string
   feature: string
   mode: IssueMode
   issueClarificationPath: string
@@ -619,6 +659,7 @@ async function writeIssueResolution(options: {
   const {
     projectDir,
     archiveDir,
+    writeDir,
     feature,
     mode,
     issueClarificationPath,
@@ -626,6 +667,7 @@ async function writeIssueResolution(options: {
     acceptanceState,
     changes,
   } = options
+  const effectiveWriteDir = writeDir ?? archiveDir
 
   const issueClarification = await fs.readFile(issueClarificationPath, 'utf-8')
   const clarificationSections = parseMarkdownSections(issueClarification)
@@ -736,7 +778,7 @@ ${governanceLines.join('\n')}
 ${residualRiskLines.join('\n')}
 `
 
-  await fs.writeFile(path.join(archiveDir, ISSUE_RESOLUTION_FILENAME), out, 'utf-8')
+  await fs.writeFile(path.join(effectiveWriteDir, ISSUE_RESOLUTION_FILENAME), out, 'utf-8')
 }
 
 function parseMarkdownSections(markdown: string): Map<string, string> {
@@ -786,6 +828,7 @@ function formatArchiveResult(
   verificationPending: boolean,
   legacyReadinessWarning: boolean,
   docUpdateConfirmUsed: boolean,
+  hasAcceptedKnownIssues: boolean,
   archiveMode: IssueMode,
   issueClarificationExists: boolean,
   promotionCandidateExists: boolean,
@@ -820,6 +863,7 @@ function formatArchiveResult(
 - Implementation mapper: ✅
 - Behavior document: ✅
 - Acceptance changes: ${hasAcceptanceChanges ? '✅' : '❌'}
+- Known issues accepted: ${hasAcceptedKnownIssues ? '✅' : '❌'}
 - Archive mode: ${escapeMarkdown(archiveMode)}
 
 ### Location
@@ -856,6 +900,7 @@ function formatPromotionSuggestions(suggestions: CurrentPromotionSuggestion[]): 
     .join('\n')
 }
 
+
 async function resolveDocumentArtifact(paths: string[], pattern: RegExp): Promise<string | null> {
   for (const candidate of paths) {
     if (!(await fileExists(candidate))) continue
@@ -883,4 +928,8 @@ async function resolveDocumentArtifact(paths: string[], pattern: RegExp): Promis
   }
 
   return null
+}
+
+function buildStagingArchiveDir(archiveRoot: string, feature: string): string {
+  return path.join(archiveRoot, `.staging-${feature}-${Date.now()}-${process.pid}`)
 }

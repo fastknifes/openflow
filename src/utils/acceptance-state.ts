@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { VerifyReadinessStatus, type AcceptanceState, type ArchiveDocUpdateConfirmationStatus, type EvidenceFreshnessMetadata, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type AcceptedKnownIssueSummary, type ArchiveDocUpdateConfirmationStatus, type EvidenceFreshnessMetadata, type HardenTerminalSummary, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus } from '../types.js'
 import { getAcceptanceStatePath } from '../config.js'
 import { logger } from './logger.js'
 
@@ -36,6 +36,7 @@ const FIELD_PREFIXES = {
   readinessEvidenceSummary: 'readinessEvidenceSummary:',
   readinessConstraintsChecked: 'readinessConstraintsChecked:',
   readinessVerifiedAt: 'readinessVerifiedAt:',
+  hardenSummary: 'hardenSummary:',
   mode: 'mode:',
   issueSlug: 'issueSlug:',
   rawIssue: 'rawIssue:',
@@ -161,6 +162,9 @@ function parseStateFile(content: string): AcceptanceState | null {
     } else if (trimmed.startsWith(FIELD_PREFIXES.readinessVerifiedAt)) {
       readinessVerifiedAt = extractFieldValue(trimmed, FIELD_PREFIXES.readinessVerifiedAt)
       hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.hardenSummary)) {
+      result.hardenSummary = extractFieldValue(trimmed, FIELD_PREFIXES.hardenSummary)
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.mode)) {
       result.mode = extractFieldValue(trimmed, FIELD_PREFIXES.mode) as 'feature' | 'issue'
@@ -300,6 +304,40 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.readiness) {
     state.readiness = result.readiness
   }
+  if (result.hardenSummary) {
+    state.hardenSummary = result.hardenSummary
+    try {
+      const parsed = JSON.parse(result.hardenSummary) as Partial<HardenTerminalSummary> & {
+        acceptedKnownIssues?: AcceptedKnownIssueSummary[]
+      }
+      if (Array.isArray(parsed.acceptedKnownIssues) && parsed.acceptedKnownIssues.length > 0) {
+        state.acceptedKnownIssues = parsed.acceptedKnownIssues
+      }
+      const status = parsed.status
+      const stopReason = parsed.stopReason
+      const unresolvedMustFixCount = parsed.unresolvedMustFixCount
+      const unresolvedNeedsDecisionCount = parsed.unresolvedNeedsDecisionCount
+      const acceptedKnownIssueCount = parsed.acceptedKnownIssueCount
+      if (typeof status === 'string'
+        && typeof stopReason === 'string'
+        && typeof unresolvedMustFixCount === 'number'
+        && typeof unresolvedNeedsDecisionCount === 'number'
+        && typeof acceptedKnownIssueCount === 'number') {
+        const terminalSummary: HardenTerminalSummary = {
+          status,
+          stopReason,
+          unresolvedMustFixCount,
+          unresolvedNeedsDecisionCount,
+          acceptedKnownIssueCount,
+        }
+        state.hardenTerminalSummary = {
+          ...terminalSummary,
+        }
+      }
+    } catch {
+      // ignore invalid stored summary to preserve backward compatibility
+    }
+  }
   if (hasReadinessField) {
     state.verifyResult = {
       readiness: result.readiness ?? state.readiness ?? VerifyReadinessStatus.NotReady,
@@ -394,6 +432,23 @@ function serializeState(state: AcceptanceState): string {
     pushOptionalLine(lines, FIELD_PREFIXES.readinessEvidenceSummary, state.verifyResult.evidenceSummary)
     pushOptionalLine(lines, FIELD_PREFIXES.readinessConstraintsChecked, state.verifyResult.constraintsChecked.join(', '))
     pushOptionalLine(lines, FIELD_PREFIXES.readinessVerifiedAt, state.verifyResult.verifiedAt)
+  }
+  if (state.hardenSummary) {
+    pushOptionalLine(lines, FIELD_PREFIXES.hardenSummary, state.hardenSummary)
+  } else {
+    if (state.hardenTerminalSummary || state.acceptedKnownIssues) {
+      const summaryPayload = {
+        ...(state.hardenTerminalSummary
+          ? state.hardenTerminalSummary
+          : {}),
+        ...(state.acceptedKnownIssues
+          ? { acceptedKnownIssues: state.acceptedKnownIssues }
+          : {}),
+      }
+      if (Object.keys(summaryPayload).length > 0) {
+        pushOptionalLine(lines, FIELD_PREFIXES.hardenSummary, JSON.stringify(summaryPayload))
+      }
+    }
   }
   if (state.evidenceFreshness) {
     pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessRecordedAt, state.evidenceFreshness.recordedAt)

@@ -3,6 +3,7 @@ import type { RequirementModel } from './requirement-model.js'
 
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
 export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
+export type FeatureDraftStatus = 'final' | 'draft_with_assumptions'
 
 export interface FeatureOption {
   label: string
@@ -19,11 +20,18 @@ export interface FeatureQuestion {
 export interface FeatureSession {
   version: 2 | 3
   feature: string
+  featureTitle?: string | undefined
+  sourceIntent?: string | undefined
   workflowState: FeatureWorkflowState
   pendingQuestionId: FeatureQuestionId | null
   promptMode?: 'question' | 'discussion' | undefined
   askedQuestionIds: FeatureQuestionId[]
   answers: Partial<Record<FeatureQuestionId, string>>
+  assumptions: string[]
+  pendingConfirmations: string[]
+  skippedQuestionIds: FeatureQuestionId[]
+  abstractionPreference?: 'product' | 'implementation' | undefined
+  draftStatus: FeatureDraftStatus
   requirementModel?: RequirementModel
   generatedDocs: string[]
   generationAttemptCount: number
@@ -41,6 +49,13 @@ type LegacyFeatureSession = {
   currentQuestionId?: FeatureQuestionId | null
   askedQuestionIds?: FeatureQuestionId[]
   answers?: Partial<Record<FeatureQuestionId, string>>
+  featureTitle?: string
+  sourceIntent?: string
+  assumptions?: string[]
+  pendingConfirmations?: string[]
+  skippedQuestionIds?: FeatureQuestionId[]
+  abstractionPreference?: string
+  draftStatus?: FeatureDraftStatus
   generatedDocs?: string[]
   lastConsumedMessageId?: string
   updatedAt?: string
@@ -113,6 +128,10 @@ export function createInitialFeatureSession(feature: string): FeatureSession {
     promptMode: 'question',
     askedQuestionIds: [],
     answers: {},
+    assumptions: [],
+    pendingConfirmations: [],
+    skippedQuestionIds: [],
+    draftStatus: 'final',
     generatedDocs: [],
     generationAttemptCount: 0,
     updatedAt: new Date().toISOString(),
@@ -136,11 +155,18 @@ export function normalizeFeatureSession(feature: string, raw: unknown): FeatureS
   return {
     version: 3,
     feature,
+    featureTitle: typeof parsed.featureTitle === 'string' ? parsed.featureTitle : undefined,
+    sourceIntent: typeof parsed.sourceIntent === 'string' ? parsed.sourceIntent : undefined,
     workflowState,
     pendingQuestionId: workflowState === 'collecting' ? pendingQuestionId : null,
     promptMode: parsed.promptMode === 'discussion' ? 'discussion' : 'question',
     askedQuestionIds: Array.isArray(parsed.askedQuestionIds) ? uniqueQuestionIds(parsed.askedQuestionIds) : deriveAskedQuestionIds(answers),
     answers,
+    assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions.filter((item): item is string => typeof item === 'string') : [],
+    pendingConfirmations: Array.isArray(parsed.pendingConfirmations) ? parsed.pendingConfirmations.filter((item): item is string => typeof item === 'string') : [],
+    skippedQuestionIds: Array.isArray(parsed.skippedQuestionIds) ? uniqueQuestionIds(parsed.skippedQuestionIds) : [],
+    abstractionPreference: parsed.abstractionPreference === 'product' || parsed.abstractionPreference === 'implementation' ? parsed.abstractionPreference : undefined,
+    draftStatus: parsed.draftStatus === 'draft_with_assumptions' ? 'draft_with_assumptions' : 'final',
     requirementModel,
     generatedDocs,
     generationAttemptCount: typeof parsed.generationAttemptCount === 'number' ? parsed.generationAttemptCount : 0,
@@ -211,10 +237,11 @@ export function markGenerating(session: FeatureSession): FeatureSession {
   return nextSession
 }
 
-export function markCompleted(session: FeatureSession, generatedPath: string): FeatureSession {
-  const generatedDocs = session.generatedDocs.includes(generatedPath)
-    ? session.generatedDocs
-    : [generatedPath]
+export function markCompleted(session: FeatureSession, generatedPaths: string | string[]): FeatureSession {
+  const generatedDocs = Array.from(new Set([
+    ...session.generatedDocs,
+    ...(Array.isArray(generatedPaths) ? generatedPaths : [generatedPaths]),
+  ].filter((path) => path.trim().length > 0)))
 
   const nextSession: FeatureSession = {
     ...session,

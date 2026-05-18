@@ -451,6 +451,23 @@ export interface VerifyResult {
   verifiedAt: string
 }
 
+export interface HardenTerminalSummary {
+  status: string
+  stopReason: string
+  unresolvedMustFixCount: number
+  unresolvedNeedsDecisionCount: number
+  acceptedKnownIssueCount: number
+}
+
+export interface AcceptedKnownIssueSummary {
+  findingId: string
+  disposition: 'accepted_known_issue' | 'design_divergence'
+  rationale: string
+  archiveEffect: 'non_blocking' | 'doc_update_required' | 'decision_required'
+  evidenceRefs: string[]
+  verifyStatus: string
+}
+
 export type IssueClassification =
   | 'bugfix'
   | 'data_issue'
@@ -535,6 +552,12 @@ export interface AcceptanceState {
   promotionCandidatePath?: string
   /** Evidence freshness metadata for quality-gate reuse decisions */
   evidenceFreshness?: EvidenceFreshnessMetadata
+  /** Structured harden terminal summary used by archive gating */
+  hardenTerminalSummary?: HardenTerminalSummary
+  /** Audit trail for accepted known issues recorded by quality-gate */
+  acceptedKnownIssues?: AcceptedKnownIssueSummary[]
+  /** Minimal harden terminal summary persisted as JSON */
+  hardenSummary?: string
 }
 
 // 按阶段分段的文件变更记录

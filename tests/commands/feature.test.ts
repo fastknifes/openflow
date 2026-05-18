@@ -53,13 +53,13 @@ function createQuestionToolContext(directory: string, answers: string[], session
 }
 
 describe('feature command', () => {
-  test('throws when feature is missing and no active session exists', async () => {
+  test('asks for natural-language description when feature is missing and no active session exists', async () => {
     const root = join(process.cwd(), '.test-feature-missing-feature')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
     await expect(handleFeature(createContext(root), undefined, undefined, createToolContext(root))).rejects.toThrow(
-      'Feature name is required'
+      'Describe the feature idea in natural language'
     )
 
     await rm(root, { recursive: true, force: true })
@@ -74,7 +74,7 @@ describe('feature command', () => {
 
     expect(result).toContain('Feature Question')
     expect(result).toContain('这个功能主要要解决什么问题？')
-    expect(result).toContain('answered 0/5')
+    expect(result).toContain('known facts 0')
 
     const sessionPath = join(root, '.sisyphus', 'feature', 'user-login.json')
     const session = JSON.parse(await readFile(sessionPath, 'utf-8')) as {
@@ -94,6 +94,69 @@ describe('feature command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('accepts Chinese natural-language feature intent without sanitization failure', async () => {
+    const root = join(process.cwd(), '.test-feature-natural-language')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const description = '为 quality gate 引入 evidence-ledger 机制'
+    const result = await handleFeature(createContext(root), description, undefined, createToolContext(root, 'session-natural'))
+
+    expect(result).toContain('Feature Question')
+    expect(result).toContain(description)
+    expect(result).toContain('这次需求更接近哪一种范围？')
+    expect(result).not.toContain('Feature name is too short after sanitization')
+
+    const files = await readdir(join(root, '.sisyphus', 'feature'))
+    const sessionFile = files.find((file) => file.startsWith('quality-gate-evidence-ledger') && file.endsWith('.json'))
+    expect(sessionFile).toBeDefined()
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', sessionFile!), 'utf-8')) as {
+      featureTitle?: string
+      sourceIntent?: string
+      generatedDocs: string[]
+    }
+    expect(session.featureTitle).toBe(description)
+    expect(session.sourceIntent).toBe(description)
+    expect(session.generatedDocs).toHaveLength(0)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('asks natural-language disambiguation when no-arg feature identity is ambiguous', async () => {
+    const root = join(process.cwd(), '.test-feature-ambiguous-identity')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
+
+    for (const feature of ['first-feature', 'second-feature']) {
+      await writeFile(join(root, '.sisyphus', 'feature', `${feature}.json`), JSON.stringify({
+        version: 3,
+        feature,
+        featureTitle: feature.replace('-', ' '),
+        workflowState: 'collecting',
+        pendingQuestionId: 'problem',
+        askedQuestionIds: [],
+        answers: {},
+        assumptions: [],
+        pendingConfirmations: [],
+        skippedQuestionIds: [],
+        draftStatus: 'final',
+        generatedDocs: [],
+        generationAttemptCount: 0,
+        updatedAt: new Date().toISOString(),
+      }, null, 2), 'utf-8')
+    }
+
+    const result = await handleFeature(createContext(root), undefined, undefined, createToolContext(root, 'session-ambiguous'))
+
+    expect(result).toContain('Feature Selection Needed')
+    expect(result).toContain('first feature')
+    expect(result).toContain('second feature')
+    expect(result).toContain('you do not need to type a slug')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('advances one step per fresh invocation and keeps pending state durable', async () => {
     const root = join(process.cwd(), '.test-feature-next-question')
     await rm(root, { recursive: true, force: true })
@@ -102,8 +165,8 @@ describe('feature command', () => {
     await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-a'))
     const result = await handleFeature(createContext(root), 'user-login', '提升效率', createToolContext(root, 'session-a'))
 
-    expect(result).toContain('这个功能的主要使用者是谁？')
-    expect(result).toContain('answered 1/5')
+    expect(result).toContain('这次需求更接近哪一种范围？')
+    expect(result).toContain('known facts 1')
 
     const sessionPath = join(root, '.sisyphus', 'feature', 'user-login.json')
     const session = JSON.parse(await readFile(sessionPath, 'utf-8')) as {
@@ -113,7 +176,7 @@ describe('feature command', () => {
     }
 
     expect(session.answers.problem).toBe('提升效率')
-    expect(session.pendingQuestionId).toBe('target-users')
+    expect(session.pendingQuestionId).toBe('scope')
     expect(session.workflowState).toBe('collecting')
 
     await rm(root, { recursive: true, force: true })
@@ -127,7 +190,7 @@ describe('feature command', () => {
     await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-resume'))
     const result = await handleFeature(createContext(root), undefined, '提升效率', createToolContext(root, 'session-resume'))
 
-    expect(result).toContain('这个功能的主要使用者是谁？')
+    expect(result).toContain('这次需求更接近哪一种范围？')
 
     const sessionPath = join(root, '.sisyphus', 'feature', 'user-login.json')
     const session = JSON.parse(await readFile(sessionPath, 'utf-8')) as { answers: Record<string, string> }
@@ -145,7 +208,7 @@ describe('feature command', () => {
     const result = await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-repeat'))
 
     expect(result).toContain('这个功能主要要解决什么问题？')
-    expect(result).toContain('answered 0/5')
+    expect(result).toContain('known facts 0')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -160,7 +223,7 @@ describe('feature command', () => {
 
     expect(questionContext.asked).toHaveLength(1)
     expect(questionContext.asked[0]?.question).toBe('这个功能主要要解决什么问题？')
-    expect(result).toContain('这个功能的主要使用者是谁？')
+    expect(result).toContain('这次需求更接近哪一种范围？')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -195,14 +258,17 @@ describe('feature command', () => {
     const toolContext = createToolContext(root, 'session-generate')
     await handleFeature(createContext(root), 'user-login', undefined, toolContext)
     await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-generate', 'message-1'))
-    await handleFeature(createContext(root), 'user-login', '内部开发者', createToolContext(root, 'session-generate', 'message-2'))
-    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-generate', 'message-3'))
-    await handleFeature(createContext(root), 'user-login', '快速上线', createToolContext(root, 'session-generate', 'message-4'))
-    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-generate', 'message-5'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-generate', 'message-2'))
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-generate', 'message-3'))
 
     expect(result).toContain('Generated documents:')
     expect(result).toContain('design.md')
     expect(result).toContain('behavior.md')
+    expect(result).toContain('Consensus:')
+    expect(result).toContain('Assumptions:')
+    expect(result).toContain('Pending confirmations:')
+    expect(result).toContain('Constraints:')
+    expect(result).toContain('Suggested next step:')
 
     const changeDirs = await readdir(join(root, 'docs', 'changes'))
     const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
@@ -213,7 +279,6 @@ describe('feature command', () => {
     const sidecar = JSON.parse(await readFile(sidecarFile, 'utf-8')) as {
       feature: string
       problemStatement?: string
-      targetUsers?: string
       constraints: Array<{ description: string }>
     }
 
@@ -223,13 +288,12 @@ describe('feature command', () => {
     expect(content).toContain('## Goals')
     expect(content).toContain('## Design Constraints')
     expect(content).toContain('## Success Criteria')
-    expect(content).toContain('## Proposed Design')
+    expect(content).not.toContain('## Architecture')
+    expect(content).not.toContain('## Proposed Design')
     expect(content).toContain('减少重复登录操作')
-    expect(content).toContain('内部开发者')
     expect(content).toContain('必须兼容现有认证')
     expect(sidecar.feature).toBe('user-login')
     expect(sidecar.problemStatement).toBe('减少重复登录操作')
-    expect(sidecar.targetUsers).toBe('内部开发者')
     expect(sidecar.constraints.some((constraint) => constraint.description === '必须兼容现有认证')).toBe(true)
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
@@ -240,6 +304,8 @@ describe('feature command', () => {
     expect(session.workflowState).toBe('completed')
     expect(session.pendingQuestionId).toBeNull()
     expect(session.generatedDocs).toHaveLength(2)
+    expect(session.generatedDocs.some((doc) => doc.endsWith('design.md'))).toBe(true)
+    expect(session.generatedDocs.some((doc) => doc.endsWith('behavior.md'))).toBe(true)
 
     const active = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'active.json'), 'utf-8')) as {
       bySessionID: Record<string, unknown>
@@ -249,20 +315,309 @@ describe('feature command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('natural-language feature description derives identity but asks one key question before final generation', async () => {
+    const root = join(process.cwd(), '.test-feature-natural-language-asks')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const description = '为 quality gate 引入 evidence-ledger 机制'
+    const result = await handleFeature(createContext(root), description, undefined, createToolContext(root, 'session-natural'))
+
+    expect(result).toContain('Feature Question')
+    expect(result).toContain(description)
+    expect(result).toContain('这次需求更接近哪一种范围？')
+    expect(result).not.toContain('Feature name is too short after sanitization')
+
+    const files = await readdir(join(root, '.sisyphus', 'feature'))
+    const sessionFile = files.find((file) => file.startsWith('quality-gate-evidence-ledger') && file.endsWith('.json'))
+    expect(sessionFile).toBeDefined()
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', sessionFile!), 'utf-8')) as {
+      featureTitle?: string
+      sourceIntent?: string
+      generatedDocs: string[]
+    }
+    expect(session.featureTitle).toBe(description)
+    expect(session.sourceIntent).toBe(description)
+    expect(session.generatedDocs).toHaveLength(0)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('natural-language feature generates after the one key scope answer with outcome as assumption', async () => {
+    const root = join(process.cwd(), '.test-feature-natural-language-one-key-question')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const description = '为 quality gate 引入 evidence-ledger 机制'
+    await handleFeature(createContext(root), description, undefined, createToolContext(root, 'session-one-key', 'message-1'))
+    const result = await handleFeature(createContext(root), undefined, 'workflow', createToolContext(root, 'session-one-key', 'message-2'))
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).toContain('Assumptions:')
+    expect(result).toContain('Expected outcome is inferred from the source intent')
+    expect(result).not.toContain('这次设计最需要考虑的一个约束是什么？')
+
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const design = await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'design.md'), 'utf-8')
+    expect(design).toContain('Expected outcome is inferred from the source intent')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('similar natural-language feature descriptions derive distinct safe slugs without overwriting sessions', async () => {
+    const root = join(process.cwd(), '.test-feature-slug-collision-safety')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await handleFeature(createContext(root), '为 quality gate 引入 evidence-ledger 机制', undefined, createToolContext(root, 'session-slug-a'))
+    await handleFeature(createContext(root), '为 quality gate 引入 evidence-ledger 审计机制', undefined, createToolContext(root, 'session-slug-b'))
+
+    const files = (await readdir(join(root, '.sisyphus', 'feature')))
+      .filter((file) => file.startsWith('quality-gate-evidence-ledger') && file.endsWith('.json'))
+
+    expect(files).toHaveLength(2)
+    expect(new Set(files).size).toBe(2)
+
+    const first = await readFile(join(root, '.sisyphus', 'feature', files[0]!), 'utf-8')
+    const second = await readFile(join(root, '.sisyphus', 'feature', files[1]!), 'utf-8')
+    expect(first).not.toBe(second)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('ambiguous no-argument feature identity asks natural-language disambiguation', async () => {
+    const root = join(process.cwd(), '.test-feature-ambiguous-identity')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
+
+    await writeFile(join(root, '.sisyphus', 'feature', 'first-feature.json'), JSON.stringify({
+      version: 3,
+      feature: 'first-feature',
+      featureTitle: 'First feature idea',
+      workflowState: 'collecting',
+      pendingQuestionId: 'problem',
+      askedQuestionIds: [],
+      answers: {},
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: '2026-05-18T00:00:00.000Z',
+    }, null, 2), 'utf-8')
+    await writeFile(join(root, '.sisyphus', 'feature', 'second-feature.json'), JSON.stringify({
+      version: 3,
+      feature: 'second-feature',
+      featureTitle: 'Second feature idea',
+      workflowState: 'collecting',
+      pendingQuestionId: 'problem',
+      askedQuestionIds: [],
+      answers: {},
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: '2026-05-18T00:01:00.000Z',
+    }, null, 2), 'utf-8')
+
+    const result = await handleFeature(createContext(root), undefined, undefined, createToolContext(root, 'session-ambiguous'))
+
+    expect(result).toContain('Feature Selection Needed')
+    expect(result).toContain('First feature idea')
+    expect(result).toContain('Second feature idea')
+    expect(result).toContain('you do not need to type a slug')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('natural-language disambiguation reply selects existing candidate instead of creating a new feature', async () => {
+    const root = join(process.cwd(), '.test-feature-natural-selection')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
+
+    await writeFile(join(root, '.sisyphus', 'feature', 'first-feature.json'), JSON.stringify({
+      version: 3,
+      feature: 'first-feature',
+      featureTitle: 'First feature idea',
+      workflowState: 'collecting',
+      pendingQuestionId: 'problem',
+      askedQuestionIds: [],
+      answers: {},
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: '2026-05-18T00:00:00.000Z',
+    }, null, 2), 'utf-8')
+    await writeFile(join(root, '.sisyphus', 'feature', 'second-feature.json'), JSON.stringify({
+      version: 3,
+      feature: 'second-feature',
+      featureTitle: 'Second feature idea',
+      workflowState: 'collecting',
+      pendingQuestionId: 'problem',
+      askedQuestionIds: [],
+      answers: {},
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: '2026-05-18T00:01:00.000Z',
+    }, null, 2), 'utf-8')
+
+    const result = await handleFeature(createContext(root), 'First feature idea', 'Improve the first idea', createToolContext(root, 'session-natural-selection'))
+
+    expect(result).toContain('这次需求更接近哪一种范围？')
+
+    const first = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'first-feature.json'), 'utf-8')) as {
+      answers: Record<string, string>
+    }
+    const files = await readdir(join(root, '.sisyphus', 'feature'))
+    expect(first.answers.problem).toBe('Improve the first idea')
+    expect(files).not.toContain('first-feature-idea.json')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('natural-language disambiguation reply selects an existing unfinished feature', async () => {
+    const root = join(process.cwd(), '.test-feature-ambiguous-natural-selection')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
+
+    await writeFile(join(root, '.sisyphus', 'feature', 'first-feature.json'), JSON.stringify({
+      version: 3,
+      feature: 'first-feature',
+      featureTitle: 'First feature idea',
+      workflowState: 'collecting',
+      pendingQuestionId: 'problem',
+      askedQuestionIds: [],
+      answers: {},
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: '2026-05-18T00:00:00.000Z',
+    }, null, 2), 'utf-8')
+    await writeFile(join(root, '.sisyphus', 'feature', 'second-feature.json'), JSON.stringify({
+      version: 3,
+      feature: 'second-feature',
+      featureTitle: 'Second feature idea',
+      workflowState: 'collecting',
+      pendingQuestionId: 'problem',
+      askedQuestionIds: [],
+      answers: {},
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: '2026-05-18T00:01:00.000Z',
+    }, null, 2), 'utf-8')
+
+    const result = await handleFeature(createContext(root), 'First feature idea', undefined, createToolContext(root, 'session-select'))
+
+    expect(result).toContain('First feature idea')
+    expect(result).toContain('Internal slug: `first-feature`')
+
+    const files = await readdir(join(root, '.sisyphus', 'feature'))
+    expect(files).not.toContain('first-feature-idea.json')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('skip/proceed response generates draft with assumptions and marks documents', async () => {
+    const root = join(process.cwd(), '.test-feature-draft-assumptions')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-draft'))
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-draft', 'message-1'))
+    const result = await handleFeature(createContext(root), 'user-login', '先生成草稿', createToolContext(root, 'session-draft', 'message-2'))
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).toContain('Assumptions:')
+
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const design = await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'design.md'), 'utf-8')
+    const behavior = await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'behavior.md'), 'utf-8')
+
+    expect(design).toContain('Draft with Assumptions')
+    expect(behavior).toContain('Draft with Assumptions')
+    expect(design).toContain('The user asked OpenFlow to proceed using current context and assumptions.')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('generates draft with assumptions when user asks to proceed before convergence', async () => {
+    const root = join(process.cwd(), '.test-feature-draft-with-assumptions')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-draft'))
+    const result = await handleFeature(createContext(root), 'user-login', '先生成草稿', createToolContext(root, 'session-draft', 'message-draft'))
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).toContain('Assumptions:')
+
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const design = await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'design.md'), 'utf-8')
+    expect(design).toContain('Draft with Assumptions')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      draftStatus: string
+      assumptions: string[]
+      skippedQuestionIds: string[]
+    }
+    expect(session.draftStatus).toBe('draft_with_assumptions')
+    expect(session.assumptions.length).toBeGreaterThan(0)
+    expect(session.skippedQuestionIds).toContain('problem')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('persists product-level preference when user rejects code-level discussion', async () => {
+    const root = join(process.cwd(), '.test-feature-product-level')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const result = await handleFeature(createContext(root), 'user-login', '我不跟你讨论代码层面的设计', createToolContext(root, 'session-product'))
+
+    expect(result).toContain('这次需求更接近哪一种范围？')
+    expect(result).not.toContain('function')
+    expect(result).not.toContain('interface')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      abstractionPreference?: string
+    }
+    expect(session.abstractionPreference).toBe('product')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('does not consume the same message twice across hook and direct handler paths', async () => {
     const root = join(process.cwd(), '.test-feature-duplicate-message')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
-    const firstMessage = createToolContext(root, 'session-duplicate', 'message-target-users')
+    const firstMessage = createToolContext(root, 'session-duplicate', 'message-scope')
     await handleFeature(createContext(root), 'user-login', undefined, firstMessage)
     await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-duplicate', 'message-problem'))
 
-    const hookResult = await handleFeature(createContext(root), 'user-login', '内部开发者', firstMessage)
-    const directResult = await handleFeature(createContext(root), 'user-login', '内部开发者', firstMessage)
+    const hookResult = await handleFeature(createContext(root), 'user-login', 'new-feature', firstMessage)
+    const directResult = await handleFeature(createContext(root), 'user-login', 'new-feature', firstMessage)
 
-    expect(hookResult).toContain('这次需求更接近哪一种范围？')
-    expect(directResult).toContain('这次需求更接近哪一种范围？')
+    expect(hookResult).toContain('这次设计最需要考虑的一个约束是什么？')
+    expect(directResult).toContain('这次设计最需要考虑的一个约束是什么？')
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
       answers: Record<string, string | undefined>
@@ -271,9 +626,9 @@ describe('feature command', () => {
     }
 
     expect(session.answers.problem).toBe('减少重复登录操作')
-    expect(session.answers['target-users']).toBe('内部开发者')
-    expect(session.answers.scope).toBeUndefined()
-    expect(session.pendingQuestionId).toBe('scope')
+    expect(session.answers.scope).toBe('new-feature')
+    expect(session.answers.constraints).toBeUndefined()
+    expect(session.pendingQuestionId).toBe('constraints')
     expect(session.generatedDocs).toHaveLength(0)
 
     await rm(root, { recursive: true, force: true })
@@ -354,11 +709,9 @@ describe('feature command', () => {
       const toolContext = createToolContext(root, 'session-invalid')
       await handleFeature(createContext(root), 'user-login', undefined, toolContext)
       await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-invalid', 'message-1'))
-      await handleFeature(createContext(root), 'user-login', '内部开发者', createToolContext(root, 'session-invalid', 'message-2'))
-      await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-invalid', 'message-3'))
-      await handleFeature(createContext(root), 'user-login', '快速上线', createToolContext(root, 'session-invalid', 'message-4'))
+      await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-invalid', 'message-2'))
 
-      const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-invalid', 'message-5'))
+      const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-invalid', 'message-3'))
 
       expect(result).toContain('Feature Design Pending')
       expect(result).toContain('String must contain at least 1 character')
