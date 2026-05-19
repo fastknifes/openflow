@@ -71,6 +71,7 @@ async function setupReadinessArchiveFixture(
   options?: {
     readiness?: VerifyReadinessStatus
     pendingDocUpdates?: Array<{ file: string; timestamp: string; reason?: string }>
+    implementationState?: AcceptanceState['implementationState']
   }
 ): Promise<OpenFlowContext> {
   await rm(testDir, { recursive: true, force: true })
@@ -94,6 +95,7 @@ async function setupReadinessArchiveFixture(
     phaseStartedAt: '2026-04-21T00:00:00.000Z',
     pendingDocUpdates: options?.pendingDocUpdates ?? [],
     ...(options?.readiness ? { readiness: options.readiness } : {}),
+    ...(options?.implementationState ? { implementationState: options.implementationState } : {}),
   })
 
   return {
@@ -633,6 +635,50 @@ describe('archive command', () => {
     expect(result).toContain('Archive Blocked')
     expect(result).toContain('limited_context')
     expect(result).toContain('not archive readiness')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  for (const implementationState of ['dirty', 'stale', 'blocked'] as const) {
+    test(`blocks archive when implementation state is ${implementationState}`, async () => {
+      const feature = `readiness-${implementationState}-implementation-state`
+      const testDir = join(process.cwd(), `.test-archive-${implementationState}-implementation-state`)
+      const ctx = await setupReadinessArchiveFixture(testDir, feature, {
+        readiness: VerifyReadinessStatus.Ready,
+        implementationState: {
+          state: implementationState,
+          updatedAt: '2026-04-21T01:00:00.000Z',
+          fromVerify: implementationState === 'stale',
+        },
+      })
+
+      const result = await handleArchive(ctx, feature)
+      expect(result).toContain('Archive Blocked')
+      expect(result).toContain(`implementation state is **${implementationState}**`)
+      expect(result).toContain('openflow-quality-gate')
+      await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+      await rm(testDir, { recursive: true, force: true })
+    })
+  }
+
+  test('allows archive when implementation state is verified', async () => {
+    const feature = 'readiness-verified-implementation-state'
+    const testDir = join(process.cwd(), '.test-archive-verified-implementation-state')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.Ready,
+      implementationState: {
+        state: 'verified',
+        updatedAt: '2026-04-21T01:00:00.000Z',
+        fromVerify: true,
+      },
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
 
     await rm(testDir, { recursive: true, force: true })
   })

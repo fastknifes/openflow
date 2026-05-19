@@ -520,6 +520,29 @@ export interface IssuePacket {
   updatedAt: string
 }
 
+/** Implementation lifecycle states for stateful quality guardrails.
+ *  - clean: no implementation changes since last verify
+ *  - dirty: implementation changes detected, readiness may be stale
+ *  - verified: quality-gate passed with fresh readiness
+ *  - stale: verified but subsequent implementation changes detected
+ *  - blocked: completion/archive blocked until quality-gate re-run
+ */
+export type ImplementationState = 'clean' | 'dirty' | 'verified' | 'stale' | 'blocked'
+
+/** Metadata for implementation state tracking */
+export interface ImplementationStateMetadata {
+  /** Current implementation state */
+  state: ImplementationState
+  /** ISO-8601 timestamp when state was last updated */
+  updatedAt: string
+  /** Files that caused the state transition to dirty/stale */
+  changedFiles?: string[]
+  /** Git HEAD at time of state update */
+  gitHead?: string
+  /** Whether the state transition was from a verify success */
+  fromVerify?: boolean
+}
+
 export interface AcceptanceState {
   feature: string
   phase: DevelopmentPhase
@@ -561,6 +584,8 @@ export interface AcceptanceState {
   hardenSummary?: string
   /** Quality-gate orchestration applicability metadata; not verify readiness. */
   qualityGateApplicability?: QualityGateApplicabilityResult
+  /** Implementation state for stateful quality guardrails */
+  implementationState?: ImplementationStateMetadata
 }
 
 // 按阶段分段的文件变更记录

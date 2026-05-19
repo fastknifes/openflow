@@ -420,6 +420,24 @@ OpenFlow 运行在 **OpenCode** 中，可选深度集成 **oh-my-openagent (omo)
 
 ## 📦 安装
 
+### 🤖 给 LLM Agent（推荐）
+
+复制这段提示词到你的 LLM Agent（Claude Code、AmpCode、Cursor、Trae、Qoder 等）：
+
+```
+Install and configure OpenFlow by following the instructions here:
+https://raw.githubusercontent.com/fastknifes/openflow/main/docs/guide/installation.md
+```
+
+> **给 LLM Agent**：获取安装指南并照做：
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/fastknifes/openflow/main/docs/guide/installation.md
+> ```
+
+---
+
+### 手动安装
+
 ```bash
 npm install @fastknife/openflow
 ```

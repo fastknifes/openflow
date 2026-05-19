@@ -1,9 +1,31 @@
-# Context Loss Reflections
+# 上下文丢失反思
 
-| Date | Summary | Classification | Promotion Candidate |
-|------|---------|---------------|-------------------|
-| 2026-05-18 | AI auto-invoked `openflow-feature` after a feature prompt despite ADR-003 forbidding automatic interactive governance command execution. | must-trigger | Yes |
+本索引是 context-loss 类反思的可复用规则层。这里保留抽象规则、触发模式和边界条件；具体失败证据保留在下方事故样本文件中。新增反思只有在改变可复用规则、触发模式或边界条件时，才需要更新本索引。
 
-## Active Corrective Rules
+## 可复用规则
 
-- **no-auto-governance-command-after-prompt**: When a Feature Question or command recommendation appears, do not call interactive OpenFlow governance tools such as `openflow-feature` unless the user explicitly requested that command; answer conversationally or ask/offer next steps instead.
+| 规则 | 适用场景 | 正确行为 | 依据样本 |
+|------|----------|----------|----------|
+| **建议提示不是执行授权** | Feature Question、推荐语或生成提示建议运行 `/openflow-feature` 或其他交互式治理命令。 | 将提示视为建议上下文。除非用户明确输入命令，或直接要求开始/继续正式工作流，否则不要调用命令；应继续对话或提示下一步。 | [自动调用 feature 命令](./2026-05-18-auto-invoked-feature-command.md) |
+| **自然语言命令需要意图矩阵测试** | 命令参数可能同时表示新标识、续接回答或批准信号。 | 同时测试“无上下文的模糊输入应被拒绝”和“有上下文的明确续接输入应被接受”，并使用用户真实命令形态作为回归样例。 | [feature 续接回归](./2026-05-18-feature-continuation-regression.md) |
+
+## 触发模式
+
+当出现以下模式时，AI 或实现代码应先套用上方规则，再继续行动：
+
+- 提示中出现 `Recommended next step`、`Feature Design Suggested`、`Feature Question` 或 `continue with /openflow-feature`，但用户没有明确输入 `/openflow-feature`。
+- 命令解析逻辑需要把自然语言同时判断为 feature 名称或工作流回答。
+- 修复重点是阻止错误生成名称、占位名称或模糊输入；此时还必须验证有效的上下文续接仍然可用。
+
+## 边界规则
+
+- 包括 `/openflow-feature` 在内的交互式 OpenFlow 治理命令，执行前必须有用户明确意图。
+- AI 可主动调用的工作流例外仅限已文档化的例外，例如实现后的 quality-gate，以及明确需要生成计划时的 writing-plan。
+- 详细事故文件是证据样本，不是主要操作规则。只有当规则跨样本反复出现时，才提升抽象规则。
+
+## 事故样本
+
+| 日期 | 样本 | 可复用教训 | 分类 | 是否建议提升 |
+|------|------|------------|------|--------------|
+| 2026-05-18 | [Feature 续接回归](./2026-05-18-feature-continuation-regression.md) | 拒绝模糊独立 feature 标识时，不能破坏有效的上下文续接。 | must-trigger | Yes |
+| 2026-05-18 | [自动调用 feature 命令](./2026-05-18-auto-invoked-feature-command.md) | 推荐运行治理命令，不等于授权 AI 自动运行该命令。 | must-trigger | Yes |

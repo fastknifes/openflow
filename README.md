@@ -421,6 +421,24 @@ No omo? OpenFlow's core constraint model still works independently.
 
 ## 📦 Installation
 
+### For LLM Agents (Recommended)
+
+Copy this prompt into your LLM agent (Claude Code, AmpCode, Cursor, Trae, Qoder, etc.):
+
+```
+Install and configure OpenFlow by following the instructions here:
+https://raw.githubusercontent.com/fastknifes/openflow/main/docs/guide/installation.md
+```
+
+> **For LLM Agents**: Fetch the installation guide and follow it:
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/fastknifes/openflow/main/docs/guide/installation.md
+> ```
+
+---
+
+### Manual Installation
+
 ```bash
 npm install @fastknife/openflow
 ```

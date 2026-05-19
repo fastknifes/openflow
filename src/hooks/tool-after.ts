@@ -1,7 +1,8 @@
 import type { Hooks } from '@opencode-ai/plugin'
-import type { OpenFlowContext, FileChangeRecord } from '../types.js'
+import type { AcceptanceState, OpenFlowContext, FileChangeRecord } from '../types.js'
 import { extractPlanName } from '../plan/parser.js'
 import { enhancePlan } from '../plan/enhancer.js'
+import { loadAcceptanceState, markImplementationDirty, markImplementationStale, mergeLimitedContextState } from '../utils/acceptance-state.js'
 import { trackFileChange } from '../utils/file-tracker.js'
 import { logger } from '../utils/logger.js'
 import { getContractRuntime } from '../contracts/runtime.js'
@@ -9,12 +10,14 @@ import { createAcceptancePromptHook } from './acceptance-prompt.js'
 import {
   appendToolAfterPrompt,
   extractFeatureFromDesignPath,
+  isImplementationLikeFile,
   isDesignDoc,
   isPlanFile,
   normalizePath,
   resolveBuildId,
   shouldPromptForAcceptanceDocSync,
   shouldTrackChange,
+  toProjectRelativePath,
 } from './tool-after-policy.js'
 import {
   evaluateDocumentBundle,
@@ -38,15 +41,15 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
     const filePath = typeof args?.filePath === 'string' ? args.filePath : undefined
     if (!filePath) return
 
-    const normalizedPath = normalizePath(filePath)
+    const projectRelativePath = toProjectRelativePath(ctx.directory, filePath)
 
     // Check for design document writes to trigger PRD generation
-    if (isDesignDoc(normalizedPath) && isPrdGenerationEnabled(ctx.config)) {
+    if (isDesignDoc(projectRelativePath) && isPrdGenerationEnabled(ctx.config)) {
       const feature = extractFeatureFromDesignPath(filePath)
       
       if (feature) {
         // Only generate PRD when the primary design doc is written
-        if (normalizedPath.endsWith('/design.md') || normalizedPath.endsWith('-design.md')) {
+        if (projectRelativePath.endsWith('/design.md') || projectRelativePath.endsWith('-design.md')) {
           const bundle = await evaluateDocumentBundle(ctx.directory, feature, ctx.config)
 
           if (bundle.generatePrd) {
@@ -88,7 +91,7 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
       }
     }
 
-    if (isPlanFile(normalizedPath)) {
+    if (isPlanFile(projectRelativePath)) {
       const planName = extractPlanName(filePath)
 
       if (planName && !ctx.enhancedPlans.has(planName)) {
@@ -105,7 +108,7 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
           }
         }
       }
-    } else if (shouldTrackChange(normalizedPath)) {
+    } else if (shouldTrackChange(projectRelativePath)) {
       const buildId = resolveBuildId(input.sessionID)
 
       const change: FileChangeRecord = {
@@ -120,6 +123,8 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
       } catch (error) {
         logger.error('Failed to track file change', error instanceof Error ? error : undefined)
       }
+
+      await updateImplementationStateForChange(ctx, projectRelativePath, input.sessionID)
 
       // Dispatch file change event to ContractRuntime for Guardian
       if (ctx.config.guardian?.enabled) {
@@ -141,7 +146,7 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
         }
       }
 
-      if (shouldPromptForAcceptanceDocSync(normalizedPath)) {
+      if (shouldPromptForAcceptanceDocSync(projectRelativePath)) {
         const acceptancePromptInput = args
           ? { tool: input.tool, args }
           : { tool: input.tool }
@@ -154,4 +159,90 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
   }
 
   return hook
+}
+
+async function updateImplementationStateForChange(
+  ctx: OpenFlowContext,
+  normalizedPath: string,
+  sessionID?: string,
+): Promise<void> {
+  if (!isImplementationLikeFile(normalizedPath)) {
+    return
+  }
+
+  const acceptanceState = await loadAcceptanceState(ctx.directory)
+  if (!acceptanceState) {
+    // Issue 2: No acceptance state → create limited-context dirty state.
+    // This prevents AI from modifying code and claiming completion without
+    // going through a quality gate. Subsequent writes merge into this state.
+    await mergeLimitedContextState(ctx.directory, normalizedPath, sessionID)
+    return
+  }
+
+  if (!matchesActiveAcceptanceState(acceptanceState, normalizedPath, sessionID)) {
+    return
+  }
+
+  const changedFiles = mergeChangedFiles(acceptanceState, normalizedPath)
+  const shouldMarkStale = acceptanceState.implementationState?.state === 'verified'
+    || acceptanceState.implementationState?.state === 'stale'
+    || Boolean(acceptanceState.readiness || acceptanceState.verifyResult)
+
+  try {
+    if (shouldMarkStale) {
+      await markImplementationStale(ctx.directory, { changedFiles })
+      logger.info('Marked implementation state stale after implementation-like change', {
+        filePath: normalizedPath,
+        feature: acceptanceState.feature,
+        mode: acceptanceState.mode ?? 'feature',
+      })
+      return
+    }
+
+    await markImplementationDirty(ctx.directory, { changedFiles })
+    logger.info('Marked implementation state dirty after implementation-like change', {
+      filePath: normalizedPath,
+      feature: acceptanceState.feature,
+      mode: acceptanceState.mode ?? 'feature',
+    })
+  } catch (error) {
+    logger.error('Failed to update implementation state after file change', error instanceof Error ? error : undefined)
+  }
+}
+
+function matchesActiveAcceptanceState(
+  state: AcceptanceState,
+  normalizedPath: string,
+  sessionID?: string,
+): boolean {
+  if (state.sessionID && sessionID && state.sessionID === sessionID) {
+    return true
+  }
+
+  const workspaceSlug = extractWorkspaceSlug(normalizedPath)
+  if (!workspaceSlug) {
+    return true
+  }
+
+  const acceptedSlugs = new Set<string>([
+    state.feature,
+    state.issueSlug,
+    state.issueClarificationPath ? extractWorkspaceSlug(normalizePath(state.issueClarificationPath)) : null,
+  ].filter((value): value is string => Boolean(value)).map(value => value.toLowerCase()))
+
+  return acceptedSlugs.has(workspaceSlug)
+}
+
+function mergeChangedFiles(state: AcceptanceState, normalizedPath: string): string[] {
+  const existing = state.implementationState?.changedFiles ?? []
+  return [...new Set([...existing, normalizedPath])].sort()
+}
+
+function extractWorkspaceSlug(normalizedPath: string): string | null {
+  const match = normalizedPath.match(/(?:^|\/)docs\/changes\/([^/]+)(?:\/|$)/u)
+  if (!match?.[1]) {
+    return null
+  }
+
+  return match[1].replace(/^\d{4}-\d{2}-\d{2}-/u, '')
 }

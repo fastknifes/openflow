@@ -10,6 +10,13 @@ import {
   clearWaitingForDocUpdateConfirm,
   enterAcceptancePhase,
   saveVerifyResult,
+  markImplementationDirty,
+  markImplementationVerified,
+  markImplementationStale,
+  markImplementationBlocked,
+  clearImplementationState,
+  getImplementationState,
+  isFreshReadiness,
   saveIssueClarificationState,
   type IssueClarificationState,
 } from '../../src/utils/acceptance-state.js'
@@ -449,6 +456,104 @@ describe('acceptance-state', () => {
     expect(loaded?.classifications).toEqual(['config_issue', 'data_issue'])
     expect(loaded?.governancePromotionStatus).toBe('candidate_created')
     expect(loaded?.issueClarificationPath).toBe('docs/changes/2026-05-09-slow-query-perf/issue-clarification.md')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('implementation state round-trips through acceptance state', async () => {
+    const root = join(TEST_ROOT, 'implementation-state-round-trip')
+    await rm(root, { recursive: true, force: true })
+
+    const state: AcceptanceState = {
+      feature: 'impl-state-demo',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-18T12:00:00.000Z',
+      pendingDocUpdates: [],
+      implementationState: {
+        state: 'stale',
+        updatedAt: '2026-05-18T12:05:00.000Z',
+        changedFiles: ['src/demo.ts', 'tests/demo.test.ts'],
+        gitHead: 'abc12345',
+        fromVerify: false,
+      },
+    }
+
+    await saveAcceptanceState(root, state)
+    const loaded = await loadAcceptanceState(root)
+
+    expect(loaded).not.toBeNull()
+    expect(loaded?.implementationState).toEqual(state.implementationState)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('legacy state without implementationState defaults to clean helper state', async () => {
+    const root = join(TEST_ROOT, 'legacy-no-implementation-state')
+    await rm(root, { recursive: true, force: true })
+
+    const state: AcceptanceState = {
+      feature: 'legacy-impl-clean',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-18T12:10:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+    }
+
+    await saveAcceptanceState(root, state)
+    const implementationState = await getImplementationState(root)
+
+    expect(implementationState).toEqual({
+      state: 'clean',
+      updatedAt: '2026-05-18T12:10:00.000Z',
+    })
+    expect(await isFreshReadiness(root)).toBe(true)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('implementation state helper transitions persist and freshness follows state', async () => {
+    const root = join(TEST_ROOT, 'implementation-state-transitions')
+    await rm(root, { recursive: true, force: true })
+
+    await saveAcceptanceState(root, {
+      feature: 'impl-transitions',
+      phase: 'acceptance',
+      phaseStartedAt: '2026-05-18T12:20:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+    })
+
+    await markImplementationDirty(root, { changedFiles: ['src/dirty.ts'], gitHead: 'dirty1234' })
+    let implementationState = await getImplementationState(root)
+    expect(implementationState?.state).toBe('dirty')
+    expect(implementationState?.changedFiles).toEqual(['src/dirty.ts'])
+    expect(implementationState?.gitHead).toBe('dirty1234')
+    expect(await isFreshReadiness(root)).toBe(false)
+
+    await markImplementationVerified(root, { changedFiles: ['src/dirty.ts'], gitHead: 'verify123' })
+    implementationState = await getImplementationState(root)
+    expect(implementationState?.state).toBe('verified')
+    expect(implementationState?.fromVerify).toBe(true)
+    expect(await isFreshReadiness(root)).toBe(true)
+
+    await markImplementationStale(root, { changedFiles: ['src/dirty.ts', 'src/more.ts'] })
+    implementationState = await getImplementationState(root)
+    expect(implementationState?.state).toBe('stale')
+    expect(implementationState?.changedFiles).toEqual(['src/dirty.ts', 'src/more.ts'])
+    expect(await isFreshReadiness(root)).toBe(false)
+
+    await markImplementationBlocked(root)
+    implementationState = await getImplementationState(root)
+    expect(implementationState?.state).toBe('blocked')
+    expect(await isFreshReadiness(root)).toBe(false)
+
+    await clearImplementationState(root)
+    implementationState = await getImplementationState(root)
+    expect(implementationState).toEqual({
+      state: 'clean',
+      updatedAt: '2026-05-18T12:20:00.000Z',
+    })
+    expect(await isFreshReadiness(root)).toBe(true)
 
     await rm(root, { recursive: true, force: true })
   })

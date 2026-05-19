@@ -118,6 +118,15 @@ describe('writing-plan skill content', () => {
     expect(skill.content).toContain('Do not create or suggest')
     expect(skill.content).toContain('parallel')
   })
+
+  test('forbids automatic invocation from stuck feature or ultrawork flows', () => {
+    const skill = getWritingPlanSkill()
+
+    expect(skill.description).toContain('Use only when the user explicitly requests')
+    expect(skill.content).toContain('Do NOT invoke this skill merely because `/openflow-feature` is active, stuck, incomplete, or has just generated design documents')
+    expect(skill.content).toContain('Do NOT invoke this skill from brainstorm, ULW/ultrawork, or continuation flow unless the user explicitly asked for plan generation')
+    expect(skill.content).toContain('do not create `plan.md` or `.sisyphus/plans/*.md`')
+  })
 })
 
 describe('writing-plan dual-path contract', () => {

@@ -26,7 +26,8 @@ of existing corrective rules under \`docs/current/workflow/ai-reflection/\`:
    (e.g., \`docs/current/workflow/ai-reflection/premature-implementation/index.md\`).
 2. If the index lists cases clearly related to the current mistake, read those case documents
    to see whether an existing corrective rule already covers the pattern.
-3. Existing corrective rules inform the classification, root cause analysis, and corrective rule
+3. Treat category index rules as the reusable operating layer and case documents as evidence
+   samples. Existing rules inform the classification, root cause analysis, and corrective rule
    for the new case — a duplicate or near-duplicate should reference the existing rule rather
    than re-derive one from scratch.
 
@@ -116,19 +117,34 @@ All reflection cases must be classified into exactly one of these categories:
 
 ### index.md Template
 
-Each category directory contains an \`index.md\` listing all cases in that category.
+Each category directory contains an \`index.md\` for reusable lessons in that category.
+The index keeps abstract rules at the top and concrete incidents as backing samples below.
 Use the following template:
 
 \`\`\`md
 # <Category Title> Reflections
 
-| Date | Summary | Classification | Promotion Candidate |
-|------|---------|---------------|-------------------|
-| <YYYY-MM-DD> | <summary> | <classification> | Yes/No |
+This index is the reusable layer for <category> lessons. Keep general rules here; keep detailed failure evidence in the case files below. A new reflection should update this index only when it changes a reusable rule, trigger pattern, or boundary condition.
 
-## Active Corrective Rules
+## Reusable Rules
 
-- **<rule-name>**: <corrective rule text>
+| Rule | Applies When | Correct Behavior | Backing Cases |
+|------|--------------|------------------|---------------|
+| **<rule-name>** | <repeatable trigger or situation> | <correct behavior to apply next time> | [<case summary>](./<case-file>.md) |
+
+## Trigger Patterns
+
+- <recognizable future signal for this rule>
+
+## Boundary Rules
+
+- <what this rule covers and what it does not cover>
+
+## Case Samples
+
+| Date | Case | Reusable Lesson | Classification | Promotion Candidate |
+|------|------|-----------------|---------------|-------------------|
+| <YYYY-MM-DD> | [<case summary>](./<case-file>.md) | <abstract lesson from the case> | <classification> | Yes/No |
 \`\`\`
 
 ### Category Document Template

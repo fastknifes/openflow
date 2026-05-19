@@ -4,7 +4,7 @@ import { type AcceptanceState, type CurrentPromotionSuggestion, type OpenFlowCon
 import { sanitizeFeatureName, createSafePath, escapeMarkdown } from '../utils/security.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { fileExists } from '../hooks/file-utils.js'
-import { loadAcceptanceState, saveAcceptanceState, setWaitingForDocUpdateConfirm } from '../utils/acceptance-state.js'
+import { getImplementationState, loadAcceptanceState, saveAcceptanceState, setWaitingForDocUpdateConfirm } from '../utils/acceptance-state.js'
 import {
   applyPromotionSuggestions,
   buildPromotionSuggestions,
@@ -131,6 +131,13 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
       return formatDocUpdateConfirmationRequired(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates, true)
     }
+  }
+
+  const implementationState = matchingAcceptanceState ? await getImplementationState(ctx.directory) : null
+  const implementationStateValue = implementationState?.state ?? 'clean'
+
+  if (matchingAcceptanceState && implementationStateValue !== 'clean' && implementationStateValue !== 'verified') {
+    return formatImplementationStateBlock(sanitizedFeature, implementationStateValue)
   }
 
   const buildChanges = await collectFileChanges(ctx.directory)
@@ -459,6 +466,19 @@ Archive stopped because no verification readiness was found for **${escapeMarkdo
 The current acceptance state (\`.sisyphus/acceptance.local.md\`) belongs to **${escapeMarkdown(staleFeature)}**, not **${escapeMarkdown(feature)}**.
 
 Run \`/openflow-verify ${feature}\` to generate fresh readiness for this feature before archiving.`
+}
+
+function formatImplementationStateBlock(
+  feature: string,
+  state: string,
+): string {
+  return `## Archive Blocked
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive stopped because implementation state is **${escapeMarkdown(state)}**.
+
+Archive only accepts fresh matching verified state. Please rerun \`openflow-quality-gate\` for **${escapeMarkdown(feature)}** before archiving again.`
 }
 
 function getArchiveDocUpdateConfirmationState(state: {

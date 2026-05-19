@@ -32,6 +32,7 @@ describe('skill registration', () => {
     expect(content).toContain('development plan')
     expect(content).toContain('/openflow-writing-plan <feature>')
     expect(content).toContain('openflow-writing-plan <feature>')
+    expect(content).toContain('Do NOT invoke this skill from brainstorm, ULW/ultrawork, or continuation flow unless the user explicitly asked for plan generation')
 
     const brainstormSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-brainstorm', 'SKILL.md')
     const brainstormContent = await readFile(brainstormSkillPath, 'utf-8')
@@ -341,6 +342,18 @@ describe('openflow-ai-reflection content: docs path and templates', () => {
     expect(content).toContain('## Markdown Templates')
     // Must contain a fenced code block with md language tag
     expect(content).toContain('```md')
+  })
+
+  test('index template separates reusable rules from concrete case samples', () => {
+    const skill = findSkillByName('openflow-ai-reflection')
+    expect(skill).toBeDefined()
+
+    const content = skill!.content
+    expect(content).toContain('## Reusable Rules')
+    expect(content).toContain('## Trigger Patterns')
+    expect(content).toContain('## Boundary Rules')
+    expect(content).toContain('## Case Samples')
+    expect(content).toContain('detailed failure evidence in the case files below')
   })
 })
 

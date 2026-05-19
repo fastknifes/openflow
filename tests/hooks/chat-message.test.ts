@@ -69,6 +69,55 @@ function createHookOutput(text: string, metadata?: Record<string, unknown>) {
   return createOutput(text, metadata) as Parameters<ReturnType<typeof createChatMessageHook>>[1]
 }
 
+/**
+ * Sets up real acceptance state files so the chat-message hook reads actual
+ * implementation state, WITHOUT using mock.module (which pollutes the global
+ * module cache and breaks other test files).
+ *
+ * - dirty/stale/blocked: saves state then marks implementation dirty
+ * - verified: saves state with ready readiness and verified implementation state
+ * - null: no acceptance state file created
+ */
+async function setupAcceptanceStateForTest(
+  root: string,
+  options: {
+    implementationState: { state: 'clean' | 'dirty' | 'verified' | 'stale' | 'blocked' } | null
+  },
+): Promise<void> {
+  const { saveAcceptanceState, markImplementationDirty, markImplementationVerified, markImplementationStale, markImplementationBlocked } = await import('../../src/utils/acceptance-state.js')
+  const { VerifyReadinessStatus } = await import('../../src/types.js')
+
+  if (!options.implementationState) {
+    // No acceptance state — getImplementationState will return null
+    return
+  }
+
+  const baseState = {
+    feature: `test-${options.implementationState.state}`,
+    phase: 'acceptance' as const,
+    phaseStartedAt: '2026-05-19T00:00:00.000Z',
+    pendingDocUpdates: [],
+  }
+
+  if (options.implementationState.state === 'dirty') {
+    await saveAcceptanceState(root, { ...baseState, readiness: VerifyReadinessStatus.Ready })
+    await markImplementationDirty(root, { changedFiles: ['src/test.ts'] })
+  } else if (options.implementationState.state === 'verified') {
+    await saveAcceptanceState(root, { ...baseState, readiness: VerifyReadinessStatus.Ready })
+    await markImplementationVerified(root, { changedFiles: ['src/test.ts'] })
+  } else if (options.implementationState.state === 'stale') {
+    await saveAcceptanceState(root, { ...baseState, readiness: VerifyReadinessStatus.Ready })
+    await markImplementationVerified(root, { changedFiles: ['src/test.ts'] })
+    await markImplementationStale(root, { changedFiles: ['src/test.ts', 'src/more.ts'] })
+  } else if (options.implementationState.state === 'blocked') {
+    await saveAcceptanceState(root, { ...baseState, readiness: VerifyReadinessStatus.NotReady })
+    await markImplementationBlocked(root)
+  } else {
+    // clean — just save without implementation state
+    await saveAcceptanceState(root, { ...baseState, readiness: VerifyReadinessStatus.Ready })
+  }
+}
+
 describe('chat-message hook', () => {
   test('suggests feature from intent metadata in smart mode', async () => {
     const root = join(process.cwd(), '.test-chat-intent')
@@ -96,6 +145,7 @@ describe('chat-message hook', () => {
       expect((output.parts[0] as { text?: string }).text).not.toContain('/openflow-feature user-login')
       expect((output.parts[0] as { text?: string }).text).toContain('/openflow-feature')
       expect((output.parts[0] as { text?: string }).text).toContain('does not block research')
+      expect((output.parts[0] as { text?: string }).text).toContain('assistant must not invoke "/openflow-feature" automatically')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -115,6 +165,7 @@ describe('chat-message hook', () => {
       expect((output.parts[0] as { text?: string }).text).toContain('Feature Design Suggested')
       expect((output.parts[0] as { text?: string }).text).toContain('/openflow-feature')
       expect((output.parts[0] as { text?: string }).text).not.toContain('/openflow-feature feature-')
+      expect((output.parts[0] as { text?: string }).text).toContain('manually run "/openflow-feature"')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -217,6 +268,66 @@ describe('chat-message hook', () => {
 
       expect((output.parts[0] as { text?: string }).text).toContain('Verification Suggested')
       expect((output.parts[0] as { text?: string }).text).toContain('non-blocking')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('blocks completion claims when implementation state is dirty', async () => {
+    const root = join(process.cwd(), '.test-chat-completion-dirty')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+    try {
+      await setupAcceptanceStateForTest(root, { implementationState: { state: 'dirty' } })
+      const ctx = createContext(root)
+      const hook = createChatMessageHook(ctx)
+      const output = createHookOutput('这个功能完成了，可以收尾')
+
+      await hook(createInput('session-completion-dirty'), output)
+
+      expect((output.parts[0] as { text?: string }).text).toContain('Completion Blocked Until Quality Gate')
+      expect((output.parts[0] as { text?: string }).text).toContain('openflow-quality-gate')
+      expect((output.parts[0] as { text?: string }).text).toContain('`dirty`')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps completion guidance non-blocking when implementation state is verified', async () => {
+    const root = join(process.cwd(), '.test-chat-completion-verified')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+    try {
+      await setupAcceptanceStateForTest(root, { implementationState: { state: 'verified' } })
+      const ctx = createContext(root)
+      const hook = createChatMessageHook(ctx)
+      const output = createHookOutput('这个功能完成了，可以收尾')
+
+      await hook(createInput('session-completion-verified'), output)
+
+      expect((output.parts[0] as { text?: string }).text).toContain('Verification Suggested')
+      expect((output.parts[0] as { text?: string }).text).toContain('non-blocking')
+      expect((output.parts[0] as { text?: string }).text).not.toContain('Completion Blocked Until Quality Gate')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps completion guidance non-blocking without active acceptance state', async () => {
+    const root = join(process.cwd(), '.test-chat-completion-no-acceptance')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+    try {
+      // No acceptance state file — getImplementationState returns null
+      const ctx = createContext(root)
+      const hook = createChatMessageHook(ctx)
+      const output = createHookOutput('这个功能完成了，可以收尾')
+
+      await hook(createInput('session-completion-no-acceptance'), output)
+
+      expect((output.parts[0] as { text?: string }).text).toContain('Verification Suggested')
+      expect((output.parts[0] as { text?: string }).text).toContain('non-blocking')
+      expect((output.parts[0] as { text?: string }).text).not.toContain('Completion Blocked Until Quality Gate')
     } finally {
       await rm(root, { recursive: true, force: true })
     }

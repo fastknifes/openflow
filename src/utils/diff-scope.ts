@@ -11,6 +11,22 @@ export interface ScopedDiffResult {
   omittedPaths: string[]
 }
 
+export function scopeDiffToFiles(diffStr: string, scopedFiles: string[]): ScopedDiffResult {
+  if (!diffStr.trim()) return { diff: diffStr, omittedPaths: [] }
+
+  const normalizedScope = new Set(scopedFiles.map(normalizeProjectPath))
+  if (normalizedScope.size === 0) return { diff: diffStr, omittedPaths: [] }
+
+  const blocks = splitDiffBlocks(diffStr)
+  const scopedBlocks = blocks.filter(block => diffBlockMatchesFiles(block, normalizedScope))
+  const omittedPaths = blocks
+    .filter(block => !diffBlockMatchesFiles(block, normalizedScope))
+    .flatMap(extractDiffBlockPaths)
+    .filter(isReviewRelevantOmittedPath)
+
+  return { diff: scopedBlocks.join('\n'), omittedPaths: [...new Set(omittedPaths)].sort() }
+}
+
 export function scopeDiffToFeature(
   projectDir: string,
   feature: string,
@@ -74,6 +90,29 @@ export function filterPathsToFeatureScope(
       scopedPaths.push(normalizeProjectPath(filePath))
     } else if (isReviewRelevantOmittedPath(filePath)) {
       omittedPaths.push(normalizeProjectPath(filePath))
+    }
+  }
+
+  return {
+    scopedPaths: [...new Set(scopedPaths)].sort(),
+    omittedPaths: [...new Set(omittedPaths)].sort(),
+  }
+}
+
+export function filterPathsToExactScope(
+  paths: string[],
+  scopedFiles: string[],
+): { scopedPaths: string[]; omittedPaths: string[] } {
+  const normalizedScope = new Set(scopedFiles.map(normalizeProjectPath))
+  const scopedPaths: string[] = []
+  const omittedPaths: string[] = []
+
+  for (const filePath of paths) {
+    const normalizedPath = normalizeProjectPath(filePath)
+    if (normalizedScope.has(normalizedPath)) {
+      scopedPaths.push(normalizedPath)
+    } else if (isReviewRelevantOmittedPath(normalizedPath)) {
+      omittedPaths.push(normalizedPath)
     }
   }
 
@@ -152,6 +191,13 @@ function diffBlockMatchesScope(block: string, scope: FeatureDiffScope): boolean 
   if (paths.length === 0) return false
 
   return paths.some(filePath => isPathInFeatureScope(filePath, scope))
+}
+
+function diffBlockMatchesFiles(block: string, scopedFiles: Set<string>): boolean {
+  const paths = extractDiffBlockPaths(block)
+  if (paths.length === 0) return false
+
+  return paths.some(filePath => scopedFiles.has(normalizeProjectPath(filePath)))
 }
 
 function isPathInFeatureScope(filePath: string, scope: FeatureDiffScope): boolean {

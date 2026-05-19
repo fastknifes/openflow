@@ -1,3 +1,4 @@
+import * as nodePath from 'node:path'
 import { generateBuildId } from '../utils/security.js'
 import { logger } from '../utils/logger.js'
 
@@ -5,6 +6,19 @@ const sessionBuildIds = new Map<string, string>()
 
 export function normalizePath(filePath: string): string {
   return filePath.toLowerCase().replace(/\\/g, '/')
+}
+
+export function toProjectRelativePath(projectDir: string, filePath: string): string {
+  if (!nodePath.isAbsolute(filePath)) {
+    return normalizePath(filePath).replace(/^\.\//u, '')
+  }
+
+  const relativePath = nodePath.relative(projectDir, filePath)
+  if (!relativePath || relativePath.startsWith('..') || nodePath.isAbsolute(relativePath)) {
+    return normalizePath(filePath)
+  }
+
+  return normalizePath(relativePath)
 }
 
 export function isPlanFile(normalizedPath: string): boolean {
@@ -38,6 +52,40 @@ export function extractFeatureFromDesignPath(filePath: string): string | null {
 
 export function shouldTrackChange(normalizedPath: string): boolean {
   return !normalizedPath.includes('node_modules/') && !normalizedPath.includes('.sisyphus/')
+}
+
+export function isTestFile(normalizedPath: string): boolean {
+  return /(^|\/)(tests?|__tests__)\//u.test(normalizedPath) || /\.(test|spec)\.(ts|tsx|js|jsx)$/u.test(normalizedPath)
+}
+
+export function isRuntimeCodeFile(normalizedPath: string): boolean {
+  return normalizedPath.startsWith('src/') && /\.(ts|tsx|js|jsx|mjs|cjs)$/u.test(normalizedPath) && !isTestFile(normalizedPath)
+}
+
+export function isDesignOnlyFile(normalizedPath: string): boolean {
+  return /^docs\/changes\/.*\/(design|behavior|prd|requirements|proposal|decisions)\.md$/u.test(normalizedPath)
+}
+
+export function isPlanningOnlyFile(normalizedPath: string): boolean {
+  return /^\.sisyphus\/plans\/[^/]+\.md$/u.test(normalizedPath) || /^docs\/changes\/.*\/plan\.md$/u.test(normalizedPath)
+}
+
+export function isMetadataOnlyFile(normalizedPath: string): boolean {
+  return /^\.sisyphus\//u.test(normalizedPath)
+    || /^(package-lock|bun\.lockb|pnpm-lock|yarn\.lock)$/u.test(normalizedPath)
+    || /^\.gitnexus\//u.test(normalizedPath)
+}
+
+export function isDocsOnlyFile(normalizedPath: string): boolean {
+  return normalizedPath.endsWith('.md') && (normalizedPath.startsWith('docs/') || /^readme(?:_[a-z]+)?\.md$/u.test(normalizedPath))
+}
+
+export function isImplementationLikeFile(normalizedPath: string): boolean {
+  if (isDesignOnlyFile(normalizedPath) || isPlanningOnlyFile(normalizedPath) || isMetadataOnlyFile(normalizedPath) || isDocsOnlyFile(normalizedPath)) {
+    return false
+  }
+
+  return isRuntimeCodeFile(normalizedPath) || isTestFile(normalizedPath)
 }
 
 export function resolveBuildId(sessionID?: string): string {

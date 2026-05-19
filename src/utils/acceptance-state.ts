@@ -1,6 +1,6 @@
-import * as fs from 'node:fs/promises'
+﻿import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { VerifyReadinessStatus, type AcceptanceState, type AcceptedKnownIssueSummary, type ArchiveDocUpdateConfirmationStatus, type EvidenceFreshnessMetadata, type HardenTerminalSummary, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type AcceptedKnownIssueSummary, type ArchiveDocUpdateConfirmationStatus, type EvidenceFreshnessMetadata, type HardenTerminalSummary, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus, type ImplementationState, type ImplementationStateMetadata, type QualityGateApplicabilityResult } from '../types.js'
 import { getAcceptanceStatePath } from '../config.js'
 import { logger } from './logger.js'
 
@@ -45,6 +45,12 @@ const FIELD_PREFIXES = {
   governancePromotionStatus: 'governancePromotionStatus:',
   issueClarificationPath: 'issueClarificationPath:',
   promotionCandidatePath: 'promotionCandidatePath:',
+  implementationState: 'implementationState:',
+  implementationStateUpdatedAt: 'implementationStateUpdatedAt:',
+  implementationStateChangedFiles: 'implementationStateChangedFiles:',
+  implementationStateGitHead: 'implementationStateGitHead:',
+  implementationStateFromVerify: 'implementationStateFromVerify:',
+  qualityGateApplicability: 'qualityGateApplicability:',
   evidenceFreshnessGitHead: 'evidenceFreshnessGitHead:',
   evidenceFreshnessChangedFiles: 'evidenceFreshnessChangedFiles:',
   evidenceFreshnessDiffHash: 'evidenceFreshnessDiffHash:',
@@ -78,6 +84,7 @@ function parseStateFile(content: string): AcceptanceState | null {
     evidenceChecks?: string[]
     evidenceSummary?: string
   } = {}
+  const implementationState: Partial<ImplementationStateMetadata> = {}
   
   let inPendingUpdates = false
   
@@ -189,6 +196,24 @@ function parseStateFile(content: string): AcceptanceState | null {
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.promotionCandidatePath)) {
       result.promotionCandidatePath = extractFieldValue(trimmed, FIELD_PREFIXES.promotionCandidatePath)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationState)) {
+      implementationState.state = extractFieldValue(trimmed, FIELD_PREFIXES.implementationState) as ImplementationState
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateUpdatedAt)) {
+      implementationState.updatedAt = extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateUpdatedAt)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateChangedFiles)) {
+      implementationState.changedFiles = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateChangedFiles))
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateGitHead)) {
+      implementationState.gitHead = extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateGitHead)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateFromVerify)) {
+      implementationState.fromVerify = extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateFromVerify) === 'true'
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.qualityGateApplicability)) {
+      try { result.qualityGateApplicability = JSON.parse(extractFieldValue(trimmed, FIELD_PREFIXES.qualityGateApplicability)) } catch { /* ignore */ }
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessGitHead)) {
       freshnessMeta.gitHead = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessGitHead)
@@ -391,6 +416,28 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.promotionCandidatePath) {
     state.promotionCandidatePath = result.promotionCandidatePath
   }
+
+  // Carry-over implementation state from flat fields
+  if (implementationState.state) {
+    state.implementationState = {
+      state: implementationState.state,
+      updatedAt: implementationState.updatedAt || state.phaseStartedAt,
+    }
+    if (implementationState.changedFiles && implementationState.changedFiles.length > 0) {
+      state.implementationState.changedFiles = implementationState.changedFiles
+    }
+    if (implementationState.gitHead) {
+      state.implementationState.gitHead = implementationState.gitHead
+    }
+    if (implementationState.fromVerify !== undefined) {
+      state.implementationState.fromVerify = implementationState.fromVerify
+    }
+  }
+
+  // Carry-over quality gate applicability
+  if (result.qualityGateApplicability) {
+    state.qualityGateApplicability = result.qualityGateApplicability as QualityGateApplicabilityResult
+  }
   
   return state
 }
@@ -457,6 +504,20 @@ function serializeState(state: AcceptanceState): string {
     pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessDiffHash, state.evidenceFreshness.diffHash)
     pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessEvidenceChecks, state.evidenceFreshness.evidenceChecks.join(', '))
     pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessEvidenceSummary, state.evidenceFreshness.evidenceSummary)
+  }
+  if (state.implementationState) {
+    pushOptionalLine(lines, FIELD_PREFIXES.implementationState, state.implementationState.state)
+    pushOptionalLine(lines, FIELD_PREFIXES.implementationStateUpdatedAt, state.implementationState.updatedAt)
+    if (state.implementationState.changedFiles && state.implementationState.changedFiles.length > 0) {
+      pushOptionalLine(lines, FIELD_PREFIXES.implementationStateChangedFiles, state.implementationState.changedFiles.join(', '))
+    }
+    pushOptionalLine(lines, FIELD_PREFIXES.implementationStateGitHead, state.implementationState.gitHead)
+    if (state.implementationState.fromVerify !== undefined) {
+      lines.push(`${FIELD_PREFIXES.implementationStateFromVerify} ${state.implementationState.fromVerify}`)
+    }
+  }
+  if (state.qualityGateApplicability) {
+    pushOptionalLine(lines, FIELD_PREFIXES.qualityGateApplicability, JSON.stringify(state.qualityGateApplicability))
   }
   pushOptionalLine(lines, FIELD_PREFIXES.mode, state.mode)
   pushOptionalLine(lines, FIELD_PREFIXES.issueSlug, state.issueSlug)
@@ -641,6 +702,107 @@ export async function markImplementationComplete(projectDir: string): Promise<vo
   }
 }
 
+// ──────────────────────────────────────────────
+// Implementation State Tracking
+// ──────────────────────────────────────────────
+
+type ImplementationStateTransitionOptions = {
+  changedFiles?: string[]
+  gitHead?: string
+}
+
+function normalizeImplementationState(state: AcceptanceState): ImplementationStateMetadata {
+  if (state.implementationState) {
+    return state.implementationState
+  }
+  return {
+    state: 'clean',
+    updatedAt: state.phaseStartedAt,
+  }
+}
+
+function createImplementationStateMetadata(
+  state: ImplementationState,
+  opts?: ImplementationStateTransitionOptions,
+): ImplementationStateMetadata {
+  const metadata: ImplementationStateMetadata = {
+    state,
+    updatedAt: formatTimestamp(),
+  }
+  if (opts?.changedFiles) {
+    metadata.changedFiles = opts.changedFiles
+  }
+  if (opts?.gitHead) {
+    metadata.gitHead = opts.gitHead
+  }
+  return metadata
+}
+
+async function updateImplementationState(
+  projectDir: string,
+  metadata: ImplementationStateMetadata,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) return
+  state.implementationState = metadata
+  await saveAcceptanceState(projectDir, state)
+}
+
+export async function markImplementationDirty(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions,
+): Promise<void> {
+  const metadata = createImplementationStateMetadata('dirty', opts)
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function markImplementationVerified(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions,
+): Promise<void> {
+  const metadata = createImplementationStateMetadata('verified', opts)
+  metadata.fromVerify = true
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function markImplementationStale(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions,
+): Promise<void> {
+  const metadata = createImplementationStateMetadata('stale', opts)
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function markImplementationBlocked(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions & { fromVerify?: boolean },
+): Promise<void> {
+  const metadata = createImplementationStateMetadata('blocked', opts)
+  if (opts?.fromVerify !== undefined) {
+    metadata.fromVerify = opts.fromVerify
+  }
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function clearImplementationState(projectDir: string): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) return
+  delete state.implementationState
+  await saveAcceptanceState(projectDir, state)
+}
+
+export async function getImplementationState(projectDir: string): Promise<ImplementationStateMetadata | null> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) return null
+  return normalizeImplementationState(state)
+}
+
+export async function isFreshReadiness(projectDir: string): Promise<boolean> {
+  const implState = await getImplementationState(projectDir)
+  if (!implState) return false
+  return implState.state === 'clean' || implState.state === 'verified'
+}
+
 export async function saveVerifyResult(
   projectDir: string,
   verifyResult: VerifyResult,
@@ -655,7 +817,7 @@ export async function saveVerifyResult(
   // Guard: if the loaded state belongs to a different feature, create a new
   // acceptance state for the target feature instead of overwriting the stale one.
   if (feature && state.feature !== feature) {
-    logger.warn('Acceptance state feature mismatch — creating target-feature state for verify result', {
+    logger.warn('Acceptance state feature mismatch 鈥?creating target-feature state for verify result', {
       expectedFeature: feature,
       staleFeature: state.feature,
     })
@@ -741,4 +903,71 @@ export async function saveIssueClarificationState(
   }
   await saveAcceptanceState(projectDir, state)
   logger.info('Saved issue clarification state', { feature: state.feature, issueSlug: issueState.issueSlug })
+}
+
+// ──────────────────────────────────────────────
+// Limited-Context State Management
+// ──────────────────────────────────────────────
+
+/**
+ * Create a limited-context acceptance state for implementation work
+ * that was detected outside of an active OpenFlow workflow session.
+ * This prevents AI from modifying code and claiming completion without
+ * going through a quality gate.
+ */
+export async function createLimitedContextState(
+  projectDir: string,
+  filePath: string,
+  sessionID?: string,
+): Promise<void> {
+  const feature = `limited-context-${Date.now()}`
+  const state: AcceptanceState = {
+    feature,
+    phase: 'acceptance',
+    phaseStartedAt: formatTimestamp(),
+    pendingDocUpdates: [],
+    sessionID,
+    implementationState: createImplementationStateMetadata('dirty', {
+      changedFiles: [filePath],
+      gitHead: sessionID,
+    }),
+    qualityGateApplicability: {
+      status: 'limited_context',
+      reasonCode: 'implementation_without_workflow_context',
+      reason: 'Implementation detected without active workflow context',
+      taskKind: 'implementation_done',
+      shouldRunVerify: true,
+      shouldRunHarden: false,
+      archiveReadinessEligible: false,
+      nextStep: 'Run quality gate',
+    },
+  }
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Created limited-context acceptance state', { feature, filePath })
+}
+
+/**
+ * Merge a changed file into an existing limited-context state,
+ * or create a new limited-context state if none exists.
+ * Only merges if the active state's feature name starts with 'limited-context-'.
+ */
+export async function mergeLimitedContextState(
+  projectDir: string,
+  filePath: string,
+  sessionID?: string,
+): Promise<void> {
+  const existingState = await loadAcceptanceState(projectDir)
+
+  if (existingState && existingState.feature.startsWith('limited-context-')) {
+    // Merge: add file to changedFiles without duplicates, mark dirty
+    const existing = existingState.implementationState?.changedFiles ?? []
+    const merged = [...new Set([...existing, filePath])].sort()
+    await markImplementationDirty(projectDir, { changedFiles: merged, gitHead: sessionID })
+    logger.info('Merged changed file into limited-context state', {
+      filePath,
+      feature: existingState.feature,
+    })
+  } else {
+    await createLimitedContextState(projectDir, filePath, sessionID)
+  }
 }

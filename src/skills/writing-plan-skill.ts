@@ -3,11 +3,19 @@ import type { SkillInfo } from './types.js'
 export function getWritingPlanSkill(): SkillInfo {
   return {
     name: 'openflow-writing-plan',
-    description: 'Manual command reference for /openflow-writing-plan when the user wants to create a development plan for a feature. It prepares plan-writing context, then writes a structured plan to docs/changes/*/plan.md (and .sisyphus/plans/{feature}.md if OMO is present).',
+    description: 'Manual command reference for /openflow-writing-plan. Use only when the user explicitly requests /openflow-writing-plan or an implementation/development plan; never invoke from stuck /openflow-feature, brainstorm, or ULW flow. It prepares plan-writing context, then writes a structured plan to docs/changes/*/plan.md (and .sisyphus/plans/{feature}.md if OMO is present).',
     content: [
       '# OpenFlow Writing-Plan Command Reference',
       '',
       '## Overview',
+      '',
+      '## Invocation Boundary',
+      '',
+      'Use this skill only when the user explicitly requests `/openflow-writing-plan <feature>` or asks for an implementation/development plan.',
+      'Do NOT invoke this skill merely because `/openflow-feature` is active, stuck, incomplete, or has just generated design documents.',
+      'Do NOT invoke this skill from brainstorm, ULW/ultrawork, or continuation flow unless the user explicitly asked for plan generation.',
+      'When feature design is stuck, continue feature clarification or create/update only `design.md` and `behavior.md`; do not create `plan.md` or `.sisyphus/plans/*.md`.',
+      'If a plan is the likely next step, suggest the explicit command and stop: `/openflow-writing-plan <feature>`.',
       '',
       'This help text documents the manual `/openflow-writing-plan` command for producing a focused, parser-compatible development plan',
       'for a feature. The primary plan artifact lives in the change workspace (`docs/changes/YYYY-MM-DD-{feature}/plan.md`).',

@@ -9,13 +9,13 @@ import { handleHarden } from './harden.js'
 import { handleVerify } from './verify.js'
 import { getPlanPath } from '../config.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
-import { loadAcceptanceState, saveAcceptanceState } from '../utils/acceptance-state.js'
+import { loadAcceptanceState, markImplementationBlocked, markImplementationVerified, saveAcceptanceState } from '../utils/acceptance-state.js'
 import { decideQualityGateRisk, type QualityGateRiskInput } from '../utils/risk-assessment.js'
 import { captureCurrentWorkspaceState, classifyEvidenceFreshness } from '../utils/evidence-freshness.js'
 import { buildMinimalSummary } from '../utils/harden-ledger.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { detectMode } from '../utils/issue-utils.js'
-import { collectFeatureScope, filterPathsToFeatureScope, scopeDiffToFeature } from '../utils/diff-scope.js'
+import { collectFeatureScope, filterPathsToExactScope, filterPathsToFeatureScope, scopeDiffToFeature, scopeDiffToFiles } from '../utils/diff-scope.js'
 
 export interface QualityGateArgs {
   /** Optional feature name override */
@@ -105,6 +105,9 @@ export async function handleQualityGate(
   const contextKind = await resolveContextKind(ctx, sanitizedFeature)
   const limitedContext = contextKind === 'limited' || contextKind === 'none'
 
+  const acceptanceState = await loadAcceptanceState(ctx.directory)
+  const implementationScopeFiles = getMatchingImplementationScopeFiles(acceptanceState, sanitizedFeature, sessionID)
+
   // ── 3. Capture workspace state (tracked diff + untracked files) ─────────
   const fullDiffText = readGitDiff(ctx.directory)
   const allUntrackedFiles = readGitUntracked(ctx.directory)
@@ -114,6 +117,7 @@ export async function handleQualityGate(
     contextKind,
     fullDiffText,
     allUntrackedFiles,
+    implementationScopeFiles,
   )
   const diffText = scopedWorkspace.diffText
   const untrackedFiles = scopedWorkspace.untrackedFiles
@@ -123,7 +127,6 @@ export async function handleQualityGate(
   const diffLines = countDiffLines(diffText) + untrackedFiles.length * 3 // rough estimate for untracked
   const hasNewExports = detectNewExports(diffText)
 
-  const acceptanceState = await loadAcceptanceState(ctx.directory)
   const applicability = classifyQualityGateApplicability({
     feature: sanitizedFeature,
     contextKind,
@@ -216,6 +219,15 @@ export async function handleQualityGate(
   const readiness = hardenGate.readiness
   const verifyContent = stripOpenFlowHeader(verifyOutput)
 
+  if (applicability.status === 'applicable') {
+    const stateChangedFiles = implementationScopeFiles ?? changedFiles
+    if (readiness === 'ready' || readiness === 'ready_with_doc_updates') {
+      await markImplementationVerified(ctx.directory, { changedFiles: stateChangedFiles })
+    } else if (readiness === 'not_ready' || readiness === 'needs_decision') {
+      await markImplementationBlocked(ctx.directory, { changedFiles: stateChangedFiles, fromVerify: true })
+    }
+  }
+
   const latestAcceptanceState = await loadAcceptanceState(ctx.directory)
   if (latestAcceptanceState && latestAcceptanceState.feature === sanitizedFeature) {
     latestAcceptanceState.qualityGateApplicability = applicability
@@ -253,6 +265,20 @@ interface ApplicabilityInput {
   contextKind: QualityGateContextKind
   changedFiles: string[]
   acceptancePhase: string | undefined
+}
+
+function getMatchingImplementationScopeFiles(
+  acceptanceState: Awaited<ReturnType<typeof loadAcceptanceState>>,
+  feature: string | undefined,
+  sessionID: string | undefined,
+): string[] | undefined {
+  if (!acceptanceState || !feature || acceptanceState.feature !== feature) {
+    return undefined
+  }
+  if (acceptanceState.sessionID && sessionID && acceptanceState.sessionID !== sessionID) {
+    return undefined
+  }
+  return acceptanceState.implementationState?.changedFiles
 }
 
 function classifyQualityGateApplicability(input: ApplicabilityInput): QualityGateApplicabilityResult {
@@ -416,6 +442,7 @@ async function scopeQualityGateWorkspace(
   contextKind: QualityGateContextKind,
   fullDiffText: string,
   allUntrackedFiles: string[],
+  implementationChangedFiles?: string[],
 ): Promise<QualityGateScopedWorkspace> {
   if (!feature || contextKind === 'limited' || contextKind === 'none') {
     return {
@@ -423,6 +450,20 @@ async function scopeQualityGateWorkspace(
       untrackedFiles: allUntrackedFiles,
       omittedFiles: [],
       scoped: false,
+    }
+  }
+
+  const primaryScopeFiles = (implementationChangedFiles ?? []).map(file => file.replace(/\\/g, '/'))
+  if (primaryScopeFiles.length > 0) {
+    const diffScope = scopeDiffToFiles(fullDiffText, primaryScopeFiles)
+    const untrackedScope = filterPathsToExactScope(allUntrackedFiles, primaryScopeFiles)
+    const omittedFiles = [...new Set([...diffScope.omittedPaths, ...untrackedScope.omittedPaths])].sort()
+
+    return {
+      diffText: diffScope.diff,
+      untrackedFiles: untrackedScope.scopedPaths,
+      omittedFiles,
+      scoped: true,
     }
   }
 
@@ -977,7 +1018,7 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
       ? changedFiles.map(f => `  - \`${escapeMarkdown(f)}\``).join('\n')
       : '',
     omittedFiles.length > 0
-      ? `- **Scoped Out Files**: ${omittedFiles.length} unrelated file(s) omitted from risk and freshness checks`
+      ? `- **Workspace Contamination**: ${omittedFiles.length} non-primary file(s) detected; omitted from readiness risk and freshness checks`
       : '',
     omittedFiles.length > 0
       ? omittedFiles.map(f => `  - \`${escapeMarkdown(f)}\``).join('\n')
@@ -1147,7 +1188,7 @@ function buildApplicabilityOnlyReport(input: {
       ? input.changedFiles.map(f => `  - \`${escapeMarkdown(f)}\``).join('\n')
       : '',
     input.omittedFiles.length > 0
-      ? `- **Scoped Out Files**: ${input.omittedFiles.length} unrelated file(s) omitted from applicability checks`
+      ? `- **Workspace Contamination**: ${input.omittedFiles.length} non-primary file(s) detected; omitted from applicability checks`
       : '',
     '',
   ].filter(Boolean).join('\n')

@@ -19,8 +19,11 @@ import {
 import { getContractRuntime } from '../contracts/runtime.js'
 import { dispatchOpenFlowCommand, extractOpenFlowCommand } from './chat-command-dispatch.js'
 import { findActiveIssueWorkspace } from './issue-workspace.js'
+import { getImplementationState, isFreshReadiness } from '../utils/acceptance-state.js'
 
-const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive']
+const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive', 'implemented', 'completed', 'ready for delivery', 'implementation complete']
+const GUARD_BLOCK_TITLE = '## OpenFlow: Completion Blocked Until Quality Gate'
+const GUARD_VERIFY_TITLE = '## OpenFlow: Verification Suggested'
 const ISSUE_ACTIVE_NOTICE_TITLE = '## OpenFlow: Issue Investigation Active'
 
 function isCompletionMessage(message: string): boolean {
@@ -35,11 +38,13 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     const rawInput = input as Record<string, unknown>
     const rawOutput = output as unknown as Record<string, unknown>
     const role = getMessageRole(rawOutput)
-    if (role && role !== 'user') return
+    const isUserMessage = !role || role === 'user'
 
     const message = extractMessageText(rawOutput)
     if (!message) return
     if (looksLikeInternalMessage(message)) return
+    // Guard recursion: don't re-trigger on OpenFlow's own guard messages
+    if (message.includes(GUARD_BLOCK_TITLE) || message.includes(GUARD_VERIFY_TITLE)) return
 
     if (await dispatchOpenFlowCommand(ctx, input, output, message)) return
 
@@ -60,9 +65,7 @@ Recommended issue flow:
       return
     }
 
-    await acceptanceHook({ sessionID: input.sessionID, message })
-
-    // Dispatch session events to Guardian
+    // ── Guardian session events (before completion guard, non-blocking) ─
     if (ctx.config.guardian?.enabled) {
       try {
         const runtime = getContractRuntime()
@@ -73,6 +76,15 @@ Recommended issue flow:
         // Non-blocking
       }
     }
+
+    // ── Completion Guard (runs for BOTH user and assistant) ───────────
+    if (ctx.config.verification.completion_prompt && isCompletionMessage(message)) {
+      const guardAppended = await appendCompletionGuardIfNeeded(ctx, output, message)
+      if (guardAppended) return
+    }
+
+    // ── Acceptance detection (runs even when feature phase is disabled) ─
+    await acceptanceHook({ sessionID: input.sessionID, message })
 
     if (!ctx.config.feature.enabled) {
       return
@@ -113,20 +125,6 @@ Recommended issue flow:
       }
     }
 
-    if (ctx.config.verification.completion_prompt && isCompletionMessage(message)) {
-      appendGuardMessage(output, `## OpenFlow: Verification Suggested
-
-The task appears to be in completion state.
-
-Recommended next action before archive:
-- View verification checklist
-- Run verification now
-- Skip for now (known risk)
-
-OpenFlow keeps this prompt non-blocking.`)
-      return
-    }
-
     const closureDecision = detectClosureReady(ctx, message)
     if (closureDecision.isClosureReady && ctx.config.feature.closure.auto_transition) {
 		appendGuardMessage(output, `## OpenFlow: Feature Design Closure Ready
@@ -155,20 +153,72 @@ Generation policy:
 
 		appendGuardMessage(output, `## OpenFlow: Feature Design Suggested
 
-This request looks like it may need OpenFlow design docs before implementation.
+This request may benefit from OpenFlow feature design docs before implementation.
 
-Recommended next step before implementation:
+Suggested user action:
 
-\`\`\`
+\`\`\`text
 /openflow-feature
 \`\`\`
 
-Run it in the same session and continue in natural language; OpenFlow will derive the internal feature name.
+To create formal design docs, manually run "/openflow-feature" in this same session and continue in natural language. OpenFlow will derive the internal feature name from context.
 
-OpenFlow only suggests this step. It does not block research, reading, or implementation tools.`)
+This is advisory only: it does not block research, reading, or implementation tools, and the assistant must not invoke "/openflow-feature" automatically unless the user explicitly requests it.`)
   }
 
   return hook
+}
+
+/**
+ * Append a completion guard to the output when the message contains
+ * completion semantics and implementation state is dirty/stale/blocked.
+ *
+ * Returns true when a guard was appended (caller should return early).
+ * Returns false when no guard was needed (caller should continue).
+ *
+ * Guards are applied for BOTH user and assistant messages.
+ * OpenFlow's own guard messages are detected and skipped (recursion guard).
+ */
+async function appendCompletionGuardIfNeeded(
+  ctx: OpenFlowContext,
+  output: Record<string, unknown>,
+  message: string,
+): Promise<boolean> {
+  if (!ctx.config.verification.completion_prompt || !isCompletionMessage(message)) {
+    return false
+  }
+
+  // Don't append if output already has a guard (duplicate prevention)
+  if (hasNotice(output, GUARD_BLOCK_TITLE) || hasNotice(output, GUARD_VERIFY_TITLE)) {
+    return false
+  }
+
+  const implementationState = await getImplementationState(ctx.directory)
+  const hasFreshReadiness = implementationState ? await isFreshReadiness(ctx.directory) : false
+
+  if (implementationState && !hasFreshReadiness && ['dirty', 'stale', 'blocked'].includes(implementationState.state)) {
+    appendGuardMessage(output, `## OpenFlow: Completion Blocked Until Quality Gate
+
+The task appears to be in completion state, but the current implementation state is \`${implementationState.state}\`.
+
+Required next action before claiming completion:
+- Run \`openflow-quality-gate\`
+- Resolve the reported readiness issues
+- Re-check completion after the quality gate is clean`)
+    return true
+  }
+
+  appendGuardMessage(output, `## OpenFlow: Verification Suggested
+
+The task appears to be in completion state.
+
+Recommended next action before archive:
+- View verification checklist
+- Run verification now
+- Skip for now (known risk)
+
+OpenFlow keeps this prompt non-blocking.`)
+  return true
 }
 
 function looksLikeDirectCommand(message: string): boolean {
@@ -216,5 +266,3 @@ async function loadActiveFeatureSession(directory: string, feature: string) {
     return undefined
   }
 }
-
-

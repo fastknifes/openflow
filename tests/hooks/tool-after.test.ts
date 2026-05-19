@@ -164,6 +164,155 @@ describe('tool-after hook', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('marks implementation state dirty for implementation-like source changes', async () => {
+    const root = join(process.cwd(), '.test-tool-after-implementation-dirty')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await saveAcceptanceState(root, {
+      feature: 'demo-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+      sessionID: 'session-implementation-dirty',
+    })
+
+    const ctx = createContext(root)
+    const hook = createToolAfterHook(ctx)
+
+    await hook(
+      { tool: 'write', sessionID: 'session-implementation-dirty', callID: 'call-implementation-dirty', args: { filePath: 'src/demo.ts' } },
+      { title: '', output: '', metadata: {} }
+    )
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.implementationState?.state).toBe('dirty')
+    expect(state?.implementationState?.changedFiles).toEqual(['src/demo.ts'])
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('marks implementation state stale when verified work is changed again', async () => {
+    const root = join(process.cwd(), '.test-tool-after-implementation-stale')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await saveAcceptanceState(root, {
+      feature: 'demo-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+      sessionID: 'session-implementation-stale',
+      readiness: 'Ready',
+      verifyResult: {
+        readiness: 'Ready',
+        reasonCodes: ['test_ready'],
+        evidenceSummary: 'fresh evidence',
+        constraintsChecked: ['test'],
+        verifiedAt: new Date().toISOString(),
+      },
+      implementationState: {
+        state: 'verified',
+        updatedAt: new Date().toISOString(),
+        changedFiles: ['src/already-verified.ts'],
+        fromVerify: true,
+      },
+    })
+
+    const ctx = createContext(root)
+    const hook = createToolAfterHook(ctx)
+
+    await hook(
+      { tool: 'edit', sessionID: 'session-implementation-stale', callID: 'call-implementation-stale', args: { filePath: 'tests/demo.test.ts' } },
+      { title: '', output: '', metadata: {} }
+    )
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.implementationState?.state).toBe('stale')
+    expect(state?.implementationState?.changedFiles).toEqual(['src/already-verified.ts', 'tests/demo.test.ts'])
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('does not dirty implementation state for design-only or plan-only changes', async () => {
+    const root = join(process.cwd(), '.test-tool-after-non-implementation')
+    await rm(root, { recursive: true, force: true })
+
+    const feature = 'demo-feature'
+    const designDir = join(root, 'docs', 'changes', feature)
+    const planDir = join(root, '.sisyphus', 'plans')
+    await mkdir(designDir, { recursive: true })
+    await mkdir(planDir, { recursive: true })
+
+    const designPath = join(designDir, 'design.md')
+    const planPath = join(planDir, `${feature}.md`)
+    await writeFile(designPath, '# Design\n\n## Overview\n\nArchitecture and user value\n', 'utf-8')
+    await writeFile(planPath, '# Plan\n\n- [ ] Keep plan enhancement\n', 'utf-8')
+
+    await saveAcceptanceState(root, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+      sessionID: 'session-non-implementation',
+      implementationState: {
+        state: 'verified',
+        updatedAt: new Date().toISOString(),
+        changedFiles: ['src/verified.ts'],
+        fromVerify: true,
+      },
+    })
+
+    const ctx = createContext(root)
+    const hook = createToolAfterHook(ctx)
+
+    await hook(
+      { tool: 'write', sessionID: 'session-non-implementation', callID: 'call-design-only', args: { filePath: designPath } },
+      { title: '', output: '', metadata: {} }
+    )
+    await hook(
+      { tool: 'write', sessionID: 'session-non-implementation', callID: 'call-plan-only', args: { filePath: planPath } },
+      { title: '', output: '', metadata: {} }
+    )
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.implementationState?.state).toBe('verified')
+    expect(state?.implementationState?.changedFiles).toEqual(['src/verified.ts'])
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('marks issue acceptance state dirty for implementation-like changes', async () => {
+    const root = join(process.cwd(), '.test-tool-after-issue-implementation-dirty')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await saveAcceptanceState(root, {
+      feature: 'demo-issue',
+      phase: 'verification_pending',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+      sessionID: 'session-issue-dirty',
+      mode: 'issue',
+      issueSlug: 'demo-issue',
+      issueClarificationPath: 'docs/changes/2026-05-18-demo-issue/issue-clarification.md',
+    })
+
+    const ctx = createContext(root)
+    const hook = createToolAfterHook(ctx)
+
+    await hook(
+      { tool: 'write', sessionID: 'session-issue-dirty', callID: 'call-issue-dirty', args: { filePath: 'src/issues/fix.ts' } },
+      { title: '', output: '', metadata: {} }
+    )
+
+    const state = await loadAcceptanceState(root)
+    expect(state?.implementationState?.state).toBe('dirty')
+    expect(state?.implementationState?.changedFiles).toEqual(['src/issues/fix.ts'])
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('enhances docs/changes/YYYY-MM-DD-feature/plan.md on write', async () => {
     const root = join(process.cwd(), '.test-tool-after-change-plan')
     await rm(root, { recursive: true, force: true })

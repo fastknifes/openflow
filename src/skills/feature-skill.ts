@@ -28,11 +28,13 @@ Valid entry examples:
 5. When the feature is converged, let OpenFlow generate the design document and return the generated path.
 6. If the user asks to skip or proceed before full convergence, generate a Draft with Assumptions and keep assumptions separate from confirmed facts.
 7. After feature design is complete, do not keep the user trapped in feature design. They may continue to implementation, verification, or archive.
+8. If feature interaction is stuck, continue feature clarification or create/update only feature design artifacts; do not invoke \`openflow-writing-plan\`, and do not create \`plan.md\` or \`.sisyphus/plans/*.md\` unless the user explicitly requests an implementation plan.
 
 ## Notes
 
 - Feature design is a soft workflow entrypoint, not a hard gate.
 - OpenFlow may suggest this command, but it should not be auto-executed just because feature work was mentioned.
+- Completing or unsticking feature design may suggest \`/openflow-writing-plan <feature>\`, but must not invoke it automatically.
 - Research, reading, and implementation tasks should remain non-blocking.
 - Design outputs belong in a dated workspace such as \`docs/changes/2026-04-17-{feature}/\`.
 `,

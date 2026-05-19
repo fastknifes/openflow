@@ -16,6 +16,24 @@ function createContext(directory: string): OpenFlowContext {
   }
 }
 
+function createContextWithSessionMessages(directory: string, text: string): OpenFlowContext {
+  return {
+    ...createContext(directory),
+    client: {
+      session: {
+        messages: async () => ({
+          messages: [
+            {
+              role: 'assistant',
+              parts: [{ type: 'text', text }],
+            },
+          ],
+        }),
+      },
+    },
+  } as unknown as OpenFlowContext
+}
+
 function createToolContext(directory: string, sessionID = 'session-1', messageID = 'message-1') {
   return {
     sessionID,
@@ -149,6 +167,36 @@ describe('feature command', () => {
     expect(result).toContain('workflow action')
     expect(result).not.toMatch(/feature-[0-9a-f]{8}/u)
     await expect(readdir(join(root, '.sisyphus', 'feature'))).rejects.toThrow()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('continues from session context when user agrees to generate related documents', async () => {
+    const root = join(process.cwd(), '.test-feature-contextual-approval')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const priorAssistantText = [
+      'P0：把 quality-gate 从 AI 自律调用升级为完成声明拦截。',
+      '下一步应把 quality-gate、readiness freshness、实现期状态从提示型建议升级为状态化硬约束。',
+    ].join('\n')
+
+    const result = await handleFeature(
+      createContextWithSessionMessages(root, priorAssistantText),
+      '同意你的方案，生成相关文档',
+      undefined,
+      createToolContext(root, 'session-contextual-approval'),
+    )
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).toContain('stateful-quality-guardrails')
+    expect(result).not.toContain('Feature Identity Needed')
+
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const generatedDir = changeDirs.find((dir) => dir.endsWith('stateful-quality-guardrails'))
+    expect(generatedDir).toBeDefined()
+    await expect(readFile(join(root, 'docs', 'changes', generatedDir!, 'design.md'), 'utf-8')).resolves.toContain('状态化质量门护栏')
+    await expect(readFile(join(root, 'docs', 'changes', generatedDir!, 'behavior.md'), 'utf-8')).resolves.toContain('stateful-quality-guardrails')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -341,6 +389,56 @@ describe('feature command', () => {
       bySessionID: Record<string, unknown>
     }
     expect(active.bySessionID['session-generate']).toBeUndefined()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('asks whether to deep-verify generated design docs and reports when accepted', async () => {
+    const root = join(process.cwd(), '.test-feature-deep-verify-accepted')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-deep-verify', 'message-0'))
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-deep-verify', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-deep-verify', 'message-2'))
+    const { asked, context } = createQuestionToolContext(root, ['执行深度校验'], 'session-deep-verify')
+
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', {
+      ...context,
+      messageID: 'message-3',
+    })
+
+    expect(asked.some((item) => item.header === '深度校验')).toBe(true)
+    expect(result).toContain('Feature Design Complete')
+    expect(result).toContain('## Deep Feature Design Verification')
+    expect(result).toContain('prevent implementation from starting')
+    expect(result).toContain('Document set')
+    expect(result).toContain('Boundary cases')
+    expect(result).toContain('Flow branch coverage')
+    expect(result).not.toContain('verification.md')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('asks whether to deep-verify generated design docs and skips when declined', async () => {
+    const root = join(process.cwd(), '.test-feature-deep-verify-skipped')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-deep-skip', 'message-0'))
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-deep-skip', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-deep-skip', 'message-2'))
+    const { asked, context } = createQuestionToolContext(root, ['跳过校验'], 'session-deep-skip')
+
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', {
+      ...context,
+      messageID: 'message-3',
+    })
+
+    expect(asked.some((item) => item.header === '深度校验')).toBe(true)
+    expect(result).toContain('Feature Design Complete')
+    expect(result).toContain('Deep design verification skipped by user choice.')
+    expect(result).not.toContain('## Deep Feature Design Verification')
 
     await rm(root, { recursive: true, force: true })
   })
