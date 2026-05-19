@@ -424,6 +424,7 @@ export interface VerifyEvidencePacket {
   checksRun: string[]
   checkResults: VerifyEvidenceCheckResult[]
   behaviorScenarios?: BehaviorScenarioCheckResult[]
+  classifiedEvidenceGaps?: ClassifiedEvidenceGap[]
   observedBehaviorSummary: string
   intendedVsActualDelta: string
   docAlignmentSummary: string
@@ -558,6 +559,8 @@ export interface AcceptanceState {
   acceptedKnownIssues?: AcceptedKnownIssueSummary[]
   /** Minimal harden terminal summary persisted as JSON */
   hardenSummary?: string
+  /** Quality-gate orchestration applicability metadata; not verify readiness. */
+  qualityGateApplicability?: QualityGateApplicabilityResult
 }
 
 // 按阶段分段的文件变更记录
@@ -611,6 +614,47 @@ export type QualityGateContextKind =
   | 'limited'   // context available but budget-restricted
   | 'none'      // no semantic context available
 
+export type QualityGateApplicabilityStatus =
+  | 'applicable'
+  | 'not_applicable'
+  | 'needs_workflow_stage'
+  | 'limited_context'
+
+export type QualityGateTaskKind =
+  | 'implementation_done'
+  | 'bugfix_done'
+  | 'archive_ready'
+  | 'design_only'
+  | 'planning_only'
+  | 'metadata_only'
+  | 'rename_only'
+  | 'docs_only'
+  | 'unknown'
+
+export interface QualityGateApplicabilityResult {
+  status: QualityGateApplicabilityStatus
+  reasonCode: string
+  reason: string
+  taskKind: QualityGateTaskKind
+  shouldRunVerify: boolean
+  shouldRunHarden: boolean
+  archiveReadinessEligible: boolean
+  nextStep: string
+}
+
+export type EvidenceGapKind =
+  | 'blocking_evidence_gap'
+  | 'workflow_stage_missing'
+  | 'limited_context_gap'
+  | 'informational_gap'
+
+export interface ClassifiedEvidenceGap {
+  code: string
+  kind: EvidenceGapKind
+  message: string
+  nextStep: string
+}
+
 export interface QualityGateResult {
   /** Feature name this quality gate was evaluated for */
   feature: string
@@ -636,6 +680,8 @@ export interface QualityGateResult {
   warnings: string[]
   /** True when context budget was insufficient — NOT a failure signal */
   limitedContext: boolean
+  /** Applicability decision made before harden/verify side effects */
+  applicability?: QualityGateApplicabilityResult
 }
 
 // ── Evidence Freshness Metadata ───────────────────────────────────────────

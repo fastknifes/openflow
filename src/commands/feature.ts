@@ -78,6 +78,10 @@ export async function handleFeature(
     )
   }
 
+  if (resolvedFeature.identity.lowConfidenceReason) {
+    return formatLowConfidenceFeatureIdentity(resolvedFeature.identity)
+  }
+
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature.identity.slug)
   let session = await loadFeatureSession(ctx.directory, sanitizedFeature)
   session = mergeIdentity(session, resolvedFeature.identity)
@@ -607,6 +611,22 @@ I found multiple unfinished feature ideas. Which one should /openflow-feature co
 ${options}
 
 Reply with the feature idea or a short natural-language description; you do not need to type a slug.`
+}
+
+function formatLowConfidenceFeatureIdentity(identity: DerivedFeatureIdentity): string {
+  const reason = identity.lowConfidenceReason === 'generic_slug'
+    ? 'The provided feature name is too generic to create a durable workspace name.'
+    : 'The request describes a workflow action, but not the specific feature or problem to name.'
+
+  return `## Feature Identity Needed
+
+${reason}
+
+Please provide a short, specific feature name or one-sentence intent, for example:
+
+\`quality-gate-stage-applicability\`
+
+OpenFlow will not create a \`feature-*\`, \`future-*\`, or other placeholder workspace from this input.`
 }
 
 function formatGenerationResultAll(feature: string, generatedPaths: string[], title?: string, model?: RequirementModel): string {

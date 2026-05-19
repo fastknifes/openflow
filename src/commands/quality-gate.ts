@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
-import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, OpenFlowContext, QualityGateContextKind } from '../types.js'
+import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, OpenFlowContext, QualityGateApplicabilityResult, QualityGateContextKind, QualityGateTaskKind } from '../types.js'
 import { VerifyReadinessStatus } from '../types.js'
 import type { EvidenceFreshnessResult, VerifyResult } from '../types.js'
 import { handleHarden } from './harden.js'
@@ -123,6 +123,31 @@ export async function handleQualityGate(
   const diffLines = countDiffLines(diffText) + untrackedFiles.length * 3 // rough estimate for untracked
   const hasNewExports = detectNewExports(diffText)
 
+  const acceptanceState = await loadAcceptanceState(ctx.directory)
+  const applicability = classifyQualityGateApplicability({
+    feature: sanitizedFeature,
+    contextKind,
+    changedFiles,
+    acceptancePhase: acceptanceState?.phase,
+  })
+
+  if (acceptanceState && acceptanceState.feature === sanitizedFeature) {
+    acceptanceState.qualityGateApplicability = applicability
+    await saveAcceptanceState(ctx.directory, acceptanceState)
+  }
+
+  if (applicability.status === 'not_applicable' || applicability.status === 'needs_workflow_stage') {
+    return buildApplicabilityOnlyReport({
+      feature: sanitizedFeature || '(unresolved)',
+      contextKind,
+      limitedContext,
+      applicability,
+      changedFiles,
+      omittedFiles: scopedWorkspace.omittedFiles,
+      diffLines,
+    })
+  }
+
   // ── 4. Risk assessment ──────────────────────────────────────────────────
   const riskInput: QualityGateRiskInput = diffText
     ? { files: changedFiles, diffLines, hasNewExports, diffText }
@@ -131,7 +156,6 @@ export async function handleQualityGate(
   const riskResult = decideQualityGateRisk(riskInput)
 
   // ── 5. Evidence freshness check ─────────────────────────────────────────
-  const acceptanceState = await loadAcceptanceState(ctx.directory)
   const workspaceState = buildScopedWorkspaceState(
     ctx.directory,
     captureCurrentWorkspaceState(ctx.directory),
@@ -187,13 +211,18 @@ export async function handleQualityGate(
   }
 
   // ── 8. Extract readiness from verify output ─────────────────────────────
+  const hardenUnavailableReason = parseHardenUnavailableReason(hardenOutput)
   const hardenGate = applyHardenReadinessGate(extractReadinessFromOutput(verifyOutput), hardenStatus, hardenOutput)
   const readiness = hardenGate.readiness
   const verifyContent = stripOpenFlowHeader(verifyOutput)
 
-  if (acceptanceState && hardenOutput.trim()) {
-    acceptanceState.hardenSummary = buildHardenSummaryForAcceptanceState(hardenStatus, hardenOutput, hardenGate.findings, readiness)
-    await saveAcceptanceState(ctx.directory, acceptanceState)
+  const latestAcceptanceState = await loadAcceptanceState(ctx.directory)
+  if (latestAcceptanceState && latestAcceptanceState.feature === sanitizedFeature) {
+    latestAcceptanceState.qualityGateApplicability = applicability
+    if (hardenOutput.trim()) {
+      latestAcceptanceState.hardenSummary = buildHardenSummaryForAcceptanceState(hardenStatus, hardenOutput, hardenGate.findings, readiness)
+    }
+    await saveAcceptanceState(ctx.directory, latestAcceptanceState)
   }
 
   // ── 9. Build markdown report ────────────────────────────────────────────
@@ -201,12 +230,14 @@ export async function handleQualityGate(
     feature: sanitizedFeature || '(unresolved)',
     contextKind,
     limitedContext,
+    applicability,
     riskResult,
     hardenDecision,
     hardenStatus,
     hardenOutput,
     readiness,
     hardenReadinessBlocker: getHardenReadinessBlocker(hardenStatus, hardenOutput),
+    hardenUnavailableReason,
     knownIssues: hardenGate.knownIssues,
     blockingFindings: hardenGate.blockingFindings,
     verifyContent,
@@ -215,6 +246,109 @@ export async function handleQualityGate(
     omittedFiles: scopedWorkspace.omittedFiles,
     diffLines,
   })
+}
+
+interface ApplicabilityInput {
+  feature: string | undefined
+  contextKind: QualityGateContextKind
+  changedFiles: string[]
+  acceptancePhase: string | undefined
+}
+
+function classifyQualityGateApplicability(input: ApplicabilityInput): QualityGateApplicabilityResult {
+  const taskKind = inferQualityGateTaskKind(input.changedFiles, input.acceptancePhase)
+  const hasCodeChange = taskKind === 'implementation_done' || taskKind === 'bugfix_done'
+
+  if (!hasCodeChange && taskKind !== 'archive_ready' && taskKind !== 'unknown') {
+    return {
+      status: 'not_applicable',
+      reasonCode: `${taskKind}_no_implementation_change`,
+      reason: 'Current changes are not implementation completion or archive readiness work.',
+      taskKind,
+      shouldRunVerify: false,
+      shouldRunHarden: false,
+      archiveReadinessEligible: false,
+      nextStep: 'No quality gate is required. Do not create workflow artifacts merely to satisfy readiness.',
+    }
+  }
+
+  if (hasCodeChange && input.feature && input.contextKind === 'limited') {
+    return {
+      status: 'needs_workflow_stage',
+      reasonCode: 'implementation_missing_workflow_context',
+      reason: 'Implementation-like changes were detected, but the feature lacks explicit design or plan workflow context.',
+      taskKind,
+      shouldRunVerify: false,
+      shouldRunHarden: false,
+      archiveReadinessEligible: false,
+      nextStep: 'Ask whether to enter the feature/planning workflow. Do not create a minimal plan or design automatically.',
+    }
+  }
+
+  if (input.contextKind === 'limited' || input.contextKind === 'none') {
+    return {
+      status: 'limited_context',
+      reasonCode: input.contextKind === 'none' ? 'semantic_context_unresolved' : 'semantic_context_limited',
+      reason: 'Semantic workflow context is unavailable or incomplete; only technical verification can run.',
+      taskKind,
+      shouldRunVerify: true,
+      shouldRunHarden: false,
+      archiveReadinessEligible: false,
+      nextStep: 'Run technical checks if useful, but do not claim full semantic readiness or archive readiness from this result.',
+    }
+  }
+
+  return {
+    status: 'applicable',
+    reasonCode: hasCodeChange ? 'implementation_change_detected' : 'workflow_context_ready_for_gate',
+    reason: 'The current context is implementation, bugfix, or archive-readiness work and requires the quality gate.',
+    taskKind: hasCodeChange ? taskKind : 'archive_ready',
+    shouldRunVerify: true,
+    shouldRunHarden: true,
+    archiveReadinessEligible: true,
+    nextStep: 'Continue with risk assessment, harden if needed, and evidence-aware verify.',
+  }
+}
+
+function inferQualityGateTaskKind(changedFiles: string[], acceptancePhase?: string): QualityGateTaskKind {
+  if (acceptancePhase === 'verification_pending' || acceptancePhase === 'acceptance') {
+    if (changedFiles.length === 0) return 'archive_ready'
+  }
+  if (changedFiles.length === 0) return 'unknown'
+
+  const normalized = changedFiles.map(file => file.replace(/\\/g, '/'))
+  const runtimeFiles = normalized.filter(isRuntimeCodeFile)
+  if (runtimeFiles.length > 0) return 'implementation_done'
+  if (normalized.some(isTestFile)) return 'implementation_done'
+  if (normalized.every(isDesignOnlyFile)) return 'design_only'
+  if (normalized.every(isPlanningOnlyFile)) return 'planning_only'
+  if (normalized.every(isMetadataOnlyFile)) return 'metadata_only'
+  if (normalized.every(isDocsOnlyFile)) return 'docs_only'
+  return 'unknown'
+}
+
+function isRuntimeCodeFile(file: string): boolean {
+  return file.startsWith('src/') && /\.(ts|tsx|js|jsx|mjs|cjs)$/u.test(file) && !isTestFile(file)
+}
+
+function isTestFile(file: string): boolean {
+  return /(^|\/)(tests?|__tests__)\//u.test(file) || /\.(test|spec)\.(ts|tsx|js|jsx)$/u.test(file)
+}
+
+function isDesignOnlyFile(file: string): boolean {
+  return /^docs\/changes\/.*\/(design|behavior|prd|requirements|proposal|decisions)\.md$/u.test(file)
+}
+
+function isPlanningOnlyFile(file: string): boolean {
+  return /^\.sisyphus\/plans\/[^/]+\.md$/u.test(file) || /^docs\/changes\/.*\/plan\.md$/u.test(file)
+}
+
+function isMetadataOnlyFile(file: string): boolean {
+  return /^\.sisyphus\//u.test(file) || /^(package-lock|bun\.lockb|pnpm-lock|yarn\.lock)$/u.test(file) || /^\.gitnexus\//u.test(file)
+}
+
+function isDocsOnlyFile(file: string): boolean {
+  return file.endsWith('.md') && (file.startsWith('docs/') || /^README(?:_[A-Z]+)?\.md$/u.test(file))
 }
 
 // ── Git helpers ────────────────────────────────────────────────────────────
@@ -470,6 +604,17 @@ function extractHardenStatus(output: string): string {
   return match?.[1] ?? 'unknown'
 }
 
+function parseHardenUnavailableReason(output: string): string | undefined {
+  const normalized = output.toLowerCase()
+  if (normalized.includes('status: rejected') && normalized.includes('missing plan file')) {
+    return 'harden_unavailable_missing_plan'
+  }
+  if (normalized.includes('status: rejected') && normalized.includes('no active plan')) {
+    return 'harden_unavailable_missing_plan'
+  }
+  return undefined
+}
+
 function extractReadinessFromOutput(verifyOutput: string): string {
   const match = verifyOutput.match(/- status:\s*(\S+)/)
   return match?.[1] ?? VerifyReadinessStatus.NotReady
@@ -587,6 +732,8 @@ function evaluateHardenReadiness(
 
   if (unresolvedMustFix.length > 0) {
     blocker = VerifyReadinessStatus.NotReady
+  } else if (parseHardenUnavailableReason(hardenOutput) === 'harden_unavailable_missing_plan') {
+    blocker = null
   } else if (hardenStatus === 'executor_blocked') {
     blocker = VerifyReadinessStatus.NeedsDecision
   } else if (unresolvedNeedsDecision.length > 0) {
@@ -773,12 +920,14 @@ interface QualityGateReportInput {
   feature: string
   contextKind: QualityGateContextKind
   limitedContext: boolean
+  applicability: QualityGateApplicabilityResult
   riskResult: ReturnType<typeof decideQualityGateRisk>
   hardenDecision: string
   hardenStatus?: string
   hardenOutput: string
   readiness: string
   hardenReadinessBlocker: VerifyReadinessStatus | null
+  hardenUnavailableReason: string | undefined
   knownIssues: HardenFindingSummary[]
   blockingFindings: string[]
   verifyContent: string
@@ -793,12 +942,14 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     feature,
     contextKind,
     limitedContext,
+    applicability,
     riskResult,
     hardenDecision,
     hardenStatus,
     hardenOutput,
     readiness,
     hardenReadinessBlocker,
+    hardenUnavailableReason,
     knownIssues,
     blockingFindings,
     verifyContent,
@@ -807,6 +958,10 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     omittedFiles,
     diffLines,
   } = input
+
+  const effectiveReadiness = hardenUnavailableReason === 'harden_unavailable_missing_plan' && applicability.archiveReadinessEligible
+    ? 'needs_workflow_stage'
+    : readiness
 
   // ── Context section ───────────────────────────────────────────────────
   const contextSection = [
@@ -832,6 +987,8 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
 
   // ── Risk Assessment section ───────────────────────────────────────────
   const riskSection = [
+    buildApplicabilitySection(applicability),
+    '',
     '### Risk Assessment',
     '',
     `- **Risk Level**: \`${riskResult.risk}\``,
@@ -878,23 +1035,26 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
   ].join('\n')
 
   // ── Readiness section ─────────────────────────────────────────────────
-  const readinessLabel = readiness === VerifyReadinessStatus.Ready
+  const readinessLabel = effectiveReadiness === VerifyReadinessStatus.Ready
     ? '✅ Ready'
-    : readiness === VerifyReadinessStatus.ReadyWithDocUpdates
+    : effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates
       ? '📝 Ready (with doc updates)'
-      : readiness === VerifyReadinessStatus.NeedsDecision
+      : effectiveReadiness === VerifyReadinessStatus.NeedsDecision
         ? '⚠️ Needs Decision'
-        : '❌ Not Ready'
+        : effectiveReadiness === 'needs_workflow_stage'
+          ? '🚧 Needs Workflow Stage'
+          : '❌ Not Ready'
 
   const readinessSection = [
     '### Readiness',
     '',
-    `- **Status**: ${readinessLabel} (\`${readiness}\`)`,
+    `- **Status**: ${readinessLabel} (\`${effectiveReadiness}\`)`,
+    hardenUnavailableReason ? `- **Harden Unavailable**: \`${hardenUnavailableReason}\`` : '',
     hardenReadinessBlocker
       ? `- **Harden Gate**: ❌ harden status \`${hardenStatus ?? 'unknown'}\` blocks archive readiness despite verify output.`
       : '',
     ...blockingFindings.map(finding => `- ${finding}`),
-    limitedContext ? '- **Limited Context**: ⚠️ readiness reflects technical verification only — semantic alignment was not possible' : '',
+    applicability.status === 'limited_context' ? '- **Limited Context**: ⚠️ technical verification only; this is not archive readiness.' : '',
     '',
   ].filter(Boolean).join('\n')
 
@@ -909,10 +1069,12 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
 
   // ── Next Step section ─────────────────────────────────────────────────
   let nextStep = ''
-  if (readiness === VerifyReadinessStatus.Ready || readiness === VerifyReadinessStatus.ReadyWithDocUpdates) {
+  if (effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates) {
     nextStep = `Feature \`${escapeMarkdown(feature)}\` is ready for archive. Run \`/openflow-archive ${escapeMarkdown(feature)}\` to finalize.`
-  } else if (readiness === VerifyReadinessStatus.NeedsDecision) {
+  } else if (effectiveReadiness === VerifyReadinessStatus.NeedsDecision) {
     nextStep = 'Resolve the blocking decision, then rerun the quality gate or verify.'
+  } else if (effectiveReadiness === 'needs_workflow_stage') {
+    nextStep = 'Enter the explicit feature/planning workflow before archive readiness. Do not create a minimal plan or design merely to satisfy the gate.'
   } else {
     nextStep = 'Address the readiness issues identified above, then rerun the quality gate.'
   }
@@ -935,6 +1097,70 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     readinessSection,
     knownIssuesSection,
     nextStepSection,
+    '---',
+    '',
+    `*Quality gate completed at ${new Date().toISOString()}*`,
+  ].join('\n')
+}
+
+function buildApplicabilitySection(applicability: QualityGateApplicabilityResult): string {
+  return [
+    '### Applicability',
+    '',
+    `- **Status**: ${formatApplicabilityStatus(applicability.status)} (\`${applicability.status}\`)`,
+    `- **Reason Code**: \`${applicability.reasonCode}\``,
+    `- **Reason**: ${escapeMarkdown(applicability.reason)}`,
+    `- **Task Kind**: \`${applicability.taskKind}\``,
+    `- **Archive Readiness Eligible**: ${applicability.archiveReadinessEligible ? '✅ yes' : '❌ no'}`,
+    '',
+  ].join('\n')
+}
+
+function formatApplicabilityStatus(status: QualityGateApplicabilityResult['status']): string {
+  switch (status) {
+    case 'applicable': return 'Applicable'
+    case 'not_applicable': return 'NotApplicable'
+    case 'needs_workflow_stage': return 'NeedsWorkflowStage'
+    case 'limited_context': return 'LimitedContext'
+  }
+}
+
+function buildApplicabilityOnlyReport(input: {
+  feature: string
+  contextKind: QualityGateContextKind
+  limitedContext: boolean
+  applicability: QualityGateApplicabilityResult
+  changedFiles: string[]
+  omittedFiles: string[]
+  diffLines: number
+}): string {
+  const contextSection = [
+    '### Context',
+    '',
+    `- **Feature**: ${escapeMarkdown(input.feature)}`,
+    `- **Context Kind**: \`${input.contextKind}\``,
+    input.limitedContext ? '- **Limited Context**: ⚠️ semantic context is limited or unavailable' : '',
+    input.changedFiles.length > 0
+      ? `- **Changed Files**: ${input.changedFiles.length} file(s) (${input.diffLines} diff lines)`
+      : '- **Changed Files**: none detected',
+    input.changedFiles.length > 0
+      ? input.changedFiles.map(f => `  - \`${escapeMarkdown(f)}\``).join('\n')
+      : '',
+    input.omittedFiles.length > 0
+      ? `- **Scoped Out Files**: ${input.omittedFiles.length} unrelated file(s) omitted from applicability checks`
+      : '',
+    '',
+  ].filter(Boolean).join('\n')
+
+  return [
+    '## Quality Gate',
+    '',
+    contextSection,
+    buildApplicabilitySection(input.applicability),
+    '### Next Step',
+    '',
+    escapeMarkdown(input.applicability.nextStep),
+    '',
     '---',
     '',
     `*Quality gate completed at ${new Date().toISOString()}*`,

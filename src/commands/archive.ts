@@ -89,6 +89,11 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const acceptedKnownIssues = matchingAcceptanceState?.acceptedKnownIssues ?? []
   const hardenTerminalSummary = matchingAcceptanceState?.hardenTerminalSummary
   const hasAcceptedKnownIssues = (hardenTerminalSummary?.acceptedKnownIssueCount ?? 0) > 0 || acceptedKnownIssues.length > 0
+  const gateApplicability = matchingAcceptanceState?.qualityGateApplicability
+
+  if (gateApplicability && !gateApplicability.archiveReadinessEligible) {
+    return formatQualityGateApplicabilityBlock(sanitizedFeature, gateApplicability.status, gateApplicability.nextStep)
+  }
 
   if (readiness === VerifyReadinessStatus.NotReady || readiness === VerifyReadinessStatus.NeedsDecision) {
     return formatReadinessBlock(sanitizedFeature, readiness)
@@ -425,6 +430,20 @@ Feature: ${escapeMarkdown(feature)}
 Archive stopped because verification readiness is **${escapeMarkdown(statusLabel)}**.
 
 ${nextAction}`
+}
+
+function formatQualityGateApplicabilityBlock(
+  feature: string,
+  status: string,
+  nextStep: string,
+): string {
+  return `## Archive Blocked
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive stopped because the latest quality-gate applicability state is **${escapeMarkdown(status)}**, which is not archive readiness.
+
+${escapeMarkdown(nextStep)}`
 }
 
 function formatMissingReadinessBlock(

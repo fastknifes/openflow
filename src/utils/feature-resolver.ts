@@ -8,6 +8,7 @@ export interface DerivedFeatureIdentity {
   slug: string
   title?: string | undefined
   sourceIntent?: string | undefined
+  lowConfidenceReason?: 'generic_slug' | 'generic_instruction' | undefined
 }
 
 export interface FeatureSessionCandidate {
@@ -43,21 +44,42 @@ export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | 
 
 export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
   const trimmed = input.trim()
+  const hash = createHash('sha256').update(trimmed).digest('hex').slice(0, 8)
   const direct = trySanitizeFeatureName(trimmed)
   if (direct && direct === trimmed.toLowerCase()) {
+    if (isGenericFeatureSlug(direct)) {
+      return {
+        slug: `feature-${hash}`,
+        title: trimmed,
+        sourceIntent: trimmed,
+        lowConfidenceReason: 'generic_slug',
+      }
+    }
     return { slug: direct }
   }
 
+  if (looksLikeGenericFeatureInstruction(trimmed)) {
+    return {
+      slug: `feature-${hash}`,
+      title: trimmed,
+      sourceIntent: trimmed,
+      lowConfidenceReason: 'generic_instruction',
+    }
+  }
+
   const asciiWords = trimmed.toLowerCase().match(/[a-z0-9]+/g) ?? []
-  const meaningfulWords = asciiWords.filter((word) => !['the', 'a', 'an', 'and', 'or', 'to', 'for', 'with'].includes(word))
+  const inferredWords = inferChineseFeatureWords(trimmed)
+  const meaningfulWords = [...asciiWords, ...inferredWords]
+    .filter((word) => !isIgnoredFeatureWord(word))
   const base = meaningfulWords.slice(0, 8).join('-')
-  const hash = createHash('sha256').update(trimmed).digest('hex').slice(0, 8)
+  const lowConfidenceReason = base ? undefined : 'generic_instruction'
   const slug = trySanitizeFeatureName(base ? `${base}-${hash}` : `feature-${hash}`) ?? `feature-${hash}`
 
   return {
     slug,
     title: trimmed,
     sourceIntent: trimmed,
+    lowConfidenceReason,
   }
 }
 
@@ -96,4 +118,54 @@ function trySanitizeFeatureName(value: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function isIgnoredFeatureWord(word: string): boolean {
+  return [
+    'the', 'a', 'an', 'and', 'or', 'to', 'for', 'with',
+    'feature', 'future', 'task', 'todo', 'change', 'update',
+    'doc', 'docs', 'document', 'documents', 'documentation',
+  ].includes(word)
+}
+
+function isGenericFeatureSlug(slug: string): boolean {
+  const words = slug.split('-').filter(Boolean)
+  return words.length === 0 || words.every(isIgnoredFeatureWord)
+}
+
+function looksLikeGenericFeatureInstruction(input: string): boolean {
+  const normalized = input.trim().toLowerCase()
+  if (/^(?:future|feature|task|todo|change|update)(?:\s+|[-_])*(?:future|feature|task|todo|change|update)?$/u.test(normalized)) {
+    return true
+  }
+
+  return /^请/u.test(input)
+    && /(?:收集|生成|创建|整理)/u.test(input)
+    && /(?:约束|文档|相关文档|资料)/u.test(input)
+    && !/(?:质量门|命名|重命名|登录|优惠券|扣减|前端|预览|阶段|适用性|触发|边界)/u.test(input)
+}
+
+function inferChineseFeatureWords(input: string): string[] {
+  const dictionary: Array<[RegExp, string[]]> = [
+    [/质量门/u, ['quality', 'gate']],
+    [/门禁/u, ['gate']],
+    [/阶段/u, ['stage']],
+    [/适用性/u, ['applicability']],
+    [/判定|分类/u, ['classifier']],
+    [/触发/u, ['trigger']],
+    [/边界/u, ['boundary']],
+    [/命名/u, ['naming']],
+    [/重命名/u, ['rename']],
+    [/登录/u, ['login']],
+    [/优惠券/u, ['coupon']],
+    [/扣减/u, ['deduction']],
+    [/规则/u, ['rule']],
+    [/配置/u, ['config']],
+    [/前端/u, ['frontend']],
+    [/设计/u, ['design']],
+    [/预览/u, ['preview']],
+    [/约束/u, ['constraints']],
+  ]
+
+  return dictionary.flatMap(([pattern, words]) => pattern.test(input) ? words : [])
 }

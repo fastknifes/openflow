@@ -243,6 +243,27 @@ Then:
 
     expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
     expect(readiness.reasonCodes).toEqual(['context_alignment_missing', 'changes_workspace_missing'])
+    expect(readiness.classifiedEvidenceGaps?.map(gap => gap.kind)).toEqual(['workflow_stage_missing', 'workflow_stage_missing'])
+  })
+
+  test('verify output exposes classified evidence gaps for missing workflow artifacts', async () => {
+    const testDir = join(process.cwd(), '.test-verify-classified-gaps')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# demo', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('classified_evidence_gaps')
+    expect(result).toContain('context_alignment_missing: workflow_stage_missing')
+    expect(result).toContain('changes_workspace_missing: workflow_stage_missing')
+    expect(result).toContain('do not create a minimal design artifact just to satisfy verify')
+
+    await rm(testDir, { recursive: true, force: true })
   })
 
   test('returns ready_with_doc_updates when checks pass but pending doc updates remain', async () => {

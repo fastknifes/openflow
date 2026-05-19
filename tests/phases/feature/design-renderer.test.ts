@@ -121,6 +121,74 @@ describe('renderDesignDocument', () => {
     expect(markdown).toContain('- [ ] All existing tests pass')
   })
 
+  test('adds an ASCII page and interaction preview for frontend requirements', () => {
+    const model: RequirementModel = {
+      ...createMinimalRequirementModel('settings-page'),
+      featureTitle: '设置页面筛选器',
+      problemStatement: '用户需要在前端页面通过表单筛选设置项',
+      targetUsers: '后台用户',
+      scopeBoundary: {
+        inScope: ['Settings filter page'],
+        outOfScope: ['Backend permission model'],
+        touchedModules: ['src/components/settings/SettingsFilter.tsx'],
+      },
+      goals: ['用户可以在设置页面筛选列表'],
+      acceptanceCriteria: [
+        {
+          id: 'ac-ui-001',
+          description: '用户点击筛选按钮后列表刷新并显示反馈',
+        },
+      ],
+    }
+
+    const markdown = renderDesignDocument(model)
+
+    expect(markdown).toContain('## UI / Interaction ASCII Preview')
+    expect(markdown).toContain('+------------------------------------------------------------+')
+    expect(markdown).toContain('Interaction flow:')
+    expect(markdown).toContain('User opens the page/component')
+    expect(markdown.indexOf('## UI / Interaction ASCII Preview')).toBeGreaterThan(markdown.indexOf('## Problem'))
+    expect(markdown.indexOf('## UI / Interaction ASCII Preview')).toBeLessThan(markdown.indexOf('## Goals'))
+  })
+
+  test('does not add the frontend ASCII preview for non-frontend requirements', () => {
+    const markdown = renderDesignDocument(createMinimalRequirementModel('api-cache-policy'))
+
+    expect(markdown).not.toContain('## UI / Interaction ASCII Preview')
+  })
+
+  test('does not treat excluded frontend scope as a frontend requirement', () => {
+    const model: RequirementModel = {
+      ...createMinimalRequirementModel('api-contract-cleanup'),
+      problemStatement: 'Normalize backend API response fields for service consumers',
+      scopeBoundary: {
+        inScope: ['Backend response contract'],
+        outOfScope: ['Frontend page changes', 'UI component updates'],
+      },
+      nonGoals: ['Do not change the dashboard page'],
+    }
+
+    const markdown = renderDesignDocument(model)
+
+    expect(markdown).not.toContain('## UI / Interaction ASCII Preview')
+  })
+
+  test('does not add the frontend ASCII preview for explicit no-UI backend changes', () => {
+    const model: RequirementModel = {
+      ...createMinimalRequirementModel('backend-contract-cleanup'),
+      problemStatement: 'Normalize backend API response fields with no UI changes',
+      scopeBoundary: {
+        inScope: ['Backend response contract; frontend is not affected'],
+        outOfScope: [],
+      },
+      goals: ['Keep dashboard page unchanged while backend clients migrate'],
+    }
+
+    const markdown = renderDesignDocument(model)
+
+    expect(markdown).not.toContain('## UI / Interaction ASCII Preview')
+  })
+
   test('renders empty optional fields with notes instead of omitting headings', () => {
     const model: RequirementModel = {
       feature: 'empty-optional-fields',

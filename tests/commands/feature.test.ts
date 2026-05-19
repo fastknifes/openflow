@@ -123,6 +123,36 @@ describe('feature command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('rejects generic future placeholder names before creating a feature session', async () => {
+    const root = join(process.cwd(), '.test-feature-generic-future-name')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const result = await handleFeature(createContext(root), 'future', undefined, createToolContext(root, 'session-generic-future'))
+
+    expect(result).toContain('Feature Identity Needed')
+    expect(result).toContain('too generic')
+    expect(result).toContain('will not create a `feature-*`, `future-*`')
+    await expect(readdir(join(root, '.sisyphus', 'feature'))).rejects.toThrow()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('rejects generic document-generation instructions before deriving feature-hash names', async () => {
+    const root = join(process.cwd(), '.test-feature-generic-doc-instruction')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const result = await handleFeature(createContext(root), '请收集约束条件，生成相关文档。', undefined, createToolContext(root, 'session-generic-doc'))
+
+    expect(result).toContain('Feature Identity Needed')
+    expect(result).toContain('workflow action')
+    expect(result).not.toMatch(/feature-[0-9a-f]{8}/u)
+    await expect(readdir(join(root, '.sisyphus', 'feature'))).rejects.toThrow()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('asks natural-language disambiguation when no-arg feature identity is ambiguous', async () => {
     const root = join(process.cwd(), '.test-feature-ambiguous-identity')
     await rm(root, { recursive: true, force: true })

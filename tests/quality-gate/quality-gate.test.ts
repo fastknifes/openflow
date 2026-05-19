@@ -211,6 +211,8 @@ describe('handleQualityGate', () => {
     // Markdown includes all required sections
     expect(output).toContain('## Quality Gate')
     expect(output).toContain('### Context')
+    expect(output).toContain('### Applicability')
+    expect(output).toContain('Applicable')
     expect(output).toContain('### Risk Assessment')
     expect(output).toContain('### Harden Decision')
     expect(output).toContain('### Evidence-Aware Verify')
@@ -260,6 +262,98 @@ describe('handleQualityGate', () => {
 
     // No fast/balanced/strict
     expect(output).not.toMatch(/fast|balanced|strict/i)
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('design-only changes return not_applicable and do not save verify readiness', async () => {
+    const directory = await createGitFixture('applicability-design-only', 'no-diff')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory)
+
+    await mkdir(join(directory, 'docs', 'changes', FEATURE_A), { recursive: true })
+    await writeFile(join(directory, 'docs', 'changes', FEATURE_A, 'design.md'), '# Design\n\nUpdated design only.\n', 'utf-8')
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerify(callLog),
+    })
+    const state = await loadAcceptanceState(directory)
+
+    expect(output).toContain('### Applicability')
+    expect(output).toContain('NotApplicable')
+    expect(output).toContain('design_only_no_implementation_change')
+    expect(output).toContain('Do not create workflow artifacts')
+    expect(callLog.order).toEqual([])
+    expect(state?.readiness).toBeUndefined()
+    expect(state?.verifyResult).toBeUndefined()
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('planning-only changes return not_applicable and skip verify', async () => {
+    const directory = await createGitFixture('applicability-planning-only', 'no-diff')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory)
+
+    await writeFile(join(directory, '.sisyphus', 'plans', `${FEATURE_A}.md`), '# Plan\n\n- Updated planning only.\n', 'utf-8')
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('NotApplicable')
+    expect(output).toContain('planning_only_no_implementation_change')
+    expect(callLog.order).toEqual([])
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('implementation change without workflow context returns needs_workflow_stage', async () => {
+    const directory = await createGitFixture('applicability-missing-workflow', 'no-diff')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory)
+
+    await rm(join(directory, '.sisyphus', 'plans'), { recursive: true, force: true })
+    await writeFile(join(directory, 'src', 'app.ts'), 'export const appVersion = "2.0"\n', 'utf-8')
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('NeedsWorkflowStage')
+    expect(output).toContain('implementation_missing_workflow_context')
+    expect(output).toContain('Do not create a minimal plan or design automatically')
+    expect(callLog.order).toEqual([])
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('harden missing plan is reported as unavailable workflow stage instead of generic not_ready', async () => {
+    const directory = await createGitFixture('harden-missing-plan-unavailable', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: rejected
+Rounds: 0
+Budget consumed: 0
+Summary: missing plan file
+
+\`.sisyphus/plans/${FEATURE_A}.md\`.`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('harden_unavailable_missing_plan')
+    expect(output).toContain('`needs_workflow_stage`')
+    expect(output).not.toContain('Address the readiness issues identified above')
+    expect(callLog.order).toContain('verify')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -340,24 +434,20 @@ describe('handleQualityGate', () => {
       overrideVerify: createMockVerify(callLog),
     })
 
-    // Verify was still called
-    expect(callLog.order).toContain('verify')
+    // Design-only context detection should not run verify readiness.
+    expect(output).toContain('NotApplicable')
+    expect(callLog.order).not.toContain('verify')
 
-    // All sections present
     expect(output).toContain('## Quality Gate')
     expect(output).toContain('### Context')
-    expect(output).toContain('### Risk Assessment')
-    expect(output).toContain('### Harden Decision')
-    expect(output).toContain('### Evidence-Aware Verify')
-    expect(output).toContain('### Readiness')
+    expect(output).toContain('### Applicability')
     expect(output).toContain('### Next Step')
 
     // No hard failure
     expect(output).not.toContain('fatal')
     expect(output).not.toContain('Error:')
 
-    // Limited context flagged
-    expect(output).toContain('limited')
+    expect(output).toContain('not_applicable')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -376,23 +466,20 @@ describe('handleQualityGate', () => {
       overrideVerify: createMockVerify(callLog),
     })
 
-    // Verify was still called
-    expect(callLog.order).toContain('verify')
+    // Issue clarification-only context detection should not run verify readiness.
+    expect(output).toContain('NotApplicable')
+    expect(callLog.order).not.toContain('verify')
 
-    // All sections present
     expect(output).toContain('## Quality Gate')
     expect(output).toContain('### Context')
-    expect(output).toContain('### Risk Assessment')
-    expect(output).toContain('### Harden Decision')
-    expect(output).toContain('### Evidence-Aware Verify')
-    expect(output).toContain('### Readiness')
+    expect(output).toContain('### Applicability')
+    expect(output).toContain('### Next Step')
 
     // No hard failure
     expect(output).not.toContain('fatal')
     expect(output).not.toContain('Error:')
 
-    // Evidence freshness section present
-    expect(output).toContain('Evidence Freshness')
+    expect(output).toContain('not_applicable')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -679,8 +766,8 @@ Summary: one design divergence was accepted as a known issue after verify eviden
     expect(output).not.toContain('`plan`')
     expect(output).not.toContain('`limited`')
 
-    // Verify was still called
-    expect(callLog.order).toContain('verify')
+    expect(output).toContain('NotApplicable')
+    expect(callLog.order).not.toContain('verify')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -714,8 +801,8 @@ Summary: one design divergence was accepted as a known issue after verify eviden
     expect(output).not.toContain('`feature`')
     expect(output).not.toContain('`plan`')
 
-    // Verify was still called
-    expect(callLog.order).toContain('verify')
+    expect(output).toContain('NotApplicable')
+    expect(callLog.order).not.toContain('verify')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -878,6 +965,55 @@ Summary: one design divergence was accepted as a known issue after verify eviden
 
     // Verify should still run (evidence is rerun, not skipped)
     expect(callLog.order).toContain('verify')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('does not overwrite target-feature readiness with stale acceptance state after harden', async () => {
+    const directory = await createGitFixture('stale-state-target-readiness', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    await saveAcceptanceState(directory, {
+      feature: 'other-feature',
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: async (_ctx, feature) => {
+        callLog.order.push('verify')
+        await saveAcceptanceState(directory, {
+          feature: feature ?? FEATURE_A,
+          phase: 'acceptance',
+          phaseStartedAt: new Date().toISOString(),
+          pendingDocUpdates: [],
+          readiness: 'ready',
+          verifyResult: {
+            readiness: 'ready',
+            reasonCodes: ['all_checks_passed'],
+            evidenceSummary: 'Fresh target-feature evidence.',
+            constraintsChecked: ['typecheck', 'test'],
+            verifiedAt: new Date().toISOString(),
+          },
+        })
+
+        return createMockVerify({ order: [] })(_ctx, feature)
+      },
+    })
+
+    const state = await loadAcceptanceState(directory)
+
+    expect(output).toContain('Ready')
+    expect(callLog.order).toEqual(['harden', 'verify'])
+    expect(state?.feature).toBe(FEATURE_A)
+    expect(state?.readiness).toBe('ready')
+    expect(state?.qualityGateApplicability?.archiveReadinessEligible).toBe(true)
+    expect(state?.hardenSummary).toContain('"status":"pass"')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)

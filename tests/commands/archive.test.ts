@@ -575,6 +575,68 @@ describe('archive command', () => {
     await rm(testDir, { recursive: true, force: true })
   })
 
+  test('blocks archive when latest quality gate was not_applicable', async () => {
+    const feature = 'readiness-not-applicable-gate'
+    const testDir = join(process.cwd(), '.test-archive-readiness-not-applicable-gate')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+      qualityGateApplicability: {
+        status: 'not_applicable',
+        reasonCode: 'design_only_no_implementation_change',
+        reason: 'Design-only work is not archive readiness.',
+        taskKind: 'design_only',
+        shouldRunVerify: false,
+        shouldRunHarden: false,
+        archiveReadinessEligible: false,
+        nextStep: 'No quality gate is required. Do not create workflow artifacts merely to satisfy readiness.',
+      },
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('not_applicable')
+    expect(result).toContain('not archive readiness')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks archive when latest quality gate had limited context', async () => {
+    const feature = 'readiness-limited-context-gate'
+    const testDir = join(process.cwd(), '.test-archive-readiness-limited-context-gate')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+      qualityGateApplicability: {
+        status: 'limited_context',
+        reasonCode: 'semantic_context_limited',
+        reason: 'Only technical verification ran.',
+        taskKind: 'unknown',
+        shouldRunVerify: true,
+        shouldRunHarden: false,
+        archiveReadinessEligible: false,
+        nextStep: 'Do not claim full semantic readiness from limited context.',
+      },
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('limited_context')
+    expect(result).toContain('not archive readiness')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
   test('allows archive when verify passed and accepted known issues are recorded in harden summary', async () => {
     const feature = 'readiness-accepted-known-issues'
     const testDir = join(process.cwd(), '.test-archive-readiness-accepted-known-issues')

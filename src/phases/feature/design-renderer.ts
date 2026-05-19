@@ -11,6 +11,7 @@ export function renderDesignDocument(model: RequirementModel): string {
     renderIdentity(model),
     renderOverview(model),
     renderProblem(model),
+    renderFrontendAsciiPreview(model),
     renderGoals(model),
     renderNonGoals(model),
     renderBehaviorAlignment(model),
@@ -94,6 +95,42 @@ function renderOverview(model: RequirementModel): string {
 
 function renderProblem(model: RequirementModel): string {
   return ['## Problem', '', escapeParagraph(model.problemStatement)].join('\n')
+}
+
+function renderFrontendAsciiPreview(model: RequirementModel): string {
+  if (!isFrontendRequirement(model)) {
+    return ''
+  }
+
+  const primaryGoal = firstMeaningful(model.goals) ?? firstMeaningful(model.acceptanceCriteria.map((criterion) => criterion.description)) ?? 'User completes the primary interaction'
+  const primaryInteraction = firstMeaningful(model.acceptanceCriteria.map((criterion) => criterion.description)) ?? primaryGoal
+  const scope = firstMeaningful(model.scopeBoundary.inScope) ?? 'Primary page or component'
+
+  return [
+    '## UI / Interaction ASCII Preview',
+    '',
+    'This feature appears to affect a user-facing frontend. Use this preview to confirm the intended page structure and interaction path before implementation.',
+    '',
+    '```text',
+    '+------------------------------------------------------------+',
+    `| ${padAscii('Page / View: ' + scope, 58)} |`,
+    '+------------------------------------------------------------+',
+    '| Header / Navigation                                        |',
+    '+------------------------------------------------------------+',
+    '| Main content                                                |',
+    `|   Goal: ${padAscii(primaryGoal, 50)} |`,
+    '|                                                            |',
+    '|   [ Primary action ]        [ Secondary / cancel ]          |',
+    '+------------------------------------------------------------+',
+    '| Feedback / validation / empty-or-loading state              |',
+    '+------------------------------------------------------------+',
+    '',
+    'Interaction flow:',
+    `1. User opens the page/component for: ${toAsciiLine(scope)}`,
+    `2. User performs: ${toAsciiLine(primaryInteraction)}`,
+    '3. UI updates visible state and shows success, validation, or recovery feedback.',
+    '```',
+  ].join('\n')
 }
 
 function renderGoals(model: RequirementModel): string {
@@ -192,6 +229,54 @@ function renderBulletSection(heading: string, items: string[]): string {
   }
 
   return lines.join('\n')
+}
+
+function isFrontendRequirement(model: RequirementModel): boolean {
+  const haystack = [
+    model.feature,
+    model.featureTitle,
+    model.sourceIntent,
+    model.problemStatement,
+    model.targetUsers,
+    ...model.goals,
+    ...model.scopeBoundary.inScope,
+    ...(model.scopeBoundary.touchedModules ?? []),
+    ...model.acceptanceCriteria.map((criterion) => criterion.description),
+    ...model.constraints.map((constraint) => constraint.description),
+    ...(model.expectedModules ?? []).map((module) => `${module.path} ${module.purpose}`),
+  ].filter(Boolean).join(' ').toLowerCase()
+
+  if (hasFrontendNegation(haystack)) {
+    return false
+  }
+
+  return /\b(frontend|front-end|ui|ux|page|screen|react|vue|svelte|css|html|form|modal|button|sidebar|navbar|dashboard)\b/.test(haystack)
+    || /前端|页面|界面|交互|组件|表单|按钮|弹窗|侧边栏|导航|看板|仪表盘/.test(haystack)
+}
+
+function hasFrontendNegation(value: string): boolean {
+  return /\b(no|without|not|exclude|avoid|skip)\s+(frontend|front-end|ui|ux|page|screen|react|vue|svelte|css|html|form|modal|button|sidebar|navbar|dashboard)\b/.test(value)
+    || /\b(frontend|front-end|ui|ux|page|screen|react|vue|svelte|css|html|form|modal|button|sidebar|navbar|dashboard)\b.{0,24}\b(not affected|unchanged|out of scope|not impacted)\b/.test(value)
+    || /不(涉及|修改|变更|影响|包含).{0,12}(前端|页面|界面|交互|组件)|无需.{0,12}(前端|页面|界面|交互|组件)|(前端|页面|界面|交互|组件).{0,12}(不受影响|不变|排除|不在范围)/.test(value)
+}
+
+function firstMeaningful(items: string[]): string | undefined {
+  return items.find((item) => item.trim().length > 0)
+}
+
+function padAscii(value: string, width: number): string {
+  const normalized = toAsciiLine(value)
+  if (normalized.length >= width) {
+    return normalized.slice(0, width - 3) + '...'
+  }
+
+  return normalized.padEnd(width, ' ')
+}
+
+function toAsciiLine(value: string): string {
+  return normalizeWhitespace(value)
+    .replace(/\|/g, '/')
+    .replace(/[\r\n]+/g, ' ')
 }
 
 function escapeParagraph(value: string | undefined): string {

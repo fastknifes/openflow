@@ -5,6 +5,7 @@ import type {
   AcceptanceState,
   AdapterConfig,
   BehaviorScenarioCheckResult,
+  ClassifiedEvidenceGap,
   OpenFlowContext,
   QualityCheckType,
   VerifyEvidenceCheckResult,
@@ -44,6 +45,7 @@ export interface VerifyReadinessResult {
   reason: string
   nextStep: string
   decisionType?: VerifyDecisionType
+  classifiedEvidenceGaps?: ClassifiedEvidenceGap[]
 }
 
 interface VerifyQuestionInput {
@@ -318,6 +320,16 @@ async function collectEvidence(
     }
   }
 
+  const classifiedEvidenceGaps = classifyEvidenceGaps({
+    mode,
+    contextAlignmentPresent,
+    changesExists,
+    issueClarificationExists,
+    issueFailures,
+    failedChecks,
+    behaviorScenarios,
+  })
+
   const verifiedCount = behaviorScenarios
     ? behaviorScenarios.filter(s => s.status === 'verified').length
     : 0
@@ -351,10 +363,86 @@ async function collectEvidence(
   if (behaviorScenarios) {
     packet.behaviorScenarios = behaviorScenarios
   }
+  if (classifiedEvidenceGaps.length > 0) {
+    packet.classifiedEvidenceGaps = classifiedEvidenceGaps
+  }
   if (behaviorEvidence.length > 0) {
     packet.behaviorEvidence = behaviorEvidence
   }
   return packet
+}
+
+function classifyEvidenceGaps(input: {
+  mode: IssueMode
+  contextAlignmentPresent: boolean
+  changesExists: boolean
+  issueClarificationExists: boolean
+  issueFailures: string[]
+  failedChecks: VerifyEvidenceCheckResult[]
+  behaviorScenarios: BehaviorScenarioCheckResult[] | undefined
+}): ClassifiedEvidenceGap[] {
+  const gaps: ClassifiedEvidenceGap[] = []
+
+  if (!input.contextAlignmentPresent) {
+    gaps.push({
+      code: 'context_alignment_missing',
+      kind: input.mode === 'feature' ? 'workflow_stage_missing' : 'blocking_evidence_gap',
+      message: input.mode === 'feature'
+        ? 'Feature verification is missing design/context alignment from the workflow stage.'
+        : 'Issue verification is missing issue clarification context alignment.',
+      nextStep: input.mode === 'feature'
+        ? 'Enter the explicit feature workflow or planning workflow; do not create a minimal design artifact just to satisfy verify.'
+        : 'Provide issue clarification before resolving or archiving the issue.',
+    })
+  }
+
+  if (!input.changesExists) {
+    gaps.push({
+      code: 'changes_workspace_missing',
+      kind: input.mode === 'feature' ? 'workflow_stage_missing' : 'limited_context_gap',
+      message: 'Change workspace is missing, so document alignment evidence is incomplete.',
+      nextStep: 'Use the explicit OpenFlow workflow stage if semantic readiness is required; otherwise treat this as limited context.',
+    })
+  }
+
+  if (input.mode !== 'feature' && !input.issueClarificationExists) {
+    gaps.push({
+      code: 'issue_clarification_missing',
+      kind: 'blocking_evidence_gap',
+      message: 'Issue-mode readiness requires an issue clarification artifact.',
+      nextStep: 'Run the issue clarification workflow before archive readiness.',
+    })
+  }
+
+  for (const issueFailure of input.issueFailures) {
+    gaps.push({
+      code: issueFailure.replace(/\s+/g, '_'),
+      kind: 'blocking_evidence_gap',
+      message: `Issue-mode evidence is incomplete: ${issueFailure}.`,
+      nextStep: 'Resolve the issue-mode evidence gap before claiming readiness.',
+    })
+  }
+
+  for (const failedCheck of input.failedChecks) {
+    gaps.push({
+      code: `${failedCheck.category}_${failedCheck.name}_failed`,
+      kind: 'blocking_evidence_gap',
+      message: `${failedCheck.category} check ${failedCheck.name} failed.`,
+      nextStep: 'Fix the failed check or explicitly accept non-hard-blocking failures where allowed.',
+    })
+  }
+
+  const behaviorGaps = input.behaviorScenarios?.filter(isBlockingBehaviorScenarioGap) ?? []
+  for (const scenario of behaviorGaps) {
+    gaps.push({
+      code: `behavior_${scenario.scenarioId}_evidence_incomplete`,
+      kind: scenario.criticality === 'critical' ? 'blocking_evidence_gap' : 'informational_gap',
+      message: `Behavior scenario "${scenario.name}" lacks required evidence.`,
+      nextStep: 'Add real verification evidence for the behavior scenario, or mark it not applicable only if the contract truly does not apply.',
+    })
+  }
+
+  return gaps
 }
 
 async function runQualityChecks(ctx: OpenFlowContext): Promise<VerifyEvidenceCheckResult[]> {
@@ -654,7 +742,7 @@ export async function classifyReadiness(
   const hasHardBlocker = reasonCodes.some(code => hardBlockerCodes.has(code))
 
   if (reasonCodes.length > 0) {
-    return {
+    const result: VerifyReadinessResult = {
       status: acceptedFailures && !hasHardBlocker ? VerifyReadinessStatus.Ready : VerifyReadinessStatus.NotReady,
       reasonCodes,
       reason: `Verification is blocked for ${feature}: ${reasonCodes.join(', ')}.`,
@@ -662,8 +750,13 @@ export async function classifyReadiness(
         ? '已接受当前失败项；如需恢复严格验证，请修复失败检查后重新运行 /openflow-verify。'
         : hasHardBlocker
           ? 'Provide the missing issue intent artifact or secure the required governance approval, then rerun /openflow-verify.'
-        : 'Fix the failing checks or missing evidence, then rerun /openflow-verify.',
+          : 'Fix the failing checks or missing evidence, then rerun /openflow-verify.',
     }
+    const classifiedEvidenceGaps = evidence.classifiedEvidenceGaps ?? classifyReasonCodesAsEvidenceGaps(reasonCodes, mode)
+    if (classifiedEvidenceGaps.length > 0) {
+      result.classifiedEvidenceGaps = classifiedEvidenceGaps
+    }
+    return result
   }
 
   if (pendingDocUpdates.length > 0) {
@@ -681,6 +774,37 @@ export async function classifyReadiness(
     reason: `Verification evidence for ${feature} is complete and no blocking follow-up remains.`,
     nextStep: 'Continue the acceptance or archive workflow.',
   }
+}
+
+function classifyReasonCodesAsEvidenceGaps(reasonCodes: string[], mode: IssueMode): ClassifiedEvidenceGap[] {
+  return reasonCodes
+    .filter(code => code.endsWith('_missing') || code.includes('_failed') || code.includes('_incomplete'))
+    .map((code): ClassifiedEvidenceGap => {
+      if (code === 'context_alignment_missing') {
+        return {
+          code,
+          kind: mode === 'feature' ? 'workflow_stage_missing' : 'blocking_evidence_gap',
+          message: 'Context alignment evidence is missing.',
+          nextStep: mode === 'feature'
+            ? 'Enter the explicit workflow stage; do not create a minimal design artifact just to satisfy verify.'
+            : 'Provide issue clarification before readiness.',
+        }
+      }
+      if (code === 'changes_workspace_missing') {
+        return {
+          code,
+          kind: mode === 'feature' ? 'workflow_stage_missing' : 'limited_context_gap',
+          message: 'Change workspace evidence is missing.',
+          nextStep: 'Use the explicit workflow stage if semantic readiness is required.',
+        }
+      }
+      return {
+        code,
+        kind: 'blocking_evidence_gap',
+        message: `Evidence gap detected: ${code}.`,
+        nextStep: 'Resolve the evidence gap before claiming readiness.',
+      }
+    })
 }
 
 async function formatVerifyResult(
@@ -701,6 +825,12 @@ async function formatVerifyResult(
     ? `
 - behavior_scenarios:
 ${evidence.behaviorScenarios.map(s => `  - ${s.scenarioId}: ${s.name} ${s.status === 'verified' ? '✅' : s.status === 'not_applicable' ? 'ℹ️' : '⚠️'} (${s.status}${s.detail ? ` — ${escapeMarkdown(s.detail)}` : ''})`).join('\n')}
+`
+    : ''
+  const classifiedEvidenceGapsSection = evidence.classifiedEvidenceGaps && evidence.classifiedEvidenceGaps.length > 0
+    ? `
+- classified_evidence_gaps:
+${evidence.classifiedEvidenceGaps.map(gap => `  - ${gap.code}: ${gap.kind} — ${escapeMarkdown(gap.message)} Next: ${escapeMarkdown(gap.nextStep)}`).join('\n')}
 `
     : ''
 
@@ -759,7 +889,7 @@ Feature: ${escapeMarkdown(feature)}
 - checks_run:
 ${evidence.checksRun.map(check => `  - ${check}`).join('\n')}
 - check_results:
-${formatCheckResults(evidence.checkResults)}${behaviorSection}
+${formatCheckResults(evidence.checkResults)}${behaviorSection}${classifiedEvidenceGapsSection}
 - observed_behavior_summary: ${escapeMarkdown(evidence.observedBehaviorSummary)}
 - intended_vs_actual_delta: ${escapeMarkdown(evidence.intendedVsActualDelta)}
 - doc_alignment_summary: ${escapeMarkdown(evidence.docAlignmentSummary)}
