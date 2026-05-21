@@ -4,6 +4,7 @@ import { defaultConfig, type AcceptanceState, type OpenFlowContext, VerifyReadin
 import { join } from 'node:path'
 import { mkdir, rm, writeFile, access, readFile, readdir } from 'node:fs/promises'
 import { loadAcceptanceState, saveAcceptanceState } from '../../src/utils/acceptance-state.js'
+import { implementationRunStore } from '../../src/utils/implementation-run.js'
 
 function createContext(configOverride?: Partial<typeof defaultConfig>): OpenFlowContext {
   return {
@@ -107,6 +108,22 @@ async function setupReadinessArchiveFixture(
       archive: { ...defaultConfig.archive, drift_check: true },
     },
   }
+}
+
+async function createImplementationRun(ctx: OpenFlowContext, feature: string, status: 'running' | 'ready_for_archive' | 'archived') {
+  return implementationRunStore.createRun(ctx, {
+    feature,
+    sessionID: `session-${feature}`,
+    messageID: `message-${feature}`,
+    agent: 'build',
+    directory: ctx.directory,
+    backend: 'opencode',
+    backendCommand: 'Use OpenCode native build agent',
+    status,
+    containerMode: 'session',
+    eventsPath: join('.sisyphus', 'openflow', 'events', `${feature}.jsonl`),
+    observationsPath: join('.sisyphus', 'openflow', 'observations', `${feature}.jsonl`),
+  })
 }
 
 describe('archive command', () => {
@@ -643,6 +660,55 @@ describe('archive command', () => {
 
     const archiveDir = await resolveArchiveDir(testDir, feature)
     await expect(access(join(archiveDir, 'implementation-mapper.md'))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks archive when implementation run is not ready for archive', async () => {
+    const feature = 'implementation-run-incomplete'
+    const testDir = join(process.cwd(), '.test-archive-implementation-run-incomplete')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+    const run = await createImplementationRun(ctx, feature, 'running')
+
+    const result = await handleArchive(ctx, feature)
+
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('implementation run status is **running**')
+    expect((await implementationRunStore.getRun(ctx, run.runID))?.status).toBe('running')
+    await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('archives ready implementation run and records archive event', async () => {
+    const feature = 'implementation-run-ready'
+    const testDir = join(process.cwd(), '.test-archive-implementation-run-ready')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+    const run = await createImplementationRun(ctx, feature, 'ready_for_archive')
+
+    const result = await handleArchive(ctx, feature)
+
+    expect(result).toContain('Archive Complete')
+    expect((await implementationRunStore.getRun(ctx, run.runID))?.status).toBe('archived')
+
+    const events = (await readFile(join(testDir, '.sisyphus', 'openflow', 'events', `${feature}.jsonl`), 'utf-8'))
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as { type: string; runID: string; feature: string })
+    expect(events).toContainEqual(expect.objectContaining({ type: 'archive_completed', runID: run.runID, feature }))
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('archives normally when no implementation run exists', async () => {
+    const feature = 'implementation-run-absent'
+    const testDir = join(process.cwd(), '.test-archive-implementation-run-absent')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+
+    const result = await handleArchive(ctx, feature)
+
+    expect(result).toContain('Archive Complete')
+    expect(await implementationRunStore.listRuns(ctx, { feature })).toEqual([])
 
     await rm(testDir, { recursive: true, force: true })
   })

@@ -9,6 +9,7 @@ import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 import { loadAcceptanceState, saveAcceptanceState } from '../../src/utils/acceptance-state.js'
 import type { EvidenceFreshnessMetadata } from '../../src/types.js'
 import { computeSimpleDiffHash } from '../../src/utils/evidence-freshness.js'
+import { implementationRunStore } from '../../src/utils/implementation-run.js'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,11 @@ function runGit(directory: string, ...args: string[]): string {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim()
+}
+
+async function readRunEvents(directory: string, eventsPath: string): Promise<Array<{ type: string; result?: string }>> {
+  const content = await readFile(join(directory, eventsPath), 'utf-8')
+  return content.trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
 }
 
 const FEATURE_A = 'feature-a'
@@ -373,6 +379,101 @@ describe('handleQualityGate', () => {
     expect(stateFile).toContain('implementationState: blocked')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('active ImplementationRun supplies execution root and records quality gate events', async () => {
+    const executionRoot = await createGitFixture('run-execution-root', 'multi-file')
+    const storeRoot = join(process.cwd(), '.test-quality-gate-run-store')
+    await rm(storeRoot, { recursive: true, force: true }).catch(() => {})
+    await mkdir(storeRoot, { recursive: true })
+    const ctx = createStandardContext(storeRoot, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+    const callLog: CallLog = { order: [] }
+    const captured: { verifyDirectory?: string } = {}
+
+    const run = await implementationRunStore.createRun(ctx, {
+      feature: FEATURE_A,
+      sessionID: 'session-run-root',
+      messageID: 'message-run-root',
+      agent: 'build',
+      directory: storeRoot,
+      worktree: executionRoot,
+      backend: 'opencode',
+      backendCommand: 'Use OpenCode native build agent',
+      status: 'quality_gate_pending',
+      containerMode: 'worktree',
+      eventsPath: '.sisyphus/openflow/events/run-execution-root.jsonl',
+      observationsPath: '.sisyphus/openflow/observations/run-execution-root.jsonl',
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: 'session-run-root' }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: async (verifyCtx, feature) => {
+        captured.verifyDirectory = verifyCtx.directory
+        callLog.order.push('verify')
+        return createMockVerifyWithReadiness({ order: [] }, 'ready')({ ...verifyCtx }, feature)
+      },
+    })
+
+    const updatedRun = await implementationRunStore.getRun(ctx, run.runID)
+    const events = await readRunEvents(storeRoot, run.eventsPath)
+
+    expect(output).toContain('### Readiness')
+    expect(captured.verifyDirectory).toBe(executionRoot)
+    expect(callLog.order).toEqual(['harden', 'verify'])
+    expect(updatedRun?.status).toBe('ready_for_archive')
+    expect(events.map(event => event.type)).toEqual(['quality_gate_started', 'quality_gate_completed'])
+    expect(events[1]?.result).toBe('ready')
+
+    await rm(executionRoot, { recursive: true, force: true }).catch(() => {})
+    await rm(storeRoot, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('active ImplementationRun readiness results transition to final run statuses', async () => {
+    const cases: Array<{ readiness: 'ready_with_doc_updates' | 'not_ready' | 'needs_decision'; status: string }> = [
+      { readiness: 'ready_with_doc_updates', status: 'ready_for_archive' },
+      { readiness: 'not_ready', status: 'blocked' },
+      { readiness: 'needs_decision', status: 'blocked' },
+    ]
+
+    for (const testCase of cases) {
+      const executionRoot = await createGitFixture(`run-status-${testCase.readiness}`, 'multi-file')
+      const ctx = createStandardContext(executionRoot, {
+        harden: { ...defaultConfig.harden, enabled: false },
+      })
+      const callLog: CallLog = { order: [] }
+
+      const run = await implementationRunStore.createRun(ctx, {
+        feature: FEATURE_A,
+        sessionID: `session-${testCase.readiness}`,
+        messageID: `message-${testCase.readiness}`,
+        agent: 'build',
+        directory: executionRoot,
+        backend: 'opencode',
+        backendCommand: 'Use OpenCode native build agent',
+        status: 'quality_gate_pending',
+        containerMode: 'session',
+        eventsPath: `.sisyphus/openflow/events/run-status-${testCase.readiness}.jsonl`,
+        observationsPath: `.sisyphus/openflow/observations/run-status-${testCase.readiness}.jsonl`,
+      })
+      expect((await implementationRunStore.getActiveRun(ctx, FEATURE_A, `session-${testCase.readiness}`))?.directory).toBe(executionRoot)
+
+      const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: `session-${testCase.readiness}` }, {
+        overrideHarden: createMockHarden(callLog),
+        overrideVerify: createMockVerifyWithReadiness(callLog, testCase.readiness),
+      })
+
+      const updatedRun = await implementationRunStore.getRun(ctx, run.runID)
+      const events = await readRunEvents(executionRoot, run.eventsPath)
+
+      expect(output).toContain(testCase.readiness)
+      expect(events.map(event => event.type)).toEqual(['quality_gate_started', 'quality_gate_completed'])
+      expect(events[1]?.result).toBe(testCase.readiness)
+      expect(updatedRun?.status).toBe(testCase.status)
+
+      await rm(executionRoot, { recursive: true, force: true }).catch(() => {})
+    }
   }, 120000)
 
   test('not_applicable quality gate does not change implementation state', async () => {

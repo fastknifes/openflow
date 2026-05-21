@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { type AcceptanceState, type CurrentPromotionSuggestion, type OpenFlowContext, type PhasedChanges, VerifyReadinessStatus } from '../types.js'
+import { type AcceptanceState, type CurrentPromotionSuggestion, type ImplementationRun, type OpenFlowContext, type PhasedChanges, VerifyReadinessStatus } from '../types.js'
 import { sanitizeFeatureName, createSafePath, escapeMarkdown } from '../utils/security.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { fileExists } from '../hooks/file-utils.js'
@@ -30,6 +30,7 @@ import {
 } from '../config.js'
 import { stripOpenFlowCommandTokens } from './verify.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
+import { implementationRunStore } from '../utils/implementation-run.js'
 
 const RECENT_BUILDS_WINDOW = 5
 
@@ -47,6 +48,11 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   }
 
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
+  const implementationRun = await resolveArchiveImplementationRun(ctx, sanitizedFeature)
+  if (implementationRun && !isArchiveAllowedRunStatus(implementationRun.status)) {
+    return formatImplementationRunArchiveBlock(sanitizedFeature, implementationRun.status)
+  }
+
   const archiveMode = await detectMode(ctx, sanitizedFeature)
 
   const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${sanitizedFeature}.md`)
@@ -258,6 +264,13 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     await cleanupBuildData(ctx.directory)
     await cleanupArchivedChangeWorkspaceSources(sourceChangeWorkspacePath, archivedChangeWorkspaceSources)
 
+    if (implementationRun) {
+      if (implementationRun.status === 'ready_for_archive') {
+        await implementationRunStore.updateRun(ctx, implementationRun.runID, { status: 'archived' })
+      }
+      await recordArchiveRunEvent(ctx, implementationRun)
+    }
+
     return formatArchiveResult(
       sanitizedFeature,
       finalArchiveDir,
@@ -349,6 +362,44 @@ async function cleanupArchivedChangeWorkspaceSources(changeWorkspacePath: string
       error: error instanceof Error ? error.message : String(error),
     })
   }
+}
+
+async function resolveArchiveImplementationRun(ctx: OpenFlowContext, feature: string): Promise<ImplementationRun | null> {
+  const activeRun = await implementationRunStore.getActiveRun(ctx, feature)
+  if (activeRun) {
+    return activeRun
+  }
+
+  const runs = await implementationRunStore.listRuns(ctx, { feature })
+  return runs[0] ?? null
+}
+
+function isArchiveAllowedRunStatus(status: ImplementationRun['status']): boolean {
+  return status === 'ready_for_archive' || status === 'archived'
+}
+
+async function recordArchiveRunEvent(ctx: OpenFlowContext, run: ImplementationRun): Promise<void> {
+  const eventsPath = path.isAbsolute(run.eventsPath) ? run.eventsPath : path.join(ctx.directory, run.eventsPath)
+  const event = {
+    type: 'archive_completed',
+    runID: run.runID,
+    feature: run.feature,
+    sessionID: run.sessionID,
+    timestamp: new Date().toISOString(),
+  }
+
+  await fs.mkdir(path.dirname(eventsPath), { recursive: true })
+  await fs.appendFile(eventsPath, `${JSON.stringify(event)}\n`, 'utf8')
+}
+
+function formatImplementationRunArchiveBlock(feature: string, status: ImplementationRun['status']): string {
+  return `## Archive Blocked
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive stopped because the implementation run status is **${escapeMarkdown(status)}**.
+
+Archive requires a completed and verified implementation run. Please run \`openflow-quality-gate\` for **${escapeMarkdown(feature)}** and archive again after it reports ready.`
 }
 
 function trackArchivedChangeWorkspaceSource(archivedSources: Set<string>, changeWorkspacePath: string, sourcePath: string): void {

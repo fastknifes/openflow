@@ -1,14 +1,15 @@
 import { execSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
-import { join } from 'node:path'
-import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, OpenFlowConfig, OpenFlowContext, QualityGateApplicabilityResult, QualityGateContextKind, QualityGateTaskKind } from '../types.js'
+import { dirname, isAbsolute, join } from 'node:path'
+import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, ImplementationRun, ImplementationRunStatus, OpenFlowConfig, OpenFlowContext, QualityGateApplicabilityResult, QualityGateContextKind, QualityGateTaskKind } from '../types.js'
 import { VerifyReadinessStatus } from '../types.js'
 import type { EvidenceFreshnessResult, VerifyResult } from '../types.js'
 import { handleHarden } from './harden.js'
 import { handleVerify } from './verify.js'
 import { getPlanPath, getChangeBehaviorPath, getChangeWorkspacePath } from '../config.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
+import { implementationRunStore, isTerminalStatus } from '../utils/implementation-run.js'
 import { generateBehaviorCodeMapper, saveImplementationMapperDocument } from '../phases/archive/index.js'
 import { loadAcceptanceState, markImplementationBlocked, markImplementationVerified, saveAcceptanceState } from '../utils/acceptance-state.js'
 import { decideQualityGateRisk, type QualityGateRiskInput } from '../utils/risk-assessment.js'
@@ -87,15 +88,33 @@ export async function handleQualityGate(
   internalOpts?: InternalOptions,
 ): Promise<string> {
   const featureArg = args?.feature?.trim()
-  const sessionID = args?.sessionID
+  const requestedSessionID = args?.sessionID
 
-  // ── 1. Resolve feature ──────────────────────────────────────────────────
-  let resolvedFeature = featureArg || await findActiveFeature(ctx)
-  let sanitizedFeature = resolvedFeature ? sanitizeFeatureName(resolvedFeature) : undefined
+  let activeRun = await findActiveImplementationRun(ctx, featureArg ? sanitizeFeatureName(featureArg) : undefined, requestedSessionID)
+  const sessionID = requestedSessionID ?? activeRun?.sessionID
+  let runCompletionRecorded = false
+  const executionRoot = activeRun ? resolveImplementationRunExecutionRoot(ctx, activeRun) : ctx.directory
+  const executionCtx: OpenFlowContext = activeRun
+    ? {
+        ...ctx,
+        directory: executionRoot,
+        worktree: activeRun.worktree || executionRoot,
+      }
+    : ctx
+
+  if (activeRun) {
+    activeRun = await implementationRunStore.updateRun(ctx, activeRun.runID, { status: 'quality_gate_running' })
+    await appendQualityGateRunEvent(ctx, activeRun, { type: 'quality_gate_started' })
+  }
+
+  try {
+    // ── 1. Resolve feature ────────────────────────────────────────────────
+    let resolvedFeature = activeRun?.feature || featureArg || await findActiveFeature(executionCtx)
+    let sanitizedFeature = resolvedFeature ? sanitizeFeatureName(resolvedFeature) : undefined
 
   // Fallback: try acceptance state
   if (!sanitizedFeature) {
-    const acceptanceState = await loadAcceptanceState(ctx.directory)
+    const acceptanceState = await loadAcceptanceState(executionCtx.directory)
     if (acceptanceState?.feature) {
       sanitizedFeature = sanitizeFeatureName(acceptanceState.feature)
       resolvedFeature = acceptanceState.feature
@@ -103,23 +122,23 @@ export async function handleQualityGate(
   }
 
   // ── 2. Determine context kind ───────────────────────────────────────────
-  const contextKind = await resolveContextKind(ctx, sanitizedFeature)
+  const contextKind = await resolveContextKind(executionCtx, sanitizedFeature)
   const limitedContext = contextKind === 'limited' || contextKind === 'none'
 
-  const acceptanceState = await loadAcceptanceState(ctx.directory)
+  const acceptanceState = await loadAcceptanceState(executionCtx.directory)
   const implementationScopeFiles = getMatchingImplementationScopeFiles(acceptanceState, sanitizedFeature, sessionID)
 
   // ── 3. Capture workspace state (tracked diff + untracked files) ─────────
-  const fullDiffText = readGitDiff(ctx.directory)
-  const allUntrackedFiles = readGitUntracked(ctx.directory)
+  const fullDiffText = readGitDiff(executionCtx.directory)
+  const allUntrackedFiles = readGitUntracked(executionCtx.directory)
   const scopedWorkspace = await scopeQualityGateWorkspace(
-    ctx.directory,
+    executionCtx.directory,
     sanitizedFeature,
     contextKind,
     fullDiffText,
     allUntrackedFiles,
     implementationScopeFiles,
-    ctx.config,
+    executionCtx.config,
   )
   const diffText = scopedWorkspace.diffText
   const untrackedFiles = scopedWorkspace.untrackedFiles
@@ -138,11 +157,11 @@ export async function handleQualityGate(
 
   if (acceptanceState && acceptanceState.feature === sanitizedFeature) {
     acceptanceState.qualityGateApplicability = applicability
-    await saveAcceptanceState(ctx.directory, acceptanceState)
+    await saveAcceptanceState(executionCtx.directory, acceptanceState)
   }
 
   if (applicability.status === 'not_applicable' || applicability.status === 'needs_workflow_stage') {
-    return buildApplicabilityOnlyReport({
+    const report = buildApplicabilityOnlyReport({
       feature: sanitizedFeature || '(unresolved)',
       contextKind,
       limitedContext,
@@ -151,6 +170,11 @@ export async function handleQualityGate(
       omittedFiles: scopedWorkspace.omittedFiles,
       diffLines,
     })
+    if (activeRun) {
+      activeRun = await recordQualityGateRunCompletion(ctx, activeRun, VerifyReadinessStatus.NotReady, 'blocked')
+      runCompletionRecorded = true
+    }
+    return report
   }
 
   // ── 4. Risk assessment ──────────────────────────────────────────────────
@@ -162,8 +186,8 @@ export async function handleQualityGate(
 
   // ── 5. Evidence freshness check ─────────────────────────────────────────
   const workspaceState = buildScopedWorkspaceState(
-    ctx.directory,
-    captureCurrentWorkspaceState(ctx.directory),
+    executionCtx.directory,
+    captureCurrentWorkspaceState(executionCtx.directory),
     changedFiles,
     scopedWorkspace.scoped,
   )
@@ -174,13 +198,13 @@ export async function handleQualityGate(
   let hardenStatus: string | undefined
   let hardenDecision: 'none' | 'risk-based' | 'final' = 'none'
 
-  if (riskResult.shouldHarden && ctx.config.harden.enabled) {
+  if (riskResult.shouldHarden && executionCtx.config.harden.enabled) {
     hardenDecision = 'risk-based'
     try {
       if (internalOpts?.overrideHarden) {
-        hardenOutput = await internalOpts.overrideHarden(ctx, sanitizedFeature, sessionID)
+        hardenOutput = await internalOpts.overrideHarden(executionCtx, sanitizedFeature, sessionID)
       } else {
-        hardenOutput = await handleHarden(ctx, sanitizedFeature, undefined, sessionID)
+        hardenOutput = await handleHarden(executionCtx, sanitizedFeature, undefined, sessionID)
       }
       hardenStatus = extractHardenStatus(hardenOutput)
     } catch (err) {
@@ -202,14 +226,14 @@ export async function handleQualityGate(
       // Preserve accepted failures for mock verify too; stale-evidence re-verify
       // should not silently clear a previous --accept-failures decision.
       const mockAcceptFailures = acceptanceState?.acceptedFailures === true ? true : undefined
-      verifyOutput = await internalOpts.overrideVerify(ctx, sanitizedFeature, mockAcceptFailures, sessionID)
+      verifyOutput = await internalOpts.overrideVerify(executionCtx, sanitizedFeature, mockAcceptFailures, sessionID)
     } else if (freshnessResult.status === 'fresh' && acceptanceState?.verifyResult) {
       verifyOutput = buildVerifyOutputFromResult(acceptanceState.verifyResult, sanitizedFeature)
     } else {
       // Preserve accepted failures from a previous explicit --accept-failures
       // run so that stale-evidence re-verify does not silently clear them.
       const preserveAccepted = acceptanceState?.acceptedFailures === true ? true : undefined
-      verifyOutput = await handleVerify(ctx, sanitizedFeature, preserveAccepted, undefined, sessionID)
+      verifyOutput = await handleVerify(executionCtx, sanitizedFeature, preserveAccepted, undefined, sessionID)
     }
   } catch (err) {
     verifyOutput = `## Verify\n\nError: verify execution failed: ${err instanceof Error ? err.message : String(err)}`
@@ -224,34 +248,34 @@ export async function handleQualityGate(
   if (applicability.status === 'applicable') {
     const stateChangedFiles = implementationScopeFiles ?? changedFiles
     if (readiness === 'ready' || readiness === 'ready_with_doc_updates') {
-      await markImplementationVerified(ctx.directory, { changedFiles: stateChangedFiles })
+      await markImplementationVerified(executionCtx.directory, { changedFiles: stateChangedFiles })
     } else if (readiness === 'not_ready' || readiness === 'needs_decision') {
-      await markImplementationBlocked(ctx.directory, { changedFiles: stateChangedFiles, fromVerify: true })
+      await markImplementationBlocked(executionCtx.directory, { changedFiles: stateChangedFiles, fromVerify: true })
     }
   }
 
-  const latestAcceptanceState = await loadAcceptanceState(ctx.directory)
+  const latestAcceptanceState = await loadAcceptanceState(executionCtx.directory)
   if (latestAcceptanceState && latestAcceptanceState.feature === sanitizedFeature) {
     latestAcceptanceState.qualityGateApplicability = applicability
     if (hardenOutput.trim()) {
       latestAcceptanceState.hardenSummary = buildHardenSummaryForAcceptanceState(hardenStatus, hardenOutput, hardenGate.findings, readiness)
     }
-    await saveAcceptanceState(ctx.directory, latestAcceptanceState)
+    await saveAcceptanceState(executionCtx.directory, latestAcceptanceState)
   }
 
   // ── 9. Generate implementation mapper if behavior doc exists ────────────
   if (sanitizedFeature && (readiness === 'ready' || readiness === 'ready_with_doc_updates')) {
     try {
-      const behaviorPath = await getChangeBehaviorPath(ctx.directory, sanitizedFeature, ctx.config)
+      const behaviorPath = await getChangeBehaviorPath(executionCtx.directory, sanitizedFeature, executionCtx.config)
       await fs.access(behaviorPath)
-      const changeWorkspacePath = await getChangeWorkspacePath(ctx.directory, sanitizedFeature, ctx.config)
+      const changeWorkspacePath = await getChangeWorkspacePath(executionCtx.directory, sanitizedFeature, executionCtx.config)
       const fileChanges: Array<{ filePath: string; tool: 'write' | 'edit' }> = changedFiles.map(filePath => ({
         filePath,
         tool: 'edit' as const,
       }))
       const mapperContent = await generateBehaviorCodeMapper({
         feature: sanitizedFeature,
-        projectDir: ctx.directory,
+        projectDir: executionCtx.directory,
         behaviorPath,
         changes: fileChanges,
         readiness,
@@ -263,6 +287,11 @@ export async function handleQualityGate(
   }
 
   // ── 10. Build markdown report ───────────────────────────────────────────
+  if (activeRun) {
+    activeRun = await recordQualityGateRunCompletion(ctx, activeRun, readiness, getImplementationRunStatusForReadiness(readiness))
+    runCompletionRecorded = true
+  }
+
   return buildQualityGateReport({
     feature: sanitizedFeature || '(unresolved)',
     contextKind,
@@ -283,6 +312,86 @@ export async function handleQualityGate(
     omittedFiles: scopedWorkspace.omittedFiles,
     diffLines,
   })
+  } catch (error) {
+    if (activeRun && !runCompletionRecorded) {
+      await recordQualityGateRunCompletion(ctx, activeRun, 'error', 'blocked')
+    }
+    throw error
+  }
+}
+
+type QualityGateRunEvent = {
+  type: 'quality_gate_started' | 'quality_gate_completed'
+  runID: string
+  sessionID: string
+  timestamp: string
+  result?: string
+}
+
+async function findActiveImplementationRun(
+  ctx: OpenFlowContext,
+  feature: string | undefined,
+  sessionID: string | undefined,
+): Promise<ImplementationRun | null> {
+  if (feature) {
+    const featureRun = await implementationRunStore.getActiveRun(ctx, feature, sessionID)
+    if (featureRun) {
+      return featureRun
+    }
+  }
+
+  if (sessionID) {
+    const runs = await implementationRunStore.listRuns(ctx, { sessionID })
+    return runs.find(run => !isTerminalStatus(run.status)) ?? null
+  }
+
+  return null
+}
+
+function resolveImplementationRunExecutionRoot(ctx: OpenFlowContext, run: ImplementationRun): string {
+  if (run.worktree && run.directory === ctx.directory) {
+    return run.worktree
+  }
+  return run.directory || ctx.directory
+}
+
+async function appendQualityGateRunEvent(
+  ctx: OpenFlowContext,
+  run: ImplementationRun,
+  event: Omit<QualityGateRunEvent, 'runID' | 'sessionID' | 'timestamp'>,
+): Promise<void> {
+  const eventsPath = resolveRunLogPath(ctx, run.eventsPath)
+  const nextEvent: QualityGateRunEvent = {
+    ...event,
+    runID: run.runID,
+    sessionID: run.sessionID,
+    timestamp: new Date().toISOString(),
+  }
+
+  await fs.mkdir(dirname(eventsPath), { recursive: true })
+  await fs.appendFile(eventsPath, `${JSON.stringify(nextEvent)}\n`, 'utf8')
+}
+
+async function recordQualityGateRunCompletion(
+  ctx: OpenFlowContext,
+  run: ImplementationRun,
+  result: string,
+  status: ImplementationRunStatus,
+): Promise<ImplementationRun> {
+  const updated = await implementationRunStore.updateRun(ctx, run.runID, { status })
+  await appendQualityGateRunEvent(ctx, updated, { type: 'quality_gate_completed', result })
+  return updated
+}
+
+function resolveRunLogPath(ctx: OpenFlowContext, filePath: string): string {
+  return isAbsolute(filePath) ? filePath : join(ctx.directory, filePath)
+}
+
+function getImplementationRunStatusForReadiness(readiness: string): ImplementationRunStatus {
+  if (readiness === 'ready' || readiness === 'ready_with_doc_updates') {
+    return 'ready_for_archive'
+  }
+  return 'blocked'
 }
 
 interface ApplicabilityInput {
