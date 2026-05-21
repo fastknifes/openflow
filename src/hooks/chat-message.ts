@@ -38,7 +38,8 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     const rawInput = input as Record<string, unknown>
     const rawOutput = output as unknown as Record<string, unknown>
     const role = getMessageRole(rawOutput)
-    const isUserMessage = !role || role === 'user'
+    // System-role messages are never processed by the hook
+    if (role === 'system') return
 
     const message = extractMessageText(rawOutput)
     if (!message) return
@@ -48,7 +49,7 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
 
     if (await dispatchOpenFlowCommand(ctx, input, output, message)) return
 
-    const activeIssueWorkspace = await findActiveIssueWorkspace(ctx.directory)
+    const activeIssueWorkspace = await findActiveIssueWorkspace(ctx.directory, input.sessionID)
     if (activeIssueWorkspace) {
       if (!hasNotice(output, ISSUE_ACTIVE_NOTICE_TITLE)) {
         appendGuardMessage(output, `${ISSUE_ACTIVE_NOTICE_TITLE}
@@ -96,7 +97,7 @@ Recommended issue flow:
         return
       }
 
-      const activeSession = await loadActiveFeatureSession(ctx.directory, activeFeature)
+      const activeSession = await loadActiveFeatureSession(ctx.directory, activeFeature, ctx.config.paths.feature_state)
       if (!activeSession || !isAwaitingFormalAnswer(activeSession)) {
         return
       }
@@ -123,6 +124,10 @@ Recommended issue flow:
       if (!looksLikePostFeatureAction(message, recentCompletedFeature)) {
         await clearRecentFeatureCompletion(ctx.directory, input.sessionID)
       }
+    }
+
+    if (shouldSuppressFeatureSuggestionForActiveDesignFlow(rawInput, rawOutput, message)) {
+      return
     }
 
     const closureDecision = detectClosureReady(ctx, message)
@@ -257,9 +262,44 @@ function looksLikePostFeatureAction(message: string, feature: string): boolean {
   return /(实现|开始做|开始开发|编码|落地|archive|归档|verify|验证|start-work|ulw-loop|implement|build|code)/i.test(message)
 }
 
-async function loadActiveFeatureSession(directory: string, feature: string) {
+function shouldSuppressFeatureSuggestionForActiveDesignFlow(
+  input: Record<string, unknown>,
+  output: Record<string, unknown>,
+  message: string,
+): boolean {
+  const signalText = [
+    message,
+    readString(input, ['agent']),
+    readString(output, ['agent']),
+    readString(input, ['message', 'agent']),
+    readString(output, ['message', 'agent']),
+    readString(input, ['metadata', 'agent']),
+    readString(output, ['metadata', 'agent']),
+    readString(output, ['message', 'metadata', 'agent']),
+    readString(output, ['message', 'metadata', 'skill']),
+    readString(output, ['message', 'metadata', 'command']),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join('\n')
+
+  return /(?:prometheus|plan builder|openflow-brainstorm|brainstorm|openflow-writing-plan|writing[-\s]?plan)/iu.test(signalText)
+    || /(?:\.sisyphus[\\/](?:drafts|plans)|规划草稿|执行计划|实现计划|开发计划|planning draft|development plan)/iu.test(signalText)
+    || /OpenFlow command:\s*\/openflow-(?:issue|feature|writing-plan)\b/iu.test(signalText)
+}
+
+function readString(source: Record<string, unknown>, path: string[]): string | undefined {
+  let current: unknown = source
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[key]
+  }
+
+  return typeof current === 'string' ? current : undefined
+}
+
+async function loadActiveFeatureSession(directory: string, feature: string, featureStateDir = '.sisyphus/feature') {
   try {
-    const filePath = path.join(directory, '.sisyphus', 'feature', `${feature}.json`)
+    const filePath = path.join(directory, featureStateDir, `${feature}.json`)
     const content = await fs.readFile(filePath, 'utf-8')
     return normalizeFeatureSession(feature, JSON.parse(content) as unknown)
   } catch {

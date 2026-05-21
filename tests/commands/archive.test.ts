@@ -104,7 +104,7 @@ async function setupReadinessArchiveFixture(
     worktree: testDir,
     config: {
       ...defaultConfig,
-      archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: true },
+      archive: { ...defaultConfig.archive, drift_check: true },
     },
   }
 }
@@ -139,12 +139,12 @@ describe('archive command', () => {
     await rm(testDir, { recursive: true, force: true })
 
     // Create requirements documents
-    const reqDir = join(testDir, 'docs', 'current', 'requirements', 'req-feature')
+    const reqDir = join(testDir, 'docs', 'changes', 'req-feature')
     await mkdir(reqDir, { recursive: true })
     await writeFile(join(reqDir, '20260322-prd.md'), '# Requirements\n\nTest requirements document', 'utf-8')
 
     // Create design documents
-    const designDir = join(testDir, 'docs', 'current', 'design', 'req-feature')
+    const designDir = join(testDir, 'docs', 'changes', 'req-feature')
     await mkdir(designDir, { recursive: true })
     await writeFile(join(designDir, '20260322-design.md'), '# Design', 'utf-8')
 
@@ -166,12 +166,8 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        feature: { 
-          ...defaultConfig.feature, 
-          output_dir: 'docs/current/design',
-          prd_output_dir: 'docs/current/requirements',
-        },
+        archive: defaultConfig.archive,
+        feature: defaultConfig.feature,
       },
     }
 
@@ -221,8 +217,8 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
+        archive: defaultConfig.archive,
+        feature: defaultConfig.feature,
       },
     }
 
@@ -261,8 +257,8 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
+        archive: defaultConfig.archive,
+        feature: defaultConfig.feature,
       },
     }
 
@@ -280,12 +276,13 @@ describe('archive command', () => {
     await rm(testDir, { recursive: true, force: true })
   })
 
-  test('uses session phase split and writes drift section when enabled', async () => {
+  test('copies pre-existing implementation-mapper.md from changes workspace', async () => {
     const testDir = join(process.cwd(), '.test-archive-session-drift')
     await rm(testDir, { recursive: true, force: true })
 
-    await mkdir(join(testDir, 'docs', 'current', 'design', 'session-feature'), { recursive: true })
-    await writeFile(join(testDir, 'docs', 'current', 'design', 'session-feature', '20260312-design.md'), '# Design\n\n`OldApi`', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'session-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'session-feature', '20260312-design.md'), '# Design\n\n`OldApi`', 'utf-8')
+    await writeFile(join(testDir, 'docs', 'changes', 'session-feature', 'implementation-mapper.md'), '# session-feature - Implementation Mapper\n\nsrc/session-feature.ts\n', 'utf-8')
     await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
     await writeFile(join(testDir, '.sisyphus', 'plans', 'session-feature.md'), '# plan', 'utf-8')
 
@@ -327,9 +324,9 @@ describe('archive command', () => {
       client,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
         acceptance: { ...defaultConfig.acceptance, drift_detection: true },
-        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
+        feature: defaultConfig.feature,
       },
     }
 
@@ -347,7 +344,7 @@ describe('archive command', () => {
     await rm(testDir, { recursive: true, force: true })
   })
 
-  test('writes requirement-first implementation traceability with real symbols', async () => {
+  test('copies implementation-mapper.md with traceability content from changes workspace', async () => {
     const testDir = join(process.cwd(), '.test-archive-traceability')
     await rm(testDir, { recursive: true, force: true })
 
@@ -361,6 +358,12 @@ describe('archive command', () => {
     await writeFile(
       join(testDir, 'docs', 'changes', 'trace-feature', 'design.md'),
       '# Design\n- This design fallback should not be primary when requirements exist\n',
+      'utf-8'
+    )
+
+    await writeFile(
+      join(testDir, 'docs', 'changes', 'trace-feature', 'implementation-mapper.md'),
+      '# trace-feature - Implementation Mapper\n\n| 追溯来源 | 需求/决策 | 代码文件 | 关键符号 | 关联说明 | 验证证据 |\n|----------|-----------|----------|----------|----------|----------|\n| requirement: prd.md → Acceptance Criteria | Generated archive traceability links requirement items to code | src/trace-feature.ts | generateArchiveTraceability, extractRequirementEvidence |  | no verification evidence recorded |\n',
       'utf-8'
     )
 
@@ -387,12 +390,8 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
-        feature: {
-          ...defaultConfig.feature,
-          output_dir: 'docs/current/design',
-          prd_output_dir: 'docs/current/requirements',
-        },
+        archive: { ...defaultConfig.archive, drift_check: false },
+        feature: defaultConfig.feature,
       },
     }
 
@@ -409,6 +408,111 @@ describe('archive command', () => {
     expect(mapper).not.toContain('Step 1')
     expect(mapper).not.toContain('*auto-detect*')
     expect(mapper).not.toContain('This design fallback should not be primary when requirements exist')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('copies behavior evidence implementation-mapper.md from changes workspace', async () => {
+    const testDir = join(process.cwd(), '.test-archive-behavior-evidence-traceability')
+    await rm(testDir, { recursive: true, force: true })
+
+    const feature = 'behavior-evidence-feature'
+    const changeDir = join(testDir, 'docs', 'changes', feature)
+    await mkdir(changeDir, { recursive: true })
+    await writeFile(join(changeDir, 'design.md'), '# Design\n\nBehavior evidence traceability fixture', 'utf-8')
+    await writeFile(
+      join(changeDir, 'behavior.md'),
+      [
+        '# Behavior',
+        '',
+        '### Scenario: SC-001 Core archive behavior',
+        '',
+        'Given:',
+        '- archive has a behavior contract',
+        'When:',
+        '- implementation mapper is generated',
+        'Then:',
+        '- evidence traceability is preserved',
+        '',
+        '### Boundary: SC-002 Optional advisory behavior',
+        '',
+        'Given:',
+        '- optional behavior lacks blocking evidence',
+        'When:',
+        '- archive maps behavior scenarios',
+        'Then:',
+        '- it remains advisory',
+        '',
+        '## Evidence Mapping',
+        '',
+        '| Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |',
+        '|-------------|-------------|--------------|---------------|----------------|-----------------------|-----------|--------|',
+        '| SC-001 | critical | .sisyphus/evidence/SC-001-core-archive-behavior.md | test | exact | N/A | fresh | verified |',
+      ].join('\n'),
+      'utf-8',
+    )
+    await writeFile(
+      join(changeDir, 'implementation-mapper.md'),
+      [
+        '# behavior-evidence-feature - Implementation Mapper',
+        '',
+        '**Date**: 2026-04-19',
+        '**Status**: Archived',
+        '',
+        '## 3. 行为到实现映射',
+        '',
+        '| Behavior Scenario | Type | Expected Behavior | Evidence | Coverage Level | Freshness | Status | Code Files | Notes |',
+        '|------------------|------|-------------------|----------|----------------|-----------|--------|------------|-------|',
+        '| Core archive behavior | scenario | Given archive has a behavior contract / When implementation mapper is generated / Then evidence traceability is preserved | .sisyphus/evidence/SC-001-core-archive-behavior.md | exact | fresh | verified | src/archive-behavior.ts | Critical behavior scenario. |',
+        '| Optional advisory behavior | boundary | Given optional behavior lacks blocking evidence / When archive maps behavior scenarios / Then it remains advisory | N/A | not_applicable | unknown | not_applicable | src/archive-behavior.ts | Boundary scenario; should-pass evidence; advisory. |',
+        '',
+        '### Evidence Files',
+        '',
+        '- .sisyphus/evidence/SC-001-core-archive-behavior.md',
+      ].join('\n'),
+      'utf-8',
+    )
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', `${feature}.md`), '# plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260419-000001'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'builds', 'build-20260419-000001', 'changes.json'),
+      JSON.stringify([{ filePath: 'src/archive-behavior.ts', tool: 'edit', timestamp: Date.now() }]),
+      'utf-8',
+    )
+    await mkdir(join(testDir, '.sisyphus', 'evidence'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'evidence', 'SC-001-core-archive-behavior.md'),
+      '# SC-001 evidence',
+      'utf-8',
+    )
+
+    const ctx: OpenFlowContext = {
+      ...createContext(),
+      directory: testDir,
+      worktree: testDir,
+      config: {
+        ...defaultConfig,
+        archive: { ...defaultConfig.archive, drift_check: false },
+        feature: defaultConfig.feature,
+      },
+    }
+
+    await handleArchive(ctx, feature)
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    const mapper = await readFile(join(archiveDir, 'implementation-mapper.md'), 'utf-8')
+    expect(mapper).toContain('行为到实现映射')
+    expect(mapper).toContain('| Behavior Scenario | Type | Expected Behavior | Evidence | Coverage Level | Freshness | Status | Code Files | Notes |')
+    expect(mapper).toContain('.sisyphus/evidence/SC-001-core-archive-behavior.md')
+    expect(mapper).toContain('| Core archive behavior | scenario |')
+    expect(mapper).toContain('| exact | fresh | verified | src/archive-behavior.ts |')
+    expect(mapper).toContain('| Optional advisory behavior | boundary |')
+    expect(mapper).toContain('| N/A | not_applicable | unknown | not_applicable | src/archive-behavior.ts |')
+    expect(mapper).toContain('advisory')
+    expect(mapper).toContain('### Evidence Files')
+    expect(mapper).toContain('- .sisyphus/evidence/SC-001-core-archive-behavior.md')
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -438,7 +542,7 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -488,7 +592,7 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -538,7 +642,7 @@ describe('archive command', () => {
     expect(result).not.toContain('acceptance readiness is missing')
 
     const archiveDir = await resolveArchiveDir(testDir, feature)
-    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).rejects.toBeDefined()
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -548,7 +652,7 @@ describe('archive command', () => {
     const testDir = join(process.cwd(), '.test-archive-readiness-doc-updates')
     const ctx = await setupReadinessArchiveFixture(testDir, feature, {
       readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
-      pendingDocUpdates: [{ file: 'docs/current/design/readiness-doc-updates/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
+      pendingDocUpdates: [{ file: 'docs/changes/readiness-doc-updates/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
     })
 
     const result = await handleArchive(ctx, feature)
@@ -572,7 +676,7 @@ describe('archive command', () => {
     expect(secondResult).toContain('confirmed doc-update reconciliation path')
 
     const archiveDir = await resolveArchiveDir(testDir, feature)
-    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).rejects.toBeDefined()
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -678,7 +782,7 @@ describe('archive command', () => {
     expect(result).toContain('Archive Complete')
 
     const archiveDir = await resolveArchiveDir(testDir, feature)
-    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).rejects.toBeDefined()
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -806,7 +910,7 @@ describe('archive command', () => {
     const testDir = join(process.cwd(), '.test-archive-readiness-doc-updates-declined')
     const ctx = await setupReadinessArchiveFixture(testDir, feature, {
       readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
-      pendingDocUpdates: [{ file: 'docs/current/design/readiness-doc-updates-declined/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
+      pendingDocUpdates: [{ file: 'docs/changes/readiness-doc-updates-declined/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
     })
 
     await saveAcceptanceState(testDir, {
@@ -814,7 +918,7 @@ describe('archive command', () => {
       phase: 'acceptance',
       phaseStartedAt: '2026-04-21T00:00:00.000Z',
       readiness: VerifyReadinessStatus.ReadyWithDocUpdates,
-      pendingDocUpdates: [{ file: 'docs/current/design/readiness-doc-updates-declined/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
+      pendingDocUpdates: [{ file: 'docs/changes/readiness-doc-updates-declined/design.md', timestamp: '2026-04-21T00:00:00.000Z' }],
       archiveUsedDocUpdateConfirmPath: true,
       archiveDocUpdateConfirmationStatus: 'declined',
       waitingForDocUpdateConfirm: false,
@@ -838,7 +942,7 @@ describe('archive command', () => {
     expect(result).toContain('acceptance readiness is missing')
 
     const archiveDir = await resolveArchiveDir(testDir, feature)
-    await expect(access(join(archiveDir, 'implementation-mapper.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'implementation-mapper.md'))).rejects.toBeDefined()
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -869,12 +973,8 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
-        feature: {
-          ...defaultConfig.feature,
-          output_dir: 'docs/current/design',
-          prd_output_dir: 'docs/current/requirements',
-        },
+        archive: { ...defaultConfig.archive, drift_check: false },
+        feature: defaultConfig.feature,
       },
     }
 
@@ -906,8 +1006,8 @@ describe('archive command', () => {
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive' },
-        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
+        archive: defaultConfig.archive,
+        feature: defaultConfig.feature,
       },
     }
 
@@ -1077,7 +1177,7 @@ Prevents stale state from bypassing semantic checks.
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -1207,7 +1307,7 @@ Enforce synchronous cache invalidation barrier after write commit.
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -1284,7 +1384,7 @@ Enforce synchronous cache invalidation barrier after write commit.
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -1300,8 +1400,8 @@ Enforce synchronous cache invalidation barrier after write commit.
     const testDir = join(process.cwd(), '.test-archive-drift-pause')
     await rm(testDir, { recursive: true, force: true })
 
-    await mkdir(join(testDir, 'docs', 'current', 'design', 'pause-feature'), { recursive: true })
-    await writeFile(join(testDir, 'docs', 'current', 'design', 'pause-feature', '20260312-design.md'), '# Design\n\n`OldApi`', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'pause-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'pause-feature', '20260312-design.md'), '# Design\n\n`OldApi`', 'utf-8')
     await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
     await writeFile(join(testDir, '.sisyphus', 'plans', 'pause-feature.md'), '# plan', 'utf-8')
 
@@ -1343,9 +1443,9 @@ Enforce synchronous cache invalidation barrier after write commit.
       client,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: true },
+        archive: { ...defaultConfig.archive, drift_check: true },
         acceptance: { ...defaultConfig.acceptance, drift_detection: true },
-        feature: { ...defaultConfig.feature, output_dir: 'docs/current/design' },
+        feature: defaultConfig.feature,
       },
     }
 
@@ -1393,7 +1493,7 @@ Enforce synchronous cache invalidation barrier after write commit.
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -1451,7 +1551,7 @@ Enforce synchronous cache invalidation barrier after write commit.
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -1499,7 +1599,7 @@ Enforce synchronous cache invalidation barrier after write commit.
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -1559,7 +1659,7 @@ Enforce synchronous cache invalidation barrier after write commit.
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 
@@ -1696,7 +1796,7 @@ Current promotion should not remove docs that exist without a matching archive s
       worktree: testDir,
       config: {
         ...defaultConfig,
-        archive: { ...defaultConfig.archive, output_dir: 'docs/archive', drift_check: false },
+        archive: { ...defaultConfig.archive, drift_check: false },
       },
     }
 

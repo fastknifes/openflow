@@ -355,6 +355,7 @@ export async function handleIssue(
   caseText?: string,
   _args?: string,
   _toolContext?: unknown,
+  sessionID?: string,
 ): Promise<string> {
   // No case text → ask for concrete issue
   if (!caseText || !caseText.trim()) {
@@ -380,7 +381,11 @@ Optional flags:
 - \`--fix\` — enter fix routing after classification is available
 - \`--resolve\` — record a resolved issue Work Node after evidence gates pass
 - \`--close\` — close the active issue packet without archiving
-The command clarifies expectations, constraints, evidence, and current semantics before any implementation. It does NOT make changes to code, data, or configuration. Use \`--resolve\` to record a completed fix after investigation.`
+The command clarifies expectations, constraints, evidence, and current semantics before any implementation. It does NOT make changes to code, data, or configuration. Use \`--resolve\` to record a completed fix after investigation.
+
+### Next Step
+
+Run the command above with your issue description to start investigation.`
   }
 
   // Parse flags from the raw case text
@@ -405,7 +410,7 @@ Provide at least one of:
 
   // Resolve workspace path. Stateful actions prefer an existing dated workspace
   // so older issue packets can be fixed/resolved/closed across days.
-  const resolvedWorkspace = resolveIssueWorkspace(ctx, args.name ?? cleanCase)
+  const resolvedWorkspace = resolveIssueWorkspace(ctx, args.name ?? cleanCase, ctx.config.paths.changes)
   const existingWorkspace = await findExistingWorkspace(ctx, slug)
   const workspacePath = existingWorkspace ?? resolvedWorkspace.workspacePath
   const clarificationPath = path.join(workspacePath, ISSUE_CLARIFICATION_FILENAME)
@@ -450,6 +455,7 @@ Run the issue command without --continue to generate a fresh clarification, or v
     symptom: cleanCase,
     environment: env,
     status: 'reported',
+    ...(sessionID ? { sessionID } : {}),
   })
 
   const report = renderIssuePacketReport(packet, historyHint)
@@ -475,18 +481,17 @@ Run the issue command without --continue to generate a fresh clarification, or v
 
 ---
 
-**Fix blocked**: classify the issue before entering fix mode.`
-    }
-    const fixingPacket = { ...packet, status: 'fixing' as const, updatedAt: new Date().toISOString() }
-    const fixingReport = renderIssuePacketReport(fixingPacket, historyHint)
-    await writeIssuePacket(workspacePath, fixingPacket)
-    return `${fixingReport}
-
----
-
 ## Fix Routing Ready
 - classification: \`${escapeMarkdown(packet.classification)}\`
-- next: implement the routed action, then invoke \`openflow-quality-gate\`.`
+
+### Next Step
+
+Implement the fix, then run the quality gate:
+
+\`\`\`
+/openflow-verify ${escapeMarkdown(slug)}
+\`\`\``
+    }
   }
 
   if (args.resolve) {
@@ -539,7 +544,15 @@ Update \`${escapeMarkdown(packetPath)}\` with classification, root cause/no-fix 
 - issue clarification: \`${escapeMarkdown(clarificationPath)}\`
 - issue resolution: \`${escapeMarkdown(resolved.resolutionPath)}\`
 - promotion candidate: \`${escapeMarkdown(resolved.promotionCandidatePath)}\`
-- plan required: no`
+- plan required: no
+
+### Next Step
+
+Run the quality gate to verify readiness before archiving:
+
+\`\`\`
+/openflow-verify ${escapeMarkdown(slug)}
+\`\`\``
   }
 
   // Persist packet by default (unless explicitly no-doc/readonly) so the issue

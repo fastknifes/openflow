@@ -926,10 +926,10 @@ export async function createLimitedContextState(
     phase: 'acceptance',
     phaseStartedAt: formatTimestamp(),
     pendingDocUpdates: [],
-    sessionID,
+    ...(sessionID !== undefined && { sessionID }),
     implementationState: createImplementationStateMetadata('dirty', {
       changedFiles: [filePath],
-      gitHead: sessionID,
+      ...(sessionID !== undefined && { gitHead: sessionID }),
     }),
     qualityGateApplicability: {
       status: 'limited_context',
@@ -962,7 +962,7 @@ export async function mergeLimitedContextState(
     // Merge: add file to changedFiles without duplicates, mark dirty
     const existing = existingState.implementationState?.changedFiles ?? []
     const merged = [...new Set([...existing, filePath])].sort()
-    await markImplementationDirty(projectDir, { changedFiles: merged, gitHead: sessionID })
+    await markImplementationDirty(projectDir, { changedFiles: merged, ...(sessionID !== undefined && { gitHead: sessionID }) })
     logger.info('Merged changed file into limited-context state', {
       filePath,
       feature: existingState.feature,

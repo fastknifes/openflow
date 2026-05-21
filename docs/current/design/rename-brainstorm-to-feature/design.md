@@ -2,45 +2,37 @@
 
 ## Overview
 
-本 feature 重设计 OpenFlow `openflow-quality-gate` 中的 harden 子流程，使其从“自由文本 reviewer/executor 对话”升级为“证据账本驱动、可观察、可降级、可收敛”的质量治理流程。
+修改 `/openflow-feature` 命令的 `finalizeFeature` 函数，在成功生成 `design.md` 和 `behavior.md` 后，将当前的单向文本输出（`formatGenerationResultAll`）升级为**确认式交互**。
 
-范围不是单点修复，而是覆盖本轮讨论中的完整问题簇：
-
-- harden reviewer 结论不能直接成为最终事实，必须进入证据链。
-- reviewer/executor 不应被设计成无边界对抗，而应通过 evidence ledger 协作。
-- harden 过程需要像 explore 子代理一样可观察，但不能回到“每轮一个 task 子代理 session”。
-- budget exhausted、max rounds、重复 finding、fixer 无实质修改等情况必须有明确终态。
-- 设计-实现分歧、MVP 偏离、文档结构偏好不能被无限升级为无法归档的 spec violation。
-- archive/readiness 不能依赖手动修改 generated acceptance state。
+核心变更：
+1. 交互模式下：通过 `Question` 工具提供三个选项供用户选择
+2. 非交互模式下：在文本输出中清晰列出可选行动，等待用户自然语言回复
+3. 新增 Oracle/Momus review 路径：当用户选择"检查约束充分性"时，调用 Oracle 或 Momus 审查设计文档和行为文档的完整性
+4. Session 状态记录：在 `FeatureSession` 中新增 `postDesignDecision` 字段记录用户选择，供后续步骤参考
 
 ## Problem
 
-现有 harden 流程存在四类系统性缺陷：
+当前 `/openflow-feature` 生成文档后的输出是单向的：
 
-1. **证据链不足**：reviewer 输出自由文本 finding，quality gate 难以区分已证实缺陷、设计歧义、偏好建议和误报。
-2. **过程不可稳定观察**：当前实现每次 reviewer/executor 调用都会创建新的子 session，并在 prompt 中嵌入 `task(...)` 形式，容易造成 session 膨胀、上下级关系丢失和二次嵌套。
-3. **不收敛时阻塞过强**：`budget_exhausted` / `max_rounds_reached` 直接阻塞 readiness；重复相同 finding 时没有处置路径。
-4. **fixer 落地不可验证**：executor 返回文本被当作 `fixReport`，但 harden 没有检查工作区是否真的产生 material diff，也没有在下一轮 reviewer 前刷新 scoped diff。
+```markdown
 
 ## Goals
 
-- 建立 evidence ledger，使 harden finding 成为可验证 claim，而不是最终裁判。
-- 建立 finding disposition 模型，支持 `must_fix`、`accepted_known_issue`、`design_divergence`、`false_positive`、`needs_decision`、`superseded`。
-- 建立一个 harden run 一个可见 child session 的模型，保留 inline trace。
-- 避免每轮创建 task 子代理 session，避免 prompt 内嵌 `task(...)`。
-- 增加 fixer material-change 检测：executor 后必须比较 before/after diff hash 或 changed files。
-- 下一轮 reviewer 必须基于刷新后的 scoped diff 和 ledger，而不是旧 diff + fix report 文本。
-- 将 review non-convergence 与真实代码失败分开处理。
-- 让 quality gate 根据 verify 证据、finding disposition 和 harden 终态统一映射 readiness。
-- 保持现有入口兼容：`openflow-quality-gate` 仍是 AI-callable skill，`/openflow-harden` 和 `/openflow-verify` 不恢复为正常用户入口。
+1. 生成文档后提供确认式交互（交互模式用 `Question` 工具，非交互模式用文本选项）
+2. 支持三种用户选择：
+   - **进入开发计划**：建议 `/openflow-writing-plan`
+   - **检查约束充分性**：触发 Oracle/Momus review `design.md` 和 `behavior.md`
+   - **查看文档**：仅返回文档路径，不附加下一步建议
+3. 保持 backward compatibility：不改变现有核心生成逻辑，只修改输出/交互层
+4. 非交互模式下 graceful degradation：文本形式列出选项
 
 ## Non-Goals
 
-- 不绕过 quality gate。
-- 不允许手动修改 generated acceptance state 作为正常流程。
-- 不把所有 `budget_exhausted` 自动视为 Ready。
-- 不要求 harden 每次都运行完整语义审查。
-- 不把 reviewer/executor 的对抗关系作为正确性保证。
+1. 不自动执行 `/openflow-writing-plan` 或任何其他命令
+2. 不改变 feature 收敛逻辑（问题收集、需求模型生成）
+3. 不修改 `design.md` 或 `behavior.md` 的内容生成逻辑
+4. 不在 review 阶段修改文档文件本身（review 是只读的）
+5. 不将 `postDesignDecision` 作为硬门槛（soft advisory only）
 
 ## Architecture
 
@@ -135,46 +127,45 @@ Active docs to update:
 
 ## Design Constraints
 
-- [must] 保持 `openflow-quality-gate` 作为 AI 完成代码后的统一入口。
-- [must] 不恢复 `/openflow-harden` 和 `/openflow-verify` 作为正常用户工作流入口。
-- [must] 不允许通过手动修改 generated acceptance state 推进归档。
-- [must] harden reviewer finding 必须有证据引用和处置状态。
-- [must] executor 后必须检查是否产生 material workspace change。
-- [must] 下一轮 reviewer 必须基于刷新后的 scoped diff。
-- [should] token 使用按风险分层触发，低风险跳过 harden，中风险 reviewer-only，高风险才进入 ledger loop。
-- [should] 一个 harden run 只创建一个 child session。
-- [should] 与现有 config、acceptance、verify、archive 行为兼容。
+1. **Backward Compatibility**: 现有非交互使用场景必须继续工作，不依赖用户选择
+2. **Soft Advisory**: `postDesignDecision` 只是记录，不阻塞、不强制后续流程
+3. **Tool Availability**: 必须处理 `hasAskQuestion(toolContext)` 为 false 的情况（非交互模式）
+4. **Error Handling**: 如果 Oracle/Momus review 失败，应返回基础结果 + 错误提示，不阻断用户
+5. **No Circular Dependency**: 不能引入对 `/openflow-writing-plan` 或 `quality-gate` 的硬依赖
 
 ## Success Criteria
 
-- [ ] Quality Gate 报告包含 Harden Trace：session ID、round、agent、tokens、stop reason。
-- [ ] Harden 不再每轮创建独立 child task session。
-- [ ] Harden prompt 不再嵌入 `task(...)` 调用文本。
-- [ ] Repeated finding/no material fix 能提前停止并给出明确 disposition。
-- [ ] `budget_exhausted` / `max_rounds_reached` 不再无条件阻塞归档，而是通过 ledger disposition 和 verify 证据映射 readiness。
-- [ ] 设计-实现分歧可以进入 `NeedsDecision` 或 accepted known issue，而不是无限 must-fix。
-- [ ] Executor 未落地修改时不会被误认为已修复。
-- [ ] 现有 quality-gate、verify、archive 测试继续通过。
+- [ ] 交互模式下：生成文档后弹出 `Question` 工具，包含三个选项
+- [ ] 非交互模式下：输出文本包含三个清晰选项，用户可用自然语言选择
+- [ ] 选择"检查约束充分性"时：调用 Oracle 或 Momus 审查 `design.md` 和 `behavior.md`
+- [ ] 选择被记录到 `FeatureSession.postDesignDecision`
+- [ ] 不选择或跳过选择时：行为与当前一致（输出建议文本）
+- [ ] 所有变更不影响现有 feature 收敛和文档生成逻辑
 
 ## Risks And Mitigations
 
-- **Risk**: accepted known issue becomes a bypass.  
-  **Mitigation**: require evidence refs, verify status, rationale, and visible report output.
-- **Risk**: ledger adds implementation complexity.  
-  **Mitigation**: MVP starts with in-memory/markdown trace and minimal structured data before persistence expansion.
-- **Risk**: session API may not support changing agent per prompt in same session.  
-  **Mitigation**: feature requires confirming API behavior; if unsupported, use one harden session as parent trace and record child message refs without per-round task nesting.
-- **Risk**: readiness enum lacks `ReadyWithKnownIssues`.  
-  **Mitigation**: map to `ReadyWithDocUpdates` in MVP while preserving explicit known-issue section.
+| Risk | Mitigation |
+|------|-----------|
+| 交互模式不可用时代码路径出错 | 始终保留非交互降级路径，单元测试覆盖两种模式 |
+| Oracle/Momus review 耗时过长 | review 在后台运行，不阻塞主流程；失败时返回基础结果 |
+| 用户困惑于多个选项 | 选项描述要清晰，默认选项为"进入开发计划" |
+| 破坏现有自动化流程 | `postDesignDecision` 为 optional，不选择时行为不变 |
 
 ## Testing Strategy
 
-- Unit tests for finding normalization, repeat detection, and disposition mapping.
-- Unit tests for material diff detection before/after executor.
-- Unit tests for harden session creation: one child session per run, multiple prompts in same session.
-- Unit tests ensuring prompt payload does not include `task(...)` wrapper.
-- Quality gate tests for readiness mapping: budget exhausted, max rounds, needs decision, accepted known issues.
-- Archive/readiness tests proving generated acceptance state is not manually edited and accepted known issues are auditable.
+1. **单元测试**（`tests/commands/feature.test.ts`）：
+   - 测试交互模式下 `Question` 工具被正确调用
+   - 测试非交互模式下输出包含选项文本
+   - 测试三种选择分别触发正确行为
+   - 测试 `postDesignDecision` 被正确保存到 session
+
+2. **集成测试**：
+   - 完整 feature 流程：从问题收集到确认交互到选择记录
+   - Oracle/Momus review 路径：模拟 review 成功和失败场景
+
+3. **Regression 测试**：
+   - 不选择任何选项时，行为与变更前一致
+   - 非交互模式下无工具调用时代码不崩溃
 
 # writing-plan-optimization - Design
 
@@ -221,15 +212,6 @@ Active docs to update:
 - 改动：路径、拆分策略、budget 自检说明同步更新
 
 ## Behavior Alignment
-
-| Scenario | Expected Design Response | Risk |
-|---|---|---|
-| reviewer 反复报告相同 spec_violation | normalized finding repeat counter stops loop and routes to disposition | High |
-| executor 返回 fix report 但没有改文件 | material-change detection marks `no_material_fix` and prevents false convergence | High |
-| MVP 与设计细节不一致但功能可用 | classify as `design_divergence` / `needs_decision`, not endless must-fix | Medium |
-| verify 全绿但 harden budget exhausted | quality gate checks unresolved finding disposition before blocking archive | High |
-| 开发者想观察 harden 质量 | one visible harden child session with inline trace | Medium |
-| harden 需要多 agent | same child session, different `body.agent`, no nested task prompt | Medium |
 
 ## Proposed Design
 
@@ -436,3 +418,363 @@ Quality gate 根据 verify + harden ledger 统一裁决：
 | all findings verified and verify pass | Ready |
 
 OpenFlow 现有 readiness 枚举若没有 `ReadyWithKnownIssues`，MVP 可先映射到 `ReadyWithDocUpdates`，并在报告中明确 `Known Issues Accepted`。
+
+# quality-gate-stage-applicability - Design
+
+## Human Consensus Summary
+
+Feature title: Feature 命令确认式交互
+Internal slug: feature-confirmation-interaction
+Source intent: 将 /openflow-feature 命令生成设计文档后的单向通知改为确认式交互，让用户选择下一步行动
+Problem or improvement target: 当前 /openflow-feature 生成 design.md 和 behavior.md 后只是单向输出文本建议，用户无法明确选择下一步行动（进入开发计划或检查约束充分性）
+Expected result: 生成文档后提供确认式交互，支持选择进入开发计划、AI 检查约束、或仅查看文档
+
+## Identity And Assumptions
+
+- Feature slug: feature-confirmation-interaction
+- Feature title: Feature 命令确认式交互
+- Source intent: 将 /openflow-feature 命令生成设计文档后的单向通知改为确认式交互，让用户选择下一步行动
+
+# stateful-quality-guardrails - Design
+
+## Proposed Workflow
+
+```text
+feature / issue context
+  → implementation write/edit detected
+    → implementation_state = dirty
+    → previous readiness = stale
+  → AI attempts completion claim
+    → if dirty/stale: Completion Blocked Until Quality Gate
+    → run openflow-quality-gate
+      → fresh readiness saved
+      → implementation_state = verified | blocked
+  → archive
+    → requires matching fresh verified state
+```
+
+## Components
+
+### Implementation State Tracker
+
+**Purpose**: 在 `tool-after` 中识别实现类写入，并把 acceptance/session 状态从记录型升级为约束型。
+
+**Responsibilities**:
+- 分类变更文件：runtime code、test、public API、workflow docs、metadata、docs-only。
+- 对实现类变更设置 `implementationDirty = true` 或等价状态。
+- 记录 dirty timestamp、changed files、sessionID、feature/issue slug。
+- 如果已有 readiness，则标记 evidence freshness 为 stale。
+
+### Completion Claim Guard
+
+**Purpose**: 在 `chat.message` 中识别 AI 完成声明，并在状态未验证时阻断或注入强约束提示。
+
+**Responsibilities**:
+- 检测 “完成了 / done / finished / ready to archive / 可以收尾” 等完成语义。
+- 如果当前状态 dirty/stale 且没有 fresh readiness，输出 `Completion Blocked Until Quality Gate`。
+- 明确要求 AI 调用 `openflow-quality-gate`，不得声称完成。
+- 对 docs-only/design-only/planning-only 任务按 quality-gate applicability 允许非实现收口。
+
+### Freshness Gate
+
+**Purpose**: 统一判定 readiness 是否仍然能代表当前工作区。
+
+**Responsibilities**:
+- 比较 readiness 生成时的 workspace state 与当前 changed files。
+- 如果 verified 后又发生实现类修改，自动失效。
+- 为 `archive`、`quality-gate`、completion guard 提供同一判定结果。
+
+### Workflow Context Guard
+
+**Purpose**: 防止没有设计/计划/issue 语义上下文的实现变更被误认为完整就绪。
+
+**Responsibilities**:
+- 发现实现类变更但缺少 design/behavior/issue context 时，标记为 limited-context。
+- limited-context 可以运行技术检查，但不得产生 archive-ready 语义结论。
+- 提示用户显式进入 `/openflow-feature`、`/openflow-issue` 或接受 limited-context 风险。
+
+# BDD-Guided Integration Evidence in Quality Gate - Design
+
+## Evidence Coverage Levels
+
+Quality Gate 使用以下覆盖等级判断 behavior scenario 与 integration evidence 的关系：
+
+| Coverage Level | Meaning | Readiness Effect |
+|----------------|---------|------------------|
+| `exact` | Evidence 明确覆盖 scenario 的 Given / When / Then，且结果匹配。 | critical 通过 |
+| `equivalent` | Evidence 的步骤不同，但语义等价覆盖关键业务行为和可观察结果。 | critical 通过 |
+| `partial` | Evidence 只覆盖部分前置条件、触发动作或结果。 | critical 不通过；optional 可 advisory |
+| `missing` | 找不到对应 evidence。 | critical 不通过 |
+| `not_applicable` | scenario 明确不适用于本次实现或被业务确认排除。 | 不阻塞，但必须记录原因 |
+
+## Scenario-to-Evidence Mapping Rules
+
+1. **Critical scenario: one row required**
+   - 每个 critical scenario 必须在 evidence mapping 中有一行。
+
+2. **One test may cover many scenarios**
+   - 一个集成测试可以覆盖多个 scenario，但不能只写“覆盖所有场景”；必须逐一列出：`scenario_id → evidence_ref → coverage_level`。
+
+3. **Given / When / Then comparison is semantic**
+   - 不要求逐字一致。
+   - 必须证明：关键前置条件成立、关键动作被触发、用户/系统可观察结果符合预期。
+
+4. **Implementation-only assertions are insufficient**
+   - 只断言内部函数、数据库字段或 mock 调用，不足以覆盖用户可观察行为，除非该 scenario 本身就是内部协议/数据一致性场景。
+
+5. **Ambiguous evidence requires clarification**
+   - 如果 evidence 与 scenario 关系不清，Quality Gate 应标记 `partial` 或 `needs_decision`，而不是自动当作通过。
+
+## Evidence Mapping Format
+
+`behavior.md` 必须使用固定 evidence mapping 表格，供 Quality Gate 解析或人工审查：
+
+```md
+| Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |
+|-------------|-------------|--------------|---------------|----------------|-----------------------|-----------|--------|
+| SC-001 | critical | .sisyphus/evidence/SC-001-api-smoke.md | api_smoke | exact | N/A | fresh | verified |
+```
+
+字段约束：
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `Scenario ID` | yes | behavior scenario 的稳定 ID；如果旧文档没有 ID，Quality Gate 应使用标题 slug 作为临时 ID。 |
+| `Criticality` | yes | `critical`、`boundary`、`optional`。 |
+| `Evidence Ref` | critical 必填 | 证据文件路径、测试报告路径、QA 记录路径或可复现验证记录。 |
+| `Evidence Type` | yes | `integration_test`、`api_smoke`、`e2e`、`qa_record`、`manual_repro`、`not_applicable`。 |
+| `Coverage Level` | yes | `exact`、`equivalent`、`partial`、`missing`、`not_applicable`。 |
+| `Equivalence Rationale` | equivalent 必填 | 解释为什么 evidence 与 scenario 语义等价。 |
+| `Freshness` | yes | `fresh`、`stale`、`unknown`。 |
+| `Status` | yes | `verified`、`failed`、`missing_evidence`、`needs_decision`、`not_applicable`。 |
+
+## Criticality Defaults
+
+- `behavior.md` 中未显式标记的 scenario 默认 `critical`。
+- `Boundary:` 标题或明确标记 `boundary` 的场景为 `boundary`。
+- 只有明确标记为 `optional` 或 `not_applicable` 的场景才不默认阻塞 readiness。
+- issue 模式下，`issue-clarification.md` 的 confirmed root cause、known requirements、expected behavior、regression signature 默认视为 critical evidence targets。
+
+## Evidence Storage
+
+- `behavior.md` 保存 scenario-to-evidence mapping 摘要。
+- `.sisyphus/evidence/{scenario-id}-{short-description}.md` 保存详细证据。
+- 若证据来自外部测试报告或日志，`Evidence Ref` 应指向稳定路径或记录摘要，不能只写"见控制台输出"。
+- Verify output 可生成临时 evidence summary，但 archive 前必须能追溯到持久化 evidence ref。
+
+### Evidence Ref 可追溯性要求
+
+Evidence Ref 必须指向可持久追溯的证据源。以下引用方式**明确禁止**：
+
+| 禁止的引用方式 | 原因 |
+|----------------|------|
+| "见控制台输出" | 控制台输出是一次性的，无法在后续会话或 review 中追溯 |
+| "测试已跑过" | 没有具体指向任何文件或记录，无法验证 |
+| "本地已验证" | 缺乏执行上下文和可复现性 |
+| 无 git hash / 无时间戳的引用 | 无法判定 freshness，会被判定为 `unknown` |
+
+合规的 Evidence Ref 示例：
+
+- `.sisyphus/evidence/SC-001-api-smoke.md`（项目内持久化证据文件）
+- `test-results/integration-2026-05-20.html`（稳定路径的测试报告）
+- `docs/changes/2026-05-20-feature/qa-checklist.md`（项目文档中的 QA 记录）
+
+### Evidence 文件模板字段与 Parser 映射
+
+证据文件 `.sisyphus/evidence/{scenario-id}-{slug}.md` 的字段对应 `BehaviorScenarioEvidence` 类型定义：
+
+| 证据文件字段 | 对应 Parser 字段 | 对应 Mapping 表列 | 必填 |
+|-------------|-----------------|------------------|------|
+| Scenario Reference → Scenario ID | `scenarioId` | Scenario ID | 是 |
+| Scenario Reference → Scenario Name | `scenarioName` | （用于 readability） | 是 |
+| Evidence Type | `evidenceType` | Evidence Type | 是 |
+| Execution Context | （辅助 freshness 判定） | （辅助字段） | 是 |
+| Observed Results → Result | `status` | Status | 是 |
+| Coverage Rationale | `equivalenceRationale` | Equivalence Rationale | equivalent 时必填 |
+| Freshness Metadata → Timestamp / Git HEAD | `freshness` | Freshness | 是 |
+| （从 mapping 表读入） | `criticality` | Criticality | 是 |
+| （从 mapping 表读入） | `coverageLevel` | Coverage Level | 是 |
+| （从 mapping 表读入） | `evidenceReference` | Evidence Ref | critical 必填 |
+
+## Freshness Rules
+
+Evidence freshness 判定规则：
+
+1. `fresh`: evidence 生成时间晚于最后一次相关实现文件变更，或 evidence 明确绑定当前 git HEAD/diff hash/change set。
+2. `stale`: evidence 早于相关实现文件变更，或绑定的是旧 git HEAD/diff hash。
+3. `unknown`: evidence 没有时间、git hash、命令输出时间、QA 日期或其他 freshness metadata。
+
+Quality Gate 不应把 `unknown` 当作通过。critical scenario 的 `unknown` freshness 应进入 `needs_decision` 或 `NotReady`。
+
+## Readiness Decision Matrix
+
+| Condition | Readiness |
+|-----------|-----------|
+| 所有 critical scenario 均为 `exact`/`equivalent` + `fresh` + `verified` | `Ready` |
+| critical scenario 存在 `partial`、`missing`、`failed` 或 `stale` | `NotReady` |
+| critical scenario evidence 语义不清或 freshness 为 `unknown` | `NeedsDecision` 或 `NotReady` |
+| 仅 optional/boundary 缺 evidence | `Ready` 或 `ReadyWithDocUpdates`，并记录 advisory gap |
+| scenario 标记 `not_applicable` 但无理由 | `NeedsDecision` |
+| evidence ref 缺失或无法读取 | `NotReady` |
+
+## Quality Gate Flow
+
+```text
+behavior.md / issue-clarification.md
+  → derive integration evidence requirements
+  → AI/OMO runs or records project-appropriate integration validation
+  → evidence is persisted under .sisyphus/evidence and mapped in behavior.md
+  → Quality Gate performs compilation health probe (adaptive, non-blocking)
+  → Quality Gate checks coverage and freshness
+  → readiness classification
+  → archive maps behavior → evidence → implementation
+```
+
+## Compilation Health Probe
+
+Quality Gate 在执行集成证据判定之前，应执行一次轻量的编译健康探测：
+
+### 探测规则
+
+| 项目标识 | 语言/框架 | 探测命令 | 说明 |
+|----------|-----------|----------|------|
+| `tsconfig.json` | TypeScript | `npx tsc --noEmit` 或 `tsc --noEmit` | 类型检查 |
+| `go.mod` | Go | `go build ./...` | 编译检查 |
+| `Cargo.toml` | Rust | `cargo check` | 编译检查 |
+| `package.json` | JavaScript/Node | 检查 `scripts` 中是否有 `typecheck`，如有则运行 | 仅在有明确脚本时运行 |
+| `composer.json` | PHP | 检查 `scripts` 或 `vendor/bin/phpstan`、`vendor/bin/psalm` | 仅在有明确工具时运行 |
+| `*.py` | Python | `python -m py_compile`（仅语法） | 轻量语法检查 |
+| `*.rb` | Ruby | `ruby -c`（仅语法） | 轻量语法检查 |
+
+### 探测原则
+
+1. **不硬编码**：命令由项目文件推断，不是 OpenFlow 写死的。
+2. **不阻塞**：探测失败或工具链缺失时，不阻塞 readiness，只记录 advisory gap。
+3. **不作为证据**：探测结果不替代集成测试证据，仅作为"项目可编译"的辅助信号。
+4. ** freshness 关联**：探测通过时，记录 timestamp 和 git HEAD，作为 evidence freshness 的辅助元数据。
+
+# Feature Confirmation Interaction - Design
+
+> **Draft with Assumptions / 带假设的草稿**
+
+This document contains assumptions that must not be treated as confirmed implementation constraints.
+
+## Feature Design Complete
+...
+
+### Next Step (Advisory)
+Design documents are complete. You may proceed to implementation planning when ready.
+Suggested user action:
+/openflow-writing-plan {feature}
+```
+
+问题：
+- 用户没有被明确询问下一步意愿
+- "建议"容易被忽略，用户可能直接进入自然语言对话而跳过结构化流程
+- 没有机制让用户在实现前请求 AI 审查设计文档的约束充分性
+- 与 Prometheus 的计划生成后的确认式交互不一致，降低用户体验一致性
+
+### 对现有行为的影响
+
+| 现有行为 | 变更后 |
+|---------|--------|
+| `formatGenerationResultAll` 单向输出文本 | 在文本基础上增加交互选项（交互模式）或文本选项列表（非交互模式） |
+| `askDeepVerification` 询问是否深度校验 | 被新的确认式交互取代或整合（详见 Decisions） |
+| `FeatureSession` 无 post-design 状态 | 新增 `postDesignDecision` 字段记录选择 |
+
+## Decisions
+
+### Decision 1: 取代还是整合 `askDeepVerification`
+
+**选择**：整合。将 `askDeepVerification` 替换为新的 `askPostDesignConfirmation`，其中包含"检查约束充分性"选项。
+
+**理由**：
+- 原 `askDeepVerification` 询问的是"是否深度校验"，与新的确认式交互功能重叠
+- 新交互更完整，包含了原深度校验的功能（"检查约束充分性"会触发类似检查）
+- 减少用户的认知负担：一个对话框 > 两个连续对话框
+
+**替代方案**：保留 `askDeepVerification` 作为独立步骤，在确认交互之后额外询问。放弃原因：增加交互轮次，不符合"高效确认"的目标。
+
+### Decision 2: Oracle vs Momus 选择
+
+**选择**：优先 Oracle，复杂场景可选 Momus。
+
+**理由**：
+- Oracle 是 read-only consultant，适合审查设计文档的完整性和约束充分性
+- Momus 是 plan critic，更适合审查实现计划而非设计文档
+- 如果用户明确要求"严格审查"，可以提供 Momus 选项
+
+**默认行为**：调用 Oracle 审查 `design.md` 和 `behavior.md` 的约束完整性、假设清晰度、边界覆盖度。
+
+### Decision 3: `postDesignDecision` 类型定义
+
+```typescript
+type PostDesignDecision = 'proceed_to_plan' | 'review_docs' | 'inspect' | undefined
+```
+
+- `proceed_to_plan`：用户希望进入开发计划阶段
+- `review_docs`：用户希望 AI 审查设计文档
+- `inspect`：用户只想查看文档，不立即行动
+- `undefined`：用户未做选择（默认）
+
+## Implementation Sketch
+
+### 变更文件
+
+1. `src/phases/feature/state-machine.ts`
+   - 在 `FeatureSession` 接口中新增 `postDesignDecision?: PostDesignDecision`
+   - 新增 `PostDesignDecision` 类型
+
+2. `src/commands/feature.ts`
+   - 修改 `finalizeFeature`：在生成文档后调用新的确认交互逻辑
+   - 新增 `askPostDesignConfirmation`：交互模式下调用 `Question` 工具
+   - 新增 `formatPostDesignOptions`：非交互模式下输出文本选项
+   - 新增 `executeDocReview`：调用 Oracle 审查文档
+   - 删除或重构 `askDeepVerification`（整合进新流程）
+   - 修改 `formatGenerationResultAll`：支持根据 `postDesignDecision` 定制输出
+
+3. `tests/commands/feature.test.ts`
+   - 新增测试用例覆盖确认交互的三种路径
+
+### 关键代码结构
+
+```typescript
+// src/commands/feature.ts
+
+async function finalizeFeature(...) {
+  // ... 现有文档生成逻辑不变 ...
+  
+  const baseResult = formatGenerationResultAll(...)
+  
+  if (hasAskQuestion(toolContext)) {
+    // 交互模式：弹出确认对话框
+    const decision = await askPostDesignConfirmation(toolContext, validatedModel)
+    if (decision) {
+      // 保存选择到 session
+      const updatedSession = { ...completedSession, postDesignDecision: decision }
+      await saveFeatureSession(...)
+      
+      // 根据选择执行相应行为
+      if (decision === 'review_docs') {
+        const reviewResult = await executeDocReview(ctx, completedSession)
+        return `${baseResult}\n\n${reviewResult}`
+      }
+      
+      // 返回定制化的下一步建议
+      return formatDecisionResult(baseResult, decision)
+    }
+  } else {
+    // 非交互模式：输出文本选项
+    return `${baseResult}\n\n${formatPostDesignOptions()}`
+  }
+  
+  return baseResult
+}
+```
+
+## References
+
+- `src/commands/feature.ts`：核心修改文件
+- `src/phases/feature/state-machine.ts`：Session 类型定义
+- `src/skills/feature-skill.ts`：Skill 行为约束
+- Prometheus plan generation 流程（`oh-my-openagent/src/agents/prometheus/gemini.ts` Phase 3）：确认式交互参考实现

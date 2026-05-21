@@ -41,7 +41,8 @@ describe('init command', () => {
       ctx.directory = testDir
 
       const result = await handleInit(ctx)
-      expect(result).toBe('initialized AGENTS.md and added OpenFlow docs guide')
+      expect(result).toContain('initialized AGENTS.md and added OpenFlow docs guide')
+      expect(result).toContain('## OpenFlow Init Complete')
 
       // Verify file was created
       const content = await fs.readFile(path.join(testDir, 'AGENTS.md'), 'utf-8')
@@ -63,7 +64,8 @@ Footer`
       await fs.writeFile(path.join(testDir, 'AGENTS.md'), initialContent, 'utf-8')
 
       const result = await handleInit(ctx)
-      expect(result).toBe('refreshed OpenFlow docs guide')
+      expect(result).toContain('refreshed OpenFlow docs guide')
+      expect(result).toContain('## OpenFlow Init Complete')
 
       // Verify content was refreshed
       const content = await fs.readFile(path.join(testDir, 'AGENTS.md'), 'utf-8')
@@ -79,7 +81,8 @@ Footer`
       await fs.writeFile(path.join(testDir, 'AGENTS.md'), '# My Project\n\nDescription.', 'utf-8')
 
       const result = await handleInit(ctx)
-      expect(result).toBe('appended OpenFlow docs guide')
+      expect(result).toContain('appended OpenFlow docs guide')
+      expect(result).toContain('## OpenFlow Init Complete')
 
       // Verify block was appended
       const content = await fs.readFile(path.join(testDir, 'AGENTS.md'), 'utf-8')
@@ -96,7 +99,8 @@ Footer`
       await fs.writeFile(path.join(testDir, 'AGENTS.md'), corruptedContent, 'utf-8')
 
       const result = await handleInit(ctx)
-      expect(result).toBe('appended fresh OpenFlow docs guide as safe repair')
+      expect(result).toContain('appended fresh OpenFlow docs guide as safe repair')
+      expect(result).toContain('## OpenFlow Init Complete')
 
       // Verify fresh block was added
       const content = await fs.readFile(path.join(testDir, 'AGENTS.md'), 'utf-8')
@@ -110,11 +114,13 @@ Footer`
 
       // First run
       const result1 = await handleInit(ctx)
-      expect(result1).toBe('initialized AGENTS.md and added OpenFlow docs guide')
+      expect(result1).toContain('initialized AGENTS.md and added OpenFlow docs guide')
+      expect(result1).toContain('## OpenFlow Init Complete')
 
       // Second run
       const result2 = await handleInit(ctx)
-      expect(result2).toBe('refreshed OpenFlow docs guide')
+      expect(result2).toContain('refreshed OpenFlow docs guide')
+      expect(result2).toContain('## OpenFlow Init Complete')
 
       // Verify only one block exists
       const content = await fs.readFile(path.join(testDir, 'AGENTS.md'), 'utf-8')
@@ -162,7 +168,8 @@ Footer text here.`
       }
 
       const result = await handleInit(ctx)
-      expect(result).toBe('initialized AGENTS.md and added OpenFlow docs guide')
+      expect(result).toContain('initialized AGENTS.md and added OpenFlow docs guide')
+      expect(result).toContain('## OpenFlow Init Complete')
 
       // Verify file was created
       const content = await fs.readFile(path.join(testDir, 'AGENTS.md'), 'utf-8')

@@ -775,7 +775,7 @@ Summary: missing plan file
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
 
-  test('budget-exhausted harden with no findings does not block ready verify output', async () => {
+  test('budget_exhausted with no findings maps to needs_decision', async () => {
     const directory = await createGitFixture('harden-budget-blocks-ready', 'multi-file')
     const callLog: CallLog = { order: [] }
     const ctx = createStandardContext(directory, {
@@ -796,9 +796,8 @@ No findings.`,
     })
 
     expect(output).toContain('`budget_exhausted`')
-    expect(output).not.toContain('Harden Gate')
-    expect(output).toContain('`ready`')
-    expect(output).toContain('ready for archive')
+    expect(output).toContain('`needs_decision`')
+    expect(output).toContain('Resolve the blocking decision')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -850,7 +849,7 @@ Summary: reviewer hit the token budget with one unresolved blocking finding rema
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
 
-  test('budget_exhausted with all findings disposed maps to ready_with_doc_updates after verify passes', async () => {
+  test('budget_exhausted with all findings disposed maps to needs_decision', async () => {
     const directory = await createGitFixture('harden-budget-all-disposed', 'multi-file')
     const callLog: CallLog = { order: [] }
     const ctx = createStandardContext(directory, {
@@ -872,8 +871,8 @@ Summary: token budget ended after all findings received a terminal disposition.
     })
 
     expect(output).toContain('`budget_exhausted`')
-    expect(output).toContain('`ready_with_doc_updates`')
-    expect(output).toContain('Known Issues')
+    expect(output).toContain('`needs_decision`')
+    expect(output).toContain('Resolve the blocking decision')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -901,6 +900,52 @@ Summary: review stopped at max rounds with one unresolved design divergence.
     expect(output).toContain('`max_rounds_reached`')
     expect(output).toContain('`needs_decision`')
     expect(output).toContain('Resolve design-divergence finding `H-201` before archive')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('max_rounds_reached with no findings maps to needs_decision', async () => {
+    const directory = await createGitFixture('harden-max-rounds-no-findings', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: max_rounds_reached
+Rounds: 5
+Budget consumed: 180000
+Summary: review stopped at max rounds without convergence.
+
+### Round 5
+No findings.`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('`max_rounds_reached`')
+    expect(output).toContain('`needs_decision`')
+    expect(output).toContain('Resolve the blocking decision')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('ready output includes explicit user confirmation wording', async () => {
+    const directory = await createGitFixture('ready-confirmation-wording', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerifyWithReadiness(callLog, 'ready'),
+    })
+
+    expect(output).toContain('`ready`')
+    expect(output).toContain('requires explicit user confirmation before proceeding')
+    expect(output).not.toContain('is ready for archive')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -1395,6 +1440,147 @@ Summary: one design divergence was accepted as a known issue after verify eviden
 
     // acceptFailures should be undefined — no previous accept to preserve
     expect(capture.acceptFailures).toBeUndefined()
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  // ── Integration evidence gap reason codes appear in quality gate output ────
+
+  test('missing_integration_evidence reason code appears in quality gate output', async () => {
+    const directory = await createGitFixture('integration-evidence-missing', 'trivial')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory)
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideVerify: async () => [
+        '## Verify',
+        `Feature: ${FEATURE_A}`,
+        '',
+        '### Evidence',
+        '- checks_run:',
+        '  - active_feature_resolution ✅ (mock)',
+        '- observed_behavior_summary: mock verify evidence',
+        '- intended_vs_actual_delta: no delta (mock)',
+        '- doc_alignment_summary: mock alignment',
+        '- current_decisions_conflict_summary: no conflicts (mock)',
+        '- known_risks_or_missing_evidence: missing integration evidence',
+        '',
+        '### Readiness',
+        '- status: not_ready',
+        '- reason_codes: missing_integration_evidence',
+        '- reason: Integration evidence gap detected',
+        '- next_step: fix integration evidence gaps',
+        '',
+      ].join('\n'),
+    })
+
+    // Quality gate output should contain the verify output with integration evidence gap
+    expect(output).toContain('### Evidence-Aware Verify')
+    expect(output).toContain('missing_integration_evidence')
+    expect(output).toContain('not_ready')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('stale_integration_evidence reason code appears in quality gate output', async () => {
+    const directory = await createGitFixture('integration-evidence-stale', 'trivial')
+    const ctx = createStandardContext(directory)
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideVerify: async () => [
+        '## Verify',
+        `Feature: ${FEATURE_A}`,
+        '',
+        '### Evidence',
+        '- checks_run:',
+        '  - active_feature_resolution ✅ (mock)',
+        '- observed_behavior_summary: mock verify evidence',
+        '- intended_vs_actual_delta: no delta (mock)',
+        '- doc_alignment_summary: mock alignment',
+        '- current_decisions_conflict_summary: no conflicts (mock)',
+        '- known_risks_or_missing_evidence: stale integration evidence',
+        '',
+        '### Readiness',
+        '- status: not_ready',
+        '- reason_codes: stale_integration_evidence',
+        '- reason: Integration evidence is stale',
+        '- next_step: re-verify integration evidence',
+        '',
+      ].join('\n'),
+    })
+
+    expect(output).toContain('### Evidence-Aware Verify')
+    expect(output).toContain('stale_integration_evidence')
+    expect(output).toContain('not_ready')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('integration_evidence_needs_decision reason code appears in quality gate output', async () => {
+    const directory = await createGitFixture('integration-evidence-needs-decision', 'trivial')
+    const ctx = createStandardContext(directory)
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideVerify: async () => [
+        '## Verify',
+        `Feature: ${FEATURE_A}`,
+        '',
+        '### Evidence',
+        '- checks_run:',
+        '  - active_feature_resolution ✅ (mock)',
+        '- observed_behavior_summary: mock verify evidence',
+        '- intended_vs_actual_delta: no delta (mock)',
+        '- doc_alignment_summary: mock alignment',
+        '- current_decisions_conflict_summary: no conflicts (mock)',
+        '- known_risks_or_missing_evidence: integration evidence freshness unknown',
+        '',
+        '### Readiness',
+        '- status: not_ready',
+        '- reason_codes: integration_evidence_needs_decision',
+        '- reason: Integration evidence freshness is unknown, needs decision',
+        '- next_step: decide on integration evidence status',
+        '',
+      ].join('\n'),
+    })
+
+    expect(output).toContain('### Evidence-Aware Verify')
+    expect(output).toContain('integration_evidence_needs_decision')
+    expect(output).toContain('not_ready')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('multiple integration evidence gap reason codes appear together', async () => {
+    const directory = await createGitFixture('integration-evidence-multi-gap', 'trivial')
+    const ctx = createStandardContext(directory)
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideVerify: async () => [
+        '## Verify',
+        `Feature: ${FEATURE_A}`,
+        '',
+        '### Evidence',
+        '- checks_run:',
+        '  - active_feature_resolution ✅ (mock)',
+        '- observed_behavior_summary: mock verify evidence',
+        '- intended_vs_actual_delta: no delta (mock)',
+        '- doc_alignment_summary: mock alignment',
+        '- current_decisions_conflict_summary: no conflicts (mock)',
+        '- known_risks_or_missing_evidence: multiple integration evidence gaps',
+        '',
+        '### Readiness',
+        '- status: not_ready',
+        '- reason_codes: missing_integration_evidence, stale_integration_evidence',
+        '- reason: Multiple integration evidence gaps detected',
+        '- next_step: fix all integration evidence gaps',
+        '',
+      ].join('\n'),
+    })
+
+    expect(output).toContain('### Evidence-Aware Verify')
+    expect(output).toContain('missing_integration_evidence')
+    expect(output).toContain('stale_integration_evidence')
+    expect(output).toContain('not_ready')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)

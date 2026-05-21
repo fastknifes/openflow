@@ -2,7 +2,9 @@ export {
   generateImplementationMapper,
   saveImplementationMapperDocument,
   generateAndSaveImplementationMapper,
+  generateBehaviorCodeMapper,
   type ImplementationMapperOptions,
+  type BehaviorCodeMapperOptions,
 } from './implementation-mapper.js'
 export {
   collectTraceabilityItems,

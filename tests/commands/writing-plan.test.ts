@@ -230,3 +230,65 @@ describe('writing-plan dual-path contract', () => {
     expect(skill.content).toContain('checked tasks or progress notes')
   })
 })
+
+describe('writing-plan config-based paths', () => {
+  test('uses custom paths.changes and paths.plans from config', async () => {
+    const root = join(process.cwd(), '.test-wp-custom-paths')
+    await rm(root, { recursive: true, force: true })
+
+    const customChanges = 'custom/changes'
+    const customPlans = 'custom/plans'
+    const ctx = createCtx(root, {
+      paths: { changes: customChanges, plans: customPlans },
+    } as Partial<OpenFlowConfig>)
+
+    const result = await handleWritingPlan(ctx, 'custom-path-feature')
+
+    // Verify the actual resolved paths contain the custom directories (escapeMarkdown doubles backslashes in output)
+    expect(result).toContain('.test-wp-custom-paths\\\\custom\\\\changes\\\\custom-path-feature\\\\plan.md')
+    expect(result).toContain('.test-wp-custom-paths\\\\custom\\\\plans\\\\custom-path-feature.md')
+
+    await rm(root, { recursive: true, force: true })
+  })
+})
+
+describe('writing-plan packet content contracts', () => {
+  test('packet contains blocking clarification instruction', async () => {
+    const root = join(process.cwd(), '.test-wp-blocking')
+    await rm(root, { recursive: true, force: true })
+
+    const result = await handleWritingPlan(createCtx(root), 'blocking-check')
+
+    expect(result).toContain('Blocking Clarification')
+    expect(result).toContain('stop and ask clarifying questions')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('packet contains agent target section', async () => {
+    const root = join(process.cwd(), '.test-wp-agent-target')
+    await rm(root, { recursive: true, force: true })
+
+    const result = await handleWritingPlan(createCtx(root), 'agent-target-check')
+
+    expect(result).toContain('Agent Target')
+    expect(result).toContain('Prometheus')
+    expect(result).toContain('OpenCode native')
+    expect(result).toContain('plan')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('packet references openflow-quality-gate and not /openflow-verify', async () => {
+    const root = join(process.cwd(), '.test-wp-quality-gate-ref')
+    await rm(root, { recursive: true, force: true })
+
+    const result = await handleWritingPlan(createCtx(root), 'quality-gate-ref')
+
+    expect(result).toContain('openflow-quality-gate')
+    expect(result).not.toContain('/openflow-verify')
+    expect(result).toContain('Do not claim completion until the quality gate reports readiness')
+
+    await rm(root, { recursive: true, force: true })
+  })
+})

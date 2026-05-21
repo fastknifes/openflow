@@ -179,14 +179,14 @@ Coordinator 据此判断置信度：
 
 ### 6.3 终止状态
 
-| 状态 | 条件 |
-|------|------|
-| `pass` | 无 blocking/spec_violation/high-confidence regression_risk |
-| `pass_with_risks` | 连续 2 轮只有 non-blocking |
-| `max_rounds_reached` | 达到硬上限 |
-| `budget_exhausted` | 达到 token 预算 |
-| `needs_human` | design_ambiguity / unresolvable_by_ai / executor 多次失败 |
-| `rejected` | trivial 需求 |
+| 状态 | 条件 | 质量门处理 |
+|------|------|-----------|
+| `pass` | 无 blocking/spec_violation/high-confidence regression_risk | 不阻塞 |
+| `pass_with_risks` | 连续 2 轮只有 non-blocking | 不阻塞 |
+| `max_rounds_reached` | 达到硬上限 | **阻塞为 NeedsDecision** |
+| `budget_exhausted` | 达到 token 预算 | **阻塞为 NeedsDecision** |
+| `needs_human` | design_ambiguity / unresolvable_by_ai / executor 多次失败 | 阻塞为 NeedsDecision |
+| `rejected` | trivial 需求 | 不运行 |
 
 ---
 

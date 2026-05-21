@@ -54,11 +54,16 @@ describe('init-content constants', () => {
     expect(results).toHaveLength(4)
   })
 
-  test('INIT_RESULT_MESSAGES has exact strings for all results', () => {
-    expect(INIT_RESULT_MESSAGES.initialized).toBe('initialized AGENTS.md and added OpenFlow docs guide')
-    expect(INIT_RESULT_MESSAGES.refreshed).toBe('refreshed OpenFlow docs guide')
-    expect(INIT_RESULT_MESSAGES.appended).toBe('appended OpenFlow docs guide')
-    expect(INIT_RESULT_MESSAGES.safe_repair).toBe('appended fresh OpenFlow docs guide as safe repair')
+  test('INIT_RESULT_MESSAGES contains expected phrases for all results', () => {
+    expect(INIT_RESULT_MESSAGES.initialized).toContain('initialized AGENTS.md and added OpenFlow docs guide')
+    expect(INIT_RESULT_MESSAGES.refreshed).toContain('refreshed OpenFlow docs guide')
+    expect(INIT_RESULT_MESSAGES.appended).toContain('appended OpenFlow docs guide')
+    expect(INIT_RESULT_MESSAGES.safe_repair).toContain('appended fresh OpenFlow docs guide as safe repair')
+    // All messages now include a formatted header
+    expect(INIT_RESULT_MESSAGES.initialized).toContain('## OpenFlow Init Complete')
+    expect(INIT_RESULT_MESSAGES.refreshed).toContain('## OpenFlow Init Complete')
+    expect(INIT_RESULT_MESSAGES.appended).toContain('## OpenFlow Init Complete')
+    expect(INIT_RESULT_MESSAGES.safe_repair).toContain('## OpenFlow Init Complete')
   })
 
   test('default newline is LF', () => {

@@ -73,7 +73,7 @@
 ## 6. 相关文档
 
 - [设计文档](./design.md)
-- [执行计划](../../.sisyphus/plans/rename-brainstorm-to-feature.md)
+- [执行计划](../../.sisyphus/plans/harden-orchestration-redesign.md)
 
 ---
 
@@ -81,11 +81,29 @@
 
 | 日期 | 版本 | 变更内容 | 作者 |
 |------|------|----------|------|
-| 2026-05-13 | 1.0 | 初始版本 | - |
+| 2026-05-21 | 1.0 | 初始版本 | - |
 
 # rename-brainstorm-to-feature - Product Requirements Document
 
 **Date**: 2026-05-13
+**Version**: 1.0
+**Priority**: P1
+**Status**: Draft
+
+---
+
+# feature-confirmation-interaction - Product Requirements Document
+
+**Date**: 2026-05-21
+**Version**: 1.0
+**Priority**: P1
+**Status**: Draft
+
+---
+
+# harden-orchestration-redesign - Product Requirements Document
+
+**Date**: 2026-05-21
 **Version**: 1.0
 **Priority**: P1
 **Status**: Draft

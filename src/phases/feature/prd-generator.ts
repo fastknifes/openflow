@@ -3,7 +3,8 @@ import * as fs from 'node:fs/promises'
 import { escapeMarkdown, findLatestDocument, createSafePath, sanitizeFeatureName } from '../../utils/security.js'
 import { logger } from '../../utils/logger.js'
 import type { OpenFlowContext } from '../../types.js'
-import { CHANGE_WORKSPACE_DIR, getChangeWorkspacePath } from '../../config.js'
+import { defaultConfig } from '../../types.js'
+import { getChangeWorkspacePath } from '../../config.js'
 import { RequirementModelSchema, type RequirementModel } from './requirement-model.js'
 
 export interface PrdGenerationOptions {
@@ -23,9 +24,7 @@ const PRD_TEMPLATE_PATH = 'templates/prd.md'
 
 type FeaturePhaseConfig = {
   enabled: boolean
-  output_dir: string
   generate_prd: boolean
-  prd_output_dir: string
 }
 
 /**
@@ -607,9 +606,10 @@ async function resolveWorkspacePaths(
     }
   }
 
+  const changesDir = config.paths?.changes ?? defaultConfig.paths.changes
   return {
-    designDir: createSafePath(projectDir, resolveFeaturePhaseConfig(config).output_dir, feature),
-    requirementsDir: createSafePath(projectDir, resolveFeaturePhaseConfig(config).prd_output_dir, feature),
+    designDir: createSafePath(projectDir, changesDir, feature),
+    requirementsDir: createSafePath(projectDir, changesDir, feature),
   }
 }
 
@@ -624,9 +624,7 @@ function resolveFeaturePhaseConfig(config: OpenFlowContext['config']): FeaturePh
     const value = candidate as Partial<FeaturePhaseConfig>
     if (
       typeof value.enabled === 'boolean'
-      && typeof value.output_dir === 'string'
       && typeof value.generate_prd === 'boolean'
-      && typeof value.prd_output_dir === 'string'
     ) {
       return value as FeaturePhaseConfig
     }
@@ -638,7 +636,7 @@ function resolveFeaturePhaseConfig(config: OpenFlowContext['config']): FeaturePh
 async function findExistingChangeWorkspacePath(projectDir: string, feature: string): Promise<string | null> {
   const sanitizedFeature = sanitizeFeatureName(feature)
   const candidates = [await getChangeWorkspacePath(projectDir, sanitizedFeature)]
-  const changesDir = createSafePath(projectDir, CHANGE_WORKSPACE_DIR)
+  const changesDir = createSafePath(projectDir, defaultConfig.paths.changes)
 
   try {
     const entries = await fs.readdir(changesDir, { withFileTypes: true })

@@ -4,6 +4,7 @@ import type { RequirementModel } from './requirement-model.js'
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
 export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
 export type FeatureDraftStatus = 'final' | 'draft_with_assumptions'
+export type PostDesignDecision = 'proceed_to_plan' | 'review_docs' | 'inspect'
 
 export interface FeatureOption {
   label: string
@@ -26,12 +27,14 @@ export interface FeatureSession {
   pendingQuestionId: FeatureQuestionId | null
   promptMode?: 'question' | 'discussion' | undefined
   askedQuestionIds: FeatureQuestionId[]
+  questionPickerPromptedIds: FeatureQuestionId[]
   answers: Partial<Record<FeatureQuestionId, string>>
   assumptions: string[]
   pendingConfirmations: string[]
   skippedQuestionIds: FeatureQuestionId[]
   abstractionPreference?: 'product' | 'implementation' | undefined
   draftStatus: FeatureDraftStatus
+  postDesignDecision?: PostDesignDecision | undefined
   requirementModel?: RequirementModel
   generatedDocs: string[]
   generationAttemptCount: number
@@ -48,6 +51,7 @@ type LegacyFeatureSession = {
   status?: string
   currentQuestionId?: FeatureQuestionId | null
   askedQuestionIds?: FeatureQuestionId[]
+  questionPickerPromptedIds?: FeatureQuestionId[]
   answers?: Partial<Record<FeatureQuestionId, string>>
   featureTitle?: string
   sourceIntent?: string
@@ -56,6 +60,7 @@ type LegacyFeatureSession = {
   skippedQuestionIds?: FeatureQuestionId[]
   abstractionPreference?: string
   draftStatus?: FeatureDraftStatus
+  postDesignDecision?: string
   generatedDocs?: string[]
   lastConsumedMessageId?: string
   updatedAt?: string
@@ -127,6 +132,7 @@ export function createInitialFeatureSession(feature: string): FeatureSession {
     pendingQuestionId: QUESTIONS[0]?.id ?? null,
     promptMode: 'question',
     askedQuestionIds: [],
+    questionPickerPromptedIds: [],
     answers: {},
     assumptions: [],
     pendingConfirmations: [],
@@ -161,12 +167,16 @@ export function normalizeFeatureSession(feature: string, raw: unknown): FeatureS
     pendingQuestionId: workflowState === 'collecting' ? pendingQuestionId : null,
     promptMode: parsed.promptMode === 'discussion' ? 'discussion' : 'question',
     askedQuestionIds: Array.isArray(parsed.askedQuestionIds) ? uniqueQuestionIds(parsed.askedQuestionIds) : deriveAskedQuestionIds(answers),
+    questionPickerPromptedIds: Array.isArray(parsed.questionPickerPromptedIds) ? uniqueQuestionIds(parsed.questionPickerPromptedIds) : [],
     answers,
     assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions.filter((item): item is string => typeof item === 'string') : [],
     pendingConfirmations: Array.isArray(parsed.pendingConfirmations) ? parsed.pendingConfirmations.filter((item): item is string => typeof item === 'string') : [],
     skippedQuestionIds: Array.isArray(parsed.skippedQuestionIds) ? uniqueQuestionIds(parsed.skippedQuestionIds) : [],
     abstractionPreference: parsed.abstractionPreference === 'product' || parsed.abstractionPreference === 'implementation' ? parsed.abstractionPreference : undefined,
     draftStatus: parsed.draftStatus === 'draft_with_assumptions' ? 'draft_with_assumptions' : 'final',
+    postDesignDecision: parsed.postDesignDecision === 'proceed_to_plan' || parsed.postDesignDecision === 'review_docs' || parsed.postDesignDecision === 'inspect'
+      ? parsed.postDesignDecision
+      : undefined,
     requirementModel,
     generatedDocs,
     generationAttemptCount: typeof parsed.generationAttemptCount === 'number' ? parsed.generationAttemptCount : 0,

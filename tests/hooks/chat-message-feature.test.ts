@@ -39,6 +39,12 @@ function createOutput(text: string) {
   } as Parameters<ReturnType<typeof createChatMessageHook>>[1]
 }
 
+function createOutputWithAgent(text: string, agent: string) {
+  const output = createOutput(text)
+  output.message.agent = agent
+  return output
+}
+
 function firstOutputText(output: ReturnType<typeof createOutput>): string {
   return ((output.parts[0] as { text?: string }).text) ?? ''
 }
@@ -62,13 +68,61 @@ describe('chat-message feature guidance', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('suppresses feature suggestion during active Prometheus planning discussion', async () => {
+    const root = join(process.cwd(), '.test-chat-prometheus-suppression')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutputWithAgent('继续完善 openflow-writing-plan 的执行计划', 'Prometheus (Plan Builder)')
+
+    await hook(createInput('session-prometheus'), output)
+
+    expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
+    expect(firstOutputText(output)).toBe('继续完善 openflow-writing-plan 的执行计划')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('suppresses feature suggestion for OpenFlow command echo messages', async () => {
+    const root = join(process.cwd(), '.test-chat-command-echo-suppression')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('OpenFlow command: /openflow-issue question-ledger-flow-suppression')
+
+    await hook(createInput('session-issue-command-echo'), output)
+
+    expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('active issue workspace suppresses feature design suggestions', async () => {
     const root = join(process.cwd(), '.test-chat-issue-mode-active')
     await rm(root, { recursive: true, force: true })
     await mkdir(join(root, 'docs', 'changes', '2026-05-13-api-500'), { recursive: true })
+    // issue-packet.json is always written by /openflow-issue (issue-clarification.md
+    // is only written with --write-doc or --resolve). The suppression logic should
+    // detect the active issue via issue-packet.json alone.
     await writeFile(
-      join(root, 'docs', 'changes', '2026-05-13-api-500', 'issue-clarification.md'),
-      '# Issue Clarification\n\n### 1. Issue Intake\nAPI returns 500.',
+      join(root, 'docs', 'changes', '2026-05-13-api-500', 'issue-packet.json'),
+      JSON.stringify({
+        version: 1,
+        slug: 'api-500',
+        symptom: 'API returns 500.',
+        environment: 'local',
+        status: 'reported',
+        classification: 'cannot_determine',
+        confidence: 'low',
+        evidence: [{ source: 'user_report', summary: 'API returns 500.' }],
+        hypotheses: ['Investigate first.'],
+        requiredChecks: ['openflow-quality-gate'],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        sessionID: 'session-issue-active',
+      }),
       'utf-8',
     )
 
@@ -107,8 +161,22 @@ describe('chat-message feature guidance', () => {
     await rm(root, { recursive: true, force: true })
     await mkdir(join(root, 'docs', 'changes', '2026-05-13-api-500'), { recursive: true })
     await writeFile(
-      join(root, 'docs', 'changes', '2026-05-13-api-500', 'issue-clarification.md'),
-      '# Issue Clarification\n\n### 1. Issue Intake\nAPI returns 500.',
+      join(root, 'docs', 'changes', '2026-05-13-api-500', 'issue-packet.json'),
+      JSON.stringify({
+        version: 1,
+        slug: 'api-500',
+        symptom: 'API returns 500.',
+        environment: 'local',
+        status: 'reported',
+        classification: 'cannot_determine',
+        confidence: 'low',
+        evidence: [{ source: 'user_report', summary: 'API returns 500.' }],
+        hypotheses: ['Investigate first.'],
+        requiredChecks: ['openflow-quality-gate'],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        sessionID: 'session-issue-dedupe',
+      }),
       'utf-8',
     )
 
@@ -437,6 +505,94 @@ describe('chat-message feature guidance', () => {
     const parts = output.parts as Array<{ text?: string }>
     const allText = parts.map(p => p.text ?? '').join('\n')
     expect(allText).toContain('/refactor main')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('session-scoped issue only blocks the same session', async () => {
+    const root = join(process.cwd(), '.test-chat-issue-session-scoped')
+    await rm(root, { recursive: true, force: true })
+    const workspace = join(root, 'docs', 'changes', '2026-05-13-api-500')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(
+      join(workspace, 'issue-clarification.md'),
+      '# Issue Clarification\n\n### 1. Issue Intake\nAPI returns 500.',
+      'utf-8',
+    )
+    await writeFile(
+      join(workspace, 'issue-packet.json'),
+      JSON.stringify({
+        version: 1,
+        slug: 'api-500',
+        symptom: 'API returns 500',
+        environment: 'local',
+        status: 'reported',
+        classification: 'cannot_determine',
+        confidence: 'low',
+        evidence: [],
+        hypotheses: [],
+        requiredChecks: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        sessionID: 'session-issue-owner',
+      }, null, 2),
+      'utf-8',
+    )
+
+    const hook = createChatMessageHook(createContext(root))
+
+    // Same session should be blocked
+    const outputBlocked = createOutput('帮我写一个登录功能')
+    await hook(createInput('session-issue-owner'), outputBlocked)
+    expect(firstOutputText(outputBlocked)).toContain('OpenFlow: Issue Investigation Active')
+    expect(firstOutputText(outputBlocked)).not.toContain('Feature Design Suggested')
+
+    // Different session should NOT be blocked
+    const outputAllowed = createOutput('帮我写一个登录功能')
+    await hook(createInput('session-other'), outputAllowed)
+    expect(firstOutputText(outputAllowed)).not.toContain('OpenFlow: Issue Investigation Active')
+    expect(firstOutputText(outputAllowed)).toContain('Feature Design Suggested')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('legacy issue without sessionID blocks all sessions', async () => {
+    const root = join(process.cwd(), '.test-chat-issue-legacy-block')
+    await rm(root, { recursive: true, force: true })
+    const workspace = join(root, 'docs', 'changes', '2026-05-13-api-500')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(
+      join(workspace, 'issue-clarification.md'),
+      '# Issue Clarification\n\n### 1. Issue Intake\nAPI returns 500.',
+      'utf-8',
+    )
+    await writeFile(
+      join(workspace, 'issue-packet.json'),
+      JSON.stringify({
+        version: 1,
+        slug: 'api-500',
+        symptom: 'API returns 500',
+        environment: 'local',
+        status: 'reported',
+        classification: 'cannot_determine',
+        confidence: 'low',
+        evidence: [],
+        hypotheses: [],
+        requiredChecks: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        // No sessionID — legacy behavior
+      }, null, 2),
+      'utf-8',
+    )
+
+    const hook = createChatMessageHook(createContext(root))
+
+    // Any session should be blocked for legacy issues (backward-compatible safety)
+    const outputBlocked = createOutput('帮我写一个登录功能')
+    await hook(createInput('session-any'), outputBlocked)
+    expect(firstOutputText(outputBlocked)).toContain('OpenFlow: Issue Investigation Active')
+    expect(firstOutputText(outputBlocked)).not.toContain('Feature Design Suggested')
 
     await rm(root, { recursive: true, force: true })
   })

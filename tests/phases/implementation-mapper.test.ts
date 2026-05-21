@@ -181,9 +181,9 @@ Then:
     })
 
     expect(content).toContain('## 3. 行为到实现映射')
-    expect(content).toContain('| Behavior Scenario | Type | Expected Behavior | Evidence | Code Files | Key Symbols | Notes |')
-    expect(content).toContain('| User can complete core flow | scenario | Given user has valid input / When user runs the command / Then result is generated | — | — | — | Critical behavior scenario. |')
-    expect(content).toContain('| Missing optional context | boundary | Given optional context is absent / When user runs the command / Then system continues with fallback | — | — | — | Boundary scenario; should-pass evidence. |')
+    expect(content).toContain('| Behavior Scenario | Type | Expected Behavior | Evidence | Coverage Level | Freshness | Status | Code Files | Notes |')
+    expect(content).toContain('| User can complete core flow | scenario | Given user has valid input / When user runs the command / Then result is generated | N/A | missing | unknown | missing_evidence | src/lib.ts | Critical behavior scenario. |')
+    expect(content).toContain('| Missing optional context | boundary | Given optional context is absent / When user runs the command / Then system continues with fallback | N/A | not_applicable | unknown | not_applicable | src/lib.ts | Boundary scenario; should-pass evidence; advisory. |')
     expect(content).toContain('## 4. 验证与结论')
   })
 })

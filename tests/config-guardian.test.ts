@@ -14,8 +14,9 @@ describe('guardian config validation', () => {
     expect(config.guardian.auto_start).toBe(defaultConfig.guardian.auto_start)
     expect(config.guardian.auto_fix).toBe(defaultConfig.guardian.auto_fix)
     expect(config.guardian.max_retries).toBe(defaultConfig.guardian.max_retries)
-    expect(config.guardian.state_dir).toBe(defaultConfig.guardian.state_dir)
     expect(config.guardian.contract_cache).toBe(defaultConfig.guardian.contract_cache)
+    // state_dir removed — paths.guardian_state is the new location
+    expect(config.paths.guardian_state).toBe(defaultConfig.paths.guardian_state)
   })
 
   test('invalid guardian.enabled (string) returns defaults', () => {
@@ -63,14 +64,13 @@ describe('guardian config validation', () => {
     expect(config.guardian).toEqual(defaultConfig.guardian)
   })
 
-  test('valid guardian state_dir passes validation', () => {
+  test('valid paths.guardian_state passes validation', () => {
     const config = loadConfig({
       openflow: {
-        guardian: { state_dir: 'data/guardian-state' },
+        paths: { guardian_state: 'data/guardian-state' },
       },
     })
-    expect(config.guardian.state_dir).toBe('data/guardian-state')
-    // Other fields should be defaults
+    expect(config.paths.guardian_state).toBe('data/guardian-state')
     expect(config.guardian.enabled).toBe(defaultConfig.guardian.enabled)
   })
 
@@ -92,22 +92,30 @@ describe('guardian config validation', () => {
         },
       },
     })
-    // Overridden fields
     expect(config.guardian.enabled).toBe(false)
     expect(config.guardian.max_retries).toBe(5)
-    // Preserved defaults
     expect(config.guardian.auto_start).toBe(defaultConfig.guardian.auto_start)
     expect(config.guardian.auto_fix).toBe(defaultConfig.guardian.auto_fix)
-    expect(config.guardian.state_dir).toBe(defaultConfig.guardian.state_dir)
     expect(config.guardian.contract_cache).toBe(defaultConfig.guardian.contract_cache)
   })
 
-  test('invalid guardian.state_dir with path traversal returns defaults', () => {
+  test('removed guardian.state_dir is rejected and returns defaults', () => {
     const config = loadConfig({
       openflow: {
-        guardian: { state_dir: '../../../etc/passwd' },
+        guardian: { state_dir: 'data/guardian-state' },
       },
     })
+    // state_dir is no longer a valid field; strict schema rejects the guardian object
     expect(config.guardian).toEqual(defaultConfig.guardian)
+    expect(config.paths.guardian_state).toBe(defaultConfig.paths.guardian_state)
+  })
+
+  test('invalid paths.guardian_state with path traversal returns defaults', () => {
+    const config = loadConfig({
+      openflow: {
+        paths: { guardian_state: '../../../etc/passwd' },
+      },
+    })
+    expect(config.paths).toEqual(defaultConfig.paths)
   })
 })

@@ -3,9 +3,10 @@ import type { OpenFlowContext } from '../types.js'
 import { handleFeature } from '../commands/feature.js'
 import { handleArchive, handleInit, handleStatus, handleConfig, handleMigrateDocs, handleIssue } from '../commands/index.js'
 import { handleChange } from '../commands/change.js'
-import { readDesignContextPacket } from '../commands/writing-plan.js'
+import { handleWritingPlan } from '../commands/writing-plan.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { appendGuardMessage } from './feature-workflow.js'
+import { detectPlanAgent } from '../utils/agent-router.js'
 
 type ChatInput = Parameters<NonNullable<Hooks['chat.message']>>[0]
 type ChatOutput = Parameters<NonNullable<Hooks['chat.message']>>[1]
@@ -108,11 +109,18 @@ export async function dispatchOpenFlowCommand(
         appendGuardMessage(output, 'Feature name is required. Usage: /openflow-writing-plan <feature-name>')
         return true
       }
-      const contextPacket = await readDesignContextPacket(ctx.directory, resolvedFeature)
-      const result = contextPacket
-        ? `## Writing Plan Context\n\nFeature: \`${resolvedFeature}\`\n\n${contextPacket}`
-        : `No design context found for feature \`${resolvedFeature}\`. Run \`/openflow-feature\` in this session first and describe the feature in natural language.`
-      appendGuardMessage(output, result)
+      const agent = await detectPlanAgent(ctx, message)
+      const packet = await handleWritingPlan(ctx, resolvedFeature)
+      const agentNote = agent === 'prometheus'
+        ? '\n\n**Agent Target**: prometheus\n\nSwitch to Prometheus planner to continue.'
+        : '\n\n**Agent Target**: plan\n\nSwitch to OpenCode plan agent to continue.'
+      appendGuardMessage(output, packet + agentNote)
+      // Programmatic agent switch: set output.message.agent so the runtime routes to the correct agent
+      const rawOutput = output as unknown as Record<string, unknown>
+      const msg = rawOutput.message as Record<string, unknown> | undefined
+      if (msg && typeof msg === 'object') {
+        msg['agent'] = agent === 'prometheus' ? 'prometheus' : 'plan'
+      }
     } catch (err) {
       appendGuardMessage(output, err instanceof Error ? err.message : String(err))
     }
@@ -128,7 +136,7 @@ export async function dispatchOpenFlowCommand(
   if (issueMatch) {
     const feature = issueMatch[1]?.trim()
     try {
-      const result = await handleIssue(ctx, feature || undefined)
+      const result = await handleIssue(ctx, feature || undefined, undefined, undefined, input.sessionID)
       appendGuardMessage(output, result)
     } catch (err) {
       appendGuardMessage(output, err instanceof Error ? err.message : String(err))

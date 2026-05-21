@@ -29,6 +29,7 @@ import {
   markGenerationFailed,
   markQuestionPrompted,
   normalizeFeatureSession,
+  type PostDesignDecision,
   shouldGenerateDesign,
 } from '../phases/feature/state-machine.js'
 
@@ -83,13 +84,31 @@ export async function handleFeature(
   }
 
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature.identity.slug)
-  let session = await loadFeatureSession(ctx.directory, sanitizedFeature)
+  let session = await loadFeatureSession(ctx.directory, sanitizedFeature, ctx.config.paths.feature_state)
   session = mergeIdentity(session, resolvedFeature.identity)
-  await bindSessionToFeature(ctx.directory, toolContext, sanitizedFeature)
+
+  // Auto-fill session for continuation requests to skip question collection
+  if (feature?.trim() && looksLikeFeatureContinuationRequest(feature) && resolvedFeature.identity.sourceIntent) {
+    session = {
+      ...session,
+      answers: {
+        ...session.answers,
+        problem: resolvedFeature.identity.sourceIntent,
+      },
+      skippedQuestionIds: uniqueQuestionIds([...session.skippedQuestionIds, 'scope', 'constraints', 'priority']),
+      draftStatus: 'draft_with_assumptions',
+      assumptions: uniqueStrings([
+        ...session.assumptions,
+        'Feature intent inferred from session context; details may need refinement.',
+      ]),
+    }
+  }
+
+  await bindSessionToFeature(ctx.directory, toolContext, sanitizedFeature, ctx.config.paths.feature_state)
   await clearRecentFeatureCompletion(ctx.directory, getToolSessionID(toolContext))
 
   if (session.workflowState === 'completed' && session.generatedDocs.length > 0) {
-    await clearSessionBindingIfCompleted(ctx.directory, toolContext, session)
+    await clearSessionBindingIfCompleted(ctx.directory, toolContext, session, ctx.config.paths.feature_state)
     return formatGenerationResultAll(sanitizedFeature, session.generatedDocs, session.featureTitle)
   }
 
@@ -99,7 +118,7 @@ export async function handleFeature(
         const convergence = evaluateFeatureConvergence(session, answer)
         if (convergence.kind === 'ask_next' && convergence.question) {
           session = markQuestionPrompted(session, convergence.question.id)
-          await saveFeatureSession(ctx.directory, session)
+          await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
           return formatQuestionPrompt(sanitizedFeature, session, convergence.question, convergence.rationale)
         }
 
@@ -123,7 +142,7 @@ export async function handleFeature(
       }
 
       session = markQuestionPrompted(session, pendingQuestion.id)
-      await saveFeatureSession(ctx.directory, session)
+      await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
       return `${validationError}\n\n${formatQuestionPrompt(sanitizedFeature, session, pendingQuestion)}`
     }
 
@@ -146,7 +165,7 @@ export async function handleFeature(
     } else {
       session = applyFeatureAnswer(session, answer, messageID)
     }
-    await saveFeatureSession(ctx.directory, session)
+    await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
   }
 
   const convergence = evaluateFeatureConvergence(session, answer)
@@ -160,7 +179,7 @@ export async function handleFeature(
       assumptions: uniqueStrings([...session.assumptions, ...convergence.assumptions]),
       pendingConfirmations: uniqueStrings([...session.pendingConfirmations, ...convergence.pendingConfirmations]),
     }
-    await saveFeatureSession(ctx.directory, session)
+    await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
     return finalizeFeature(ctx, session, toolContext)
   }
 
@@ -169,10 +188,13 @@ export async function handleFeature(
     return finalizeFeature(ctx, session, toolContext)
   }
 
+  const wasQuestionPickerAlreadyPrompted = session.questionPickerPromptedIds.includes(pendingQuestion.id)
   session = markQuestionPrompted(session, pendingQuestion.id)
-  await saveFeatureSession(ctx.directory, session)
+  await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
 
-  if (hasAskQuestion(toolContext) && !answer?.trim() && isAwaitingFormalAnswer(session)) {
+  if (hasAskQuestion(toolContext) && !answer?.trim() && isAwaitingFormalAnswer(session) && !wasQuestionPickerAlreadyPrompted) {
+    session = markQuestionPickerPrompted(session, pendingQuestion.id)
+    await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
     const interactiveAnswer = await askSingleQuestion(session, pendingQuestion, toolContext)
     if (interactiveAnswer) {
       return handleFeature(ctx, sanitizedFeature, interactiveAnswer, toolContext)
@@ -189,7 +211,7 @@ async function finalizeFeature(
 ): Promise<string> {
   const existingGenerated = session.generatedDocs[0]
   if (session.workflowState === 'completed' && existingGenerated) {
-    await clearSessionBindingIfCompleted(ctx.directory, toolContext, session)
+    await clearSessionBindingIfCompleted(ctx.directory, toolContext, session, ctx.config.paths.feature_state)
     return formatGenerationResultAll(session.feature, session.generatedDocs, session.featureTitle, session.requirementModel)
   }
 
@@ -202,14 +224,14 @@ async function finalizeFeature(
       ...session,
       requirementModel,
     })
-    await saveFeatureSession(ctx.directory, generatingSession)
+    await saveFeatureSession(ctx.directory, generatingSession, ctx.config.paths.feature_state)
 
     const { designPath, behaviorPath, requirementModel: validatedModel } = await generateDesignDocument(ctx, generatingSession)
     const allGeneratedDocs = [designPath]
     if (behaviorPath) {
       allGeneratedDocs.push(behaviorPath)
     }
-    const completedSession = markCompleted(
+    let completedSession = markCompleted(
       {
         ...generatingSession,
         requirementModel: validatedModel,
@@ -217,14 +239,33 @@ async function finalizeFeature(
       },
       allGeneratedDocs
     )
-    await saveFeatureSession(ctx.directory, completedSession)
+    await saveFeatureSession(ctx.directory, completedSession, ctx.config.paths.feature_state)
     await markRecentFeatureCompletion(ctx.directory, getToolSessionID(toolContext), completedSession.feature)
-    await clearSessionBindingIfCompleted(ctx.directory, toolContext, completedSession)
-    return formatGenerationResultAll(session.feature, completedSession.generatedDocs, completedSession.featureTitle, validatedModel)
+    await clearSessionBindingIfCompleted(ctx.directory, toolContext, completedSession, ctx.config.paths.feature_state)
+
+    const baseResult = formatGenerationResultAll(session.feature, completedSession.generatedDocs, completedSession.featureTitle, validatedModel)
+
+    if (hasAskQuestion(toolContext) && !completedSession.postDesignDecision) {
+      const decision = await askPostDesignConfirmation(toolContext, validatedModel)
+      if (decision) {
+        completedSession = {
+          ...completedSession,
+          postDesignDecision: decision,
+        }
+        await saveFeatureSession(ctx.directory, completedSession, ctx.config.paths.feature_state)
+        return `${baseResult}\n\n${formatPostDesignDecisionResult(decision, session.feature, validatedModel)}`
+      }
+    }
+
+    if (!hasAskQuestion(toolContext)) {
+      return `${baseResult}\n\n${formatNextStepOptions()}`
+    }
+
+    return baseResult
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const failedSession = markGenerationFailed(markGenerating(session), message)
-    await saveFeatureSession(ctx.directory, failedSession)
+    await saveFeatureSession(ctx.directory, failedSession, ctx.config.paths.feature_state)
     return formatGenerationFailure(session.feature, message)
   }
 }
@@ -269,7 +310,12 @@ async function askSingleQuestion(
 
 async function resolveFeature(ctx: OpenFlowContext, feature: string | undefined, toolContext: unknown): Promise<FeatureResolution> {
   if (feature?.trim()) {
-    const existingCandidate = await resolveExistingFeatureCandidate(ctx.directory, feature)
+    if (looksLikeFeatureContinuationRequest(feature)) {
+      const continued = await resolveContinuationFeature(ctx, toolContext)
+      if (continued) return { kind: 'resolved', identity: continued }
+    }
+
+    const existingCandidate = await resolveExistingFeatureCandidate(ctx.directory, feature, ctx.config.paths.feature_state)
     if (existingCandidate) {
       return { kind: 'resolved', identity: existingCandidate }
     }
@@ -279,14 +325,14 @@ async function resolveFeature(ctx: OpenFlowContext, feature: string | undefined,
 
   const sessionID = getToolSessionID(toolContext)
   if (sessionID) {
-    const index = await loadFeatureSessionIndex(ctx.directory)
+    const index = await loadFeatureSessionIndex(ctx.directory, ctx.config.paths.feature_state)
     const activeFeature = index.bySessionID[sessionID]?.feature
     if (activeFeature) {
       return { kind: 'resolved', identity: { slug: activeFeature } }
     }
   }
 
-  const incompleteSessions = await findIncompleteFeatureSessions(ctx.directory)
+  const incompleteSessions = await findIncompleteFeatureSessions(ctx.directory, ctx.config.paths.feature_state)
   if (incompleteSessions.length === 1) {
     const candidate = incompleteSessions[0]!
     return {
@@ -311,11 +357,145 @@ async function resolveFeature(ctx: OpenFlowContext, feature: string | undefined,
   return { kind: 'missing' }
 }
 
-async function resolveExistingFeatureCandidate(projectDir: string, selection: string): Promise<DerivedFeatureIdentity | undefined> {
+function looksLikeFeatureContinuationRequest(value: string): boolean {
+  const normalized = value.trim().toLowerCase()
+  return /(?:同意|确认|采用|就按|生成.*文档|proceed|go with|generate.*docs)/iu.test(normalized)
+    && !/(?:实现|开发|新增|添加|修复|登录|优惠券|质量门|前端|预览|命名|阶段|适用)/u.test(value)
+}
+
+async function resolveContinuationFeature(ctx: OpenFlowContext, toolContext: unknown): Promise<DerivedFeatureIdentity | undefined> {
+  const sessionID = getToolSessionID(toolContext)
+  if (sessionID) {
+    const index = await loadFeatureSessionIndex(ctx.directory, ctx.config.paths.feature_state)
+    const activeFeature = index.bySessionID[sessionID]?.feature
+    if (activeFeature) {
+      return { slug: activeFeature }
+    }
+  }
+
+  const incompleteSessions = await findIncompleteFeatureSessions(ctx.directory, ctx.config.paths.feature_state)
+  if (incompleteSessions.length === 1) {
+    const candidate = incompleteSessions[0]!
+    return {
+      slug: candidate.slug,
+      title: candidate.title,
+      sourceIntent: candidate.sourceIntent,
+    }
+  }
+
+  return inferFeatureIdentityFromSessionHistory(ctx, sessionID)
+}
+
+async function inferFeatureIdentityFromSessionHistory(ctx: OpenFlowContext, sessionID: string | undefined): Promise<DerivedFeatureIdentity | undefined> {
+  if (!sessionID) return undefined
+  const client = (ctx.client as { session?: { messages?: (args: unknown) => Promise<unknown> } }).session
+  if (!client?.messages) return undefined
+
+  let response: unknown
+  try {
+    response = await client.messages({
+      path: { id: sessionID },
+      query: { directory: ctx.directory },
+    })
+  } catch {
+    try {
+      response = await client.messages({ id: sessionID, directory: ctx.directory })
+    } catch {
+      return undefined
+    }
+  }
+
+  const text = extractRecentAssistantText(response)
+  return inferFeatureIdentityFromText(text)
+}
+
+function extractRecentAssistantText(response: unknown): string {
+  const records = extractMessageRecords(response)
+  const assistantTexts = records
+    .filter((record) => record.role !== 'user')
+    .map((record) => record.text)
+    .filter(Boolean)
+
+  return assistantTexts.slice(-6).join('\n\n')
+}
+
+function extractMessageRecords(value: unknown): Array<{ role?: string; text: string }> {
+  if (Array.isArray(value)) {
+    return value.flatMap(extractMessageRecords)
+  }
+
+  if (!value || typeof value !== 'object') return []
+  const record = value as Record<string, unknown>
+
+  for (const key of ['messages', 'data', 'items', 'results']) {
+    const nested = record[key]
+    if (Array.isArray(nested)) return extractMessageRecords(nested)
+  }
+
+  const role = typeof record.role === 'string'
+    ? record.role
+    : typeof (record.message as Record<string, unknown> | undefined)?.role === 'string'
+      ? ((record.message as Record<string, unknown>).role as string)
+      : undefined
+  const text = extractTextFromUnknown(record)
+  if (!text) return []
+  return role ? [{ role, text }] : [{ text }]
+}
+
+function extractTextFromUnknown(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(extractTextFromUnknown).filter(Boolean).join('\n')
+  if (!value || typeof value !== 'object') return ''
+
+  const record = value as Record<string, unknown>
+  const directText = typeof record.text === 'string'
+    ? record.text
+    : typeof record.content === 'string'
+      ? record.content
+      : undefined
+  if (directText) return directText
+
+  const parts = Array.isArray(record.parts) ? record.parts : undefined
+  if (parts) return parts.map(extractTextFromUnknown).filter(Boolean).join('\n')
+
+  const message = record.message
+  if (message && typeof message === 'object') return extractTextFromUnknown(message)
+  return ''
+}
+
+function inferFeatureIdentityFromText(text: string): DerivedFeatureIdentity | undefined {
+  const commandSlug = [...text.matchAll(/\/openflow-feature\s+([a-z0-9][a-z0-9-]{2,63})/giu)]
+    .map((match) => match[1])
+    .filter(Boolean)
+    .pop()
+  if (commandSlug) {
+    return { slug: commandSlug }
+  }
+
+  if (/状态化硬约束|stateful\s+guardrails?/iu.test(text)) {
+    return {
+      slug: 'stateful-quality-guardrails',
+      title: '状态化质量门护栏',
+      sourceIntent: '把 OpenFlow 的 quality-gate、readiness freshness、实现期状态从提示型建议升级为状态化硬约束，防止 AI 在未完成验证前声称完成。',
+    }
+  }
+
+  if (/quality[-\s]?gate/iu.test(text) && /readiness\s+freshness|implementation\s+session|完成声明/u.test(text)) {
+    return {
+      slug: 'stateful-quality-guardrails',
+      title: '状态化质量门护栏',
+      sourceIntent: '把 quality-gate、readiness freshness、实现期状态从提示型建议升级为状态化硬约束。',
+    }
+  }
+
+  return undefined
+}
+
+async function resolveExistingFeatureCandidate(projectDir: string, selection: string, featureStateDir: string): Promise<DerivedFeatureIdentity | undefined> {
   const normalizedSelection = normalizeSelectionText(selection)
   if (!normalizedSelection) return undefined
 
-  const candidates = await findIncompleteFeatureSessions(projectDir)
+  const candidates = await findIncompleteFeatureSessions(projectDir, featureStateDir)
   const matched = candidates.find((candidate) => {
     const values = [candidate.slug, candidate.title, candidate.sourceIntent]
       .map((value) => normalizeSelectionText(value ?? ''))
@@ -334,8 +514,8 @@ async function resolveExistingFeatureCandidate(projectDir: string, selection: st
   }
 }
 
-async function loadFeatureSession(projectDir: string, feature: string): Promise<FeatureSession> {
-  const sessionPath = getFeatureSessionPath(projectDir, feature)
+async function loadFeatureSession(projectDir: string, feature: string, featureStateDir: string): Promise<FeatureSession> {
+  const sessionPath = getFeatureSessionPath(projectDir, feature, featureStateDir)
 
   try {
     const content = await fs.readFile(sessionPath, 'utf-8')
@@ -345,9 +525,9 @@ async function loadFeatureSession(projectDir: string, feature: string): Promise<
   }
 }
 
-async function saveFeatureSession(projectDir: string, session: FeatureSession): Promise<void> {
-  const sessionDir = createSafePath(projectDir, '.sisyphus', 'feature')
-  const sessionPath = getFeatureSessionPath(projectDir, session.feature)
+async function saveFeatureSession(projectDir: string, session: FeatureSession, featureStateDir: string): Promise<void> {
+  const sessionDir = createSafePath(projectDir, featureStateDir)
+  const sessionPath = getFeatureSessionPath(projectDir, session.feature, featureStateDir)
   session.updatedAt = new Date().toISOString()
   await fs.mkdir(sessionDir, { recursive: true })
   await fs.writeFile(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
@@ -381,6 +561,13 @@ function uniqueQuestionIds(questionIds: FeatureQuestion['id'][]): FeatureQuestio
   return [...new Set(questionIds)]
 }
 
+function markQuestionPickerPrompted(session: FeatureSession, questionId: FeatureQuestion['id']): FeatureSession {
+  return {
+    ...session,
+    questionPickerPromptedIds: uniqueQuestionIds([...session.questionPickerPromptedIds, questionId]),
+  }
+}
+
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
 }
@@ -389,16 +576,16 @@ function normalizeSelectionText(value: string): string {
   return value.trim().toLowerCase().replace(/[`'"\s_-]+/g, '')
 }
 
-function getFeatureSessionPath(projectDir: string, feature: string): string {
-  return createSafePath(projectDir, '.sisyphus', 'feature', `${feature}.json`)
+function getFeatureSessionPath(projectDir: string, feature: string, featureStateDir: string): string {
+  return createSafePath(projectDir, featureStateDir, `${feature}.json`)
 }
 
-function getFeatureSessionIndexPath(projectDir: string): string {
-  return createSafePath(projectDir, '.sisyphus', 'feature', 'active.json')
+function getFeatureSessionIndexPath(projectDir: string, featureStateDir: string): string {
+  return createSafePath(projectDir, featureStateDir, 'active.json')
 }
 
-async function loadFeatureSessionIndex(projectDir: string): Promise<FeatureSessionIndex> {
-  const indexPath = getFeatureSessionIndexPath(projectDir)
+async function loadFeatureSessionIndex(projectDir: string, featureStateDir: string): Promise<FeatureSessionIndex> {
+  const indexPath = getFeatureSessionIndexPath(projectDir, featureStateDir)
 
   try {
     const content = await fs.readFile(indexPath, 'utf-8')
@@ -411,34 +598,34 @@ async function loadFeatureSessionIndex(projectDir: string): Promise<FeatureSessi
   }
 }
 
-async function saveFeatureSessionIndex(projectDir: string, index: FeatureSessionIndex): Promise<void> {
-  const indexPath = getFeatureSessionIndexPath(projectDir)
+async function saveFeatureSessionIndex(projectDir: string, index: FeatureSessionIndex, featureStateDir: string): Promise<void> {
+  const indexPath = getFeatureSessionIndexPath(projectDir, featureStateDir)
   await fs.mkdir(path.dirname(indexPath), { recursive: true })
   await fs.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8')
 }
 
-async function bindSessionToFeature(projectDir: string, toolContext: unknown, feature: string): Promise<void> {
+async function bindSessionToFeature(projectDir: string, toolContext: unknown, feature: string, featureStateDir: string): Promise<void> {
   const sessionID = getToolSessionID(toolContext)
   if (!sessionID) return
 
-  const index = await loadFeatureSessionIndex(projectDir)
+  const index = await loadFeatureSessionIndex(projectDir, featureStateDir)
   index.bySessionID[sessionID] = {
     feature,
     updatedAt: new Date().toISOString(),
   }
-  await saveFeatureSessionIndex(projectDir, index)
+  await saveFeatureSessionIndex(projectDir, index, featureStateDir)
 }
 
-async function clearSessionBindingIfCompleted(projectDir: string, toolContext: unknown, session: FeatureSession): Promise<void> {
+async function clearSessionBindingIfCompleted(projectDir: string, toolContext: unknown, session: FeatureSession, featureStateDir: string): Promise<void> {
   if (session.workflowState !== 'completed') return
 
   const sessionID = getToolSessionID(toolContext)
   if (!sessionID) return
 
-  const index = await loadFeatureSessionIndex(projectDir)
+  const index = await loadFeatureSessionIndex(projectDir, featureStateDir)
   if (!index.bySessionID[sessionID]) return
   delete index.bySessionID[sessionID]
-  await saveFeatureSessionIndex(projectDir, index)
+  await saveFeatureSessionIndex(projectDir, index, featureStateDir)
 }
 
 function getToolSessionID(toolContext: unknown): string | undefined {
@@ -571,6 +758,88 @@ function getToolMessageID(toolContext: unknown): string | undefined {
     : undefined
 }
 
+async function askPostDesignConfirmation(toolContext: unknown, _model?: RequirementModel): Promise<PostDesignDecision | undefined> {
+  if (!hasAskQuestion(toolContext)) return undefined
+
+  const answers = await toolContext.askQuestion({
+    questions: [
+      {
+        question: '设计文档已生成。您希望如何继续？',
+        header: '下一步行动',
+        options: [
+          { label: '进入开发计划', description: '查看推荐命令，手动进入 implementation plan 生成。' },
+          { label: '检查约束充分性', description: '让 assistant/runtime 复查 design.md 与 behavior.md 的约束是否充分。' },
+          { label: '查看文档', description: '先检查已生成的设计文档，再决定后续动作。' },
+        ],
+        multiple: false,
+        custom: false,
+      },
+    ],
+  })
+
+  const answer = normalizeInteractiveAnswer(answers[0])
+  if (answer === '进入开发计划') {
+    return 'proceed_to_plan'
+  }
+
+  if (answer === '检查约束充分性') {
+    return 'review_docs'
+  }
+
+  if (answer === '查看文档') {
+    return 'inspect'
+  }
+
+  return undefined
+}
+
+function formatPostDesignDecisionResult(decision: PostDesignDecision, feature: string, model?: RequirementModel): string {
+  if (decision === 'proceed_to_plan') {
+    return `## Post-Design Confirmation
+
+Design is ready for implementation planning. To generate the plan, manually run:
+
+\`\`\`
+/openflow-writing-plan ${escapeMarkdown(feature)}
+\`\`\`
+
+OpenFlow will not run this automatically; start it only when you are ready.`
+  }
+
+  if (decision === 'review_docs') {
+    return formatDesignDocumentReview(model)
+  }
+
+  return `## Documents Ready
+
+The generated design documents are ready for inspection. Review them before choosing whether to proceed to planning or refine constraints.`
+}
+
+function formatDesignDocumentReview(model?: RequirementModel): string {
+  const constraints = model?.constraints?.length
+    ? model.constraints.map((constraint) => `- ${escapeMarkdown(constraint.description)}`).join('\n')
+    : '- None recorded.'
+
+  return `## Design Document Review
+
+Documents to review:
+- \`design.md\`
+- \`behavior.md\`
+
+Constraints from the requirement model:
+${constraints}
+
+Assistant/runtime instruction: review whether these constraints are sufficient for implementation planning, including boundary coverage, compatibility expectations, and unresolved confirmations. Do not assume constraint sufficiency without checking the generated documents.`
+}
+
+function formatNextStepOptions(): string {
+  return `## Next Step Options
+
+- 进入开发计划: manually run \`/openflow-writing-plan <feature>\` when ready.
+- 检查约束充分性: review \`design.md\` and \`behavior.md\` for constraint sufficiency before planning.
+- 查看文档: inspect the generated design documents first.`
+}
+
 function formatQuestionPrompt(feature: string, session: FeatureSession, question: FeatureQuestion, rationale?: string): string {
   const options = getRecommendedOptions(session, question)
     .map((option) => `- ${escapeMarkdown(option.label)}: ${escapeMarkdown(option.description)}`)
@@ -662,7 +931,19 @@ ${pending}
 Constraints:
 ${constraints}
 
-Suggested next step: review the generated documents, then run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` if you want an implementation plan.`
+### Next Step (Advisory)
+
+Design documents are complete. You may proceed to implementation planning when ready.
+
+Suggested user action:
+
+\`\`\`
+/openflow-writing-plan ${escapeMarkdown(feature)}
+\`\`\`
+
+To generate an implementation plan, manually run the command above. OpenFlow will read the design context and produce a structured plan.
+
+This is advisory only: it does not block implementation, and the assistant must not invoke "/openflow-writing-plan" automatically unless the user explicitly requests it.`
 }
 
 function formatGenerationFailure(feature: string, message: string): string {

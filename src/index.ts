@@ -4,6 +4,7 @@ import type { OpenFlowContext as BaseOpenFlowContext } from './types.js'
 import { registerCommands } from './command-registration.js'
 import { registerSkills } from './skills/registration.js'
 import { loadConfig } from './config.js'
+import { discoverConfig } from './utils/config-loader.js'
 import { logger, OpenFlowError } from './utils/index.js'
 import { handleInit, handleWritingPlan, handleFeature, handleIssue, handleArchive, handleQualityGate, handleMigrateDocs, type QualityGateArgs } from './commands/index.js'
 import { getContractRuntime } from './contracts/runtime.js'
@@ -30,7 +31,13 @@ async function safeExecute(operation: () => Promise<string>): Promise<string> {
 }
 
 export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
-  const config = loadConfig((ctx as Record<string, unknown>).config as Record<string, unknown> | undefined)
+  const discovered = ctx.directory
+    ? await discoverConfig(
+        ctx.directory,
+        (ctx as Record<string, unknown>).config as Record<string, unknown> | undefined
+      )
+    : null
+  const config = loadConfig(discovered ?? undefined)
 
   const openflowCtx: OpenFlowContext = {
     ...ctx,
@@ -54,7 +61,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
       await runtime.start(ctx.directory)
       const guardian = new GuardianConsumer(ctx.directory)
       runtime.consumers.register(guardian)
-      logger.info('Drift Guardian started', { state_dir: config.guardian.state_dir })
+      logger.info('Drift Guardian started', { state_dir: config.paths.guardian_state })
     } catch (error) {
       logger.warn('Guardian initialization failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -113,8 +120,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
           caseText: tool.schema.string(),
         },
         execute: async (args: { caseText: string }, toolContext) => {
-          void toolContext
-          return safeExecute(() => handleIssue(openflowCtx, args.caseText))
+          return safeExecute(() => handleIssue(openflowCtx, args.caseText, undefined, undefined, toolContext?.sessionID))
         },
       }),
       [OPENFLOW_TOOL_COMMANDS.archive.name]: tool({
@@ -169,7 +175,13 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
     },
 
     config: async (cfg) => {
-      openflowCtx.config = loadConfig(cfg as Record<string, unknown>)
+      const discovered = openflowCtx.directory
+        ? await discoverConfig(
+            openflowCtx.directory,
+            cfg as Record<string, unknown> | undefined
+          )
+        : null
+      openflowCtx.config = loadConfig(discovered ?? undefined)
       logger.info('Configuration reloaded')
     },
   }

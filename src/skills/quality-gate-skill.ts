@@ -53,7 +53,11 @@ export function getQualityGateSkill(): SkillInfo {
       '   - Quality checks (typecheck, lint, test, format)',
       '   - Security checks (secrets, vulnerabilities)',
       "   - Consistency with current system facts and decisions",
-      '7. **Readiness Classification** — Returns one of: Ready, ReadyWithDocUpdates, NotReady,',
+      '7. **Implementation Mapper Generation** — When readiness is Ready or ReadyWithDocUpdates',
+      '   and a behavior.md exists, generates a lightweight implementation-mapper.md in the',
+      '   changes workspace (docs/changes/{feature}/). This mapper records behavior scenarios',
+      '   and their corresponding key code files for traceability.',
+      '8. **Readiness Classification** — Returns one of: Ready, ReadyWithDocUpdates, NotReady,',
       '   or NeedsDecision. Blocking conditions are reported as NotReady or NeedsDecision with',
       '   reason codes, not as a separate status.',
       '',
@@ -80,6 +84,9 @@ export function getQualityGateSkill(): SkillInfo {
       '- Do NOT claim "looks good" or "should pass" before invoking',
       '- Do NOT tell the user to manually run /openflow-harden or /openflow-verify',
       '- Do NOT rely on stale verification from a previous invocation',
+      '- Do NOT automatically invoke /openflow-archive after the quality gate returns Ready or ReadyWithDocUpdates',
+      '- Do NOT treat quality gate readiness as user acceptance; readiness is a technical verification result, not a delivery approval',
+      '- Report the quality gate result to the user and wait for explicit confirmation before proceeding to archive',
     ].join('\n'),
   }
 }

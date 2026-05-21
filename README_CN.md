@@ -454,35 +454,75 @@ npm install @fastknife/openflow
 
 ## ⚙️ 配置说明
 
-进一步自定义行为，在 `opencode.json` 中设置：
+OpenFlow 支持三种配置来源，优先级从高到低：
+
+1. 项目根目录的 **`openflow.json`**
+2. 项目根目录的 **`openflow.jsonc`**（支持注释）
+3. `opencode.json` 中顶层 **`openflow`** 字段
+
+找到的第一个来源生效，不会跨来源深度合并。
+
+### 独立配置文件（`openflow.json` 或 `openflow.jsonc`）
+
+在项目根目录创建 `openflow.json`（或 `openflow.jsonc`）。文件直接包含 OpenFlow 配置对象：
 
 ```json
 {
+  "paths": {
+    "changes": "docs/changes",
+    "archive": "docs/archive",
+    "current_requirements": "docs/current/requirements",
+    "current_design": "docs/current/design",
+    "current_spec": "docs/current/spec",
+    "current_workflow": "docs/current/workflow",
+    "builds": ".sisyphus/builds",
+    "plans": ".sisyphus/plans",
+    "acceptance_state": ".sisyphus/acceptance.local.md",
+    "feature_state": ".sisyphus/feature",
+    "change_units": ".sisyphus/change-units.json",
+    "guardian_state": ".sisyphus/openflow/guardian"
+  },
+  "feature": {
+    "enabled": true,
+    "auto_trigger": true,
+    "trigger_mode": "smart"
+  },
+  "tdd": {
+    "enabled": true,
+    "expand_threshold": 3
+  },
+  "verification": {
+    "in_plan": true,
+    "security": ["secret", "vuln"],
+    "quality": ["lint", "typecheck", "test"]
+  },
+  "archive": {
+    "enabled": true,
+    "auto_promote_current": true
+  },
+  "writingPlan": {
+    "enabled": true
+  },
+  "guardian": {
+    "enabled": true,
+    "auto_fix": true
+  }
+}
+```
+
+### 嵌入 `opencode.json`
+
+如果你希望把所有配置放在 `opencode.json` 中，使用顶层 `openflow` 对象。这是最低优先级的来源：
+
+```json
+{
+  "plugins": ["@fastknife/openflow"],
   "openflow": {
+    "paths": {
+      "plans": ".custom/plans"
+    },
     "feature": {
-      "enabled": true,
-      "auto_trigger": true,
-      "trigger_mode": "smart"
-    },
-    "tdd": {
-      "enabled": true,
-      "expand_threshold": 3
-    },
-    "verification": {
-      "in_plan": true,
-      "security": ["secret", "vuln"],
-      "quality": ["lint", "typecheck", "test"]
-    },
-    "archive": {
-      "enabled": true,
-      "auto_promote_current": true
-    },
-    "writingPlan": {
-      "enabled": true
-    },
-    "guardian": {
-      "enabled": true,
-      "auto_fix": true
+      "trigger_mode": "always"
     }
   }
 }

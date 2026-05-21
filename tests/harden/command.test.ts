@@ -144,7 +144,7 @@ describe('handleHarden', () => {
     expect(result).toContain('Status: rejected')
   })
 
-  test('simple feature runs reviewer-only mode and passes when reviewer reports no findings', async () => {
+  test('simple feature runs reviewer and executor once with disposition', async () => {
     const directory = await createGitFixture('simple-pass', 'simple')
     try {
       const client = createMockClient(['NO_FINDINGS'])
@@ -154,7 +154,8 @@ describe('handleHarden', () => {
 
       expect(result).toContain('Status: pass')
       expect(result).toContain('Rounds: 1')
-      expect(client.promptCount).toBe(1)
+      // Simple mode now creates Reviewer + Executor sessions (2 prompts)
+      expect(client.promptCount).toBe(2)
     } finally {
       await removeFixture(directory)
     }
@@ -176,46 +177,56 @@ describe('handleHarden', () => {
     }
   })
 
-  test('complex feature returns budget_exhausted when round budget is consumed before convergence', async () => {
+  test('complex feature completes rounds normally without token budget hard-stop', async () => {
     const directory = await createGitFixture('budget', 'complex')
     try {
       const client = createMockClient([
         'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts proves the bug\nFiles: src/fixture.ts',
         'Root cause: value changed\nDiff: minimal patch applied\nVerify: rerun tests',
       ], 2)
+      // New behavior: no tokenBudgetTotal; only maxRounds limits execution.
+      // Token consumption is reported, not used as a hard-stop.
       const ctx = createContext(directory, {
-        harden: { ...defaultConfig.harden, tokenBudgetTotal: 1, maxRounds: 3 },
+        harden: { ...defaultConfig.harden, maxRounds: 3 },
       }, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
-      expect(result).toContain('Status: budget_exhausted')
+      // Should NOT contain budget_exhausted — tokens are reported, not a hard-stop
+      expect(result).not.toContain('budget_exhausted')
+      // Should contain token consumption report instead
+      expect(result).toContain('Total tokens consumed')
+      // Status should be one of the normal terminal states
+      expect(result).toMatch(/Status: (pass|needs_human|review_inconclusive|executor_blocked|max_rounds_reached)/)
     } finally {
       await removeFixture(directory)
     }
   })
 
-  test('per-round reviewer overage returns budget_exhausted', async () => {
+  test('per-round reviewer overage completes normally without budget_exhausted', async () => {
     const directory = await createGitFixture('per-round-reviewer', 'complex')
     try {
       const client = createMockClient([
         'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts proves the bug\nFiles: src/fixture.ts',
       ], 200)
+      // New behavior: no tokenBudgetPerRound; rounds complete normally regardless of token count.
+      // Token consumption is reported, not used as a hard-stop.
       const ctx = createContext(directory, {
-        harden: { ...defaultConfig.harden, tokenBudgetPerRound: 100, tokenBudgetTotal: 100000 },
+        harden: { ...defaultConfig.harden },
       }, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
-      expect(result).toContain('Status: budget_exhausted')
-      expect(result).toContain('reviewer')
-      expect(result).toContain('per-round budget')
+      // Should NOT contain budget_exhausted — tokens are reported, not a hard-stop
+      expect(result).not.toContain('budget_exhausted')
+      // Should contain token consumption report
+      expect(result).toContain('Total tokens consumed')
     } finally {
       await removeFixture(directory)
     }
   })
 
-  test('per-round executor overage returns budget_exhausted', async () => {
+  test('per-round executor overage completes normally without budget_exhausted', async () => {
     const directory = await createGitFixture('per-round-executor', 'complex')
     try {
       // Use per-call token counts: reviewer under 200 budget, executor over 200 budget
@@ -249,20 +260,23 @@ describe('handleHarden', () => {
           },
         },
       }
+      // New behavior: no tokenBudgetPerRound; rounds complete normally regardless of token count.
       const ctx = createContext(directory, {
-        harden: { ...defaultConfig.harden, tokenBudgetPerRound: 200, tokenBudgetTotal: 100000 },
+        harden: { ...defaultConfig.harden },
       }, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
-      expect(result).toContain('Status: budget_exhausted')
-      expect(result).toContain('executor')
+      // Should NOT contain budget_exhausted — tokens are reported, not a hard-stop
+      expect(result).not.toContain('budget_exhausted')
+      // Should contain token consumption report
+      expect(result).toContain('Total tokens consumed')
     } finally {
       await removeFixture(directory)
     }
   })
 
-  test('per-round under budget continues loop', async () => {
+  test('loop continues up to maxRounds without token budget constraints', async () => {
     const directory = await createGitFixture('per-round-under', 'complex')
     try {
       const client = createMockClient([
@@ -270,14 +284,17 @@ describe('handleHarden', () => {
         'Root cause: value changed\nDiff: minimal patch applied\nVerify: rerun tests',
         'NO_FINDINGS',
       ], 100)
+      // New behavior: no token budget config; only maxRounds controls loop.
       const ctx = createContext(directory, {
-        harden: { ...defaultConfig.harden, tokenBudgetPerRound: 50000, tokenBudgetTotal: 250000 },
+        harden: { ...defaultConfig.harden },
       }, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
       expect(result).toContain('Status: pass')
       expect(result).toContain('Rounds: 2')
+      // Should contain token consumption report
+      expect(result).toContain('Total tokens consumed')
     } finally {
       await removeFixture(directory)
     }
@@ -442,6 +459,95 @@ describe('handleHarden', () => {
 
       expect(result).toContain('Status: needs_human')
       expect(result).toContain('design ambiguity')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('complex feature with rejected finding and accepted rebuttal', async () => {
+    const directory = await createGitFixture('reject-accept', 'complex')
+    try {
+      // Mock multi-round responses: Reviewer finds issue → Executor rejects → Reviewer accepts rejection → Next round no findings
+      const client = createMockClient([
+        // Round 1 Reviewer: reports a blocking_bug
+        'Level: blocking_bug\nDescription: Missing validation\nEvidence: src/fixture.ts does not validate input\nFiles: src/fixture.ts',
+        // Round 1 Executor: rejects the finding with verdict
+        'verdict: reject\nrationale: Design doc does not require validation for this endpoint',
+        // Round 1 Reviewer rebuttal: accepts the rejection
+        'accept',
+        // Round 2 Reviewer: no more findings
+        'NO_FINDINGS',
+      ], 100)
+      const ctx = createContext(directory, undefined, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      // Should pass (with risks or clean) since the rejection was accepted
+      expect(result).toMatch(/Status: (pass|pass_with_risks)/)
+      // Should contain rejected_findings section in final report
+      expect(result).toContain('rejected_findings')
+      // Should contain the Executor's rejection rationale
+      expect(result).toContain('Design doc does not require validation')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('complex feature with rejected finding and unresolved rebuttal', async () => {
+    const directory = await createGitFixture('reject-unresolved', 'complex')
+    try {
+      // Mock multi-round responses: Reviewer finds issue → Executor rejects → Reviewer challenges → Executor final rejects → unresolved
+      const client = createMockClient([
+        // Round 1 Reviewer: reports a spec_violation
+        'Level: spec_violation\nDescription: Wrong return type\nEvidence: src/fixture.ts returns number instead of string\nFiles: src/fixture.ts',
+        // Round 1 Executor: rejects the finding
+        'verdict: reject\nrationale: Return type matches current design v1.2',
+        // Round 1 Reviewer rebuttal: challenges the rejection
+        'challenge: Design v2.0 explicitly requires string return type\nevidence: docs/changes/feature-a/design.md line 45',
+        // Round 1 Executor rebuttal: final rejection
+        'final_verdict: reject\nrationale: v2.0 is not yet approved',
+      ], 100)
+      const ctx = createContext(directory, undefined, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      // Should indicate needs_human since the rebuttal is unresolved
+      expect(result).toContain('Status: needs_human')
+      // Should contain unresolved section
+      expect(result).toContain('unresolved_needs_decision')
+      // Should contain both rebuttal references (reviewer challenge and executor response)
+      expect(result).toContain('challenge')
+      expect(result).toContain('final_verdict')
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('complex feature runs reviewer and executor once with disposition', async () => {
+    const directory = await createGitFixture('complex-disposition', 'complex')
+    try {
+      // Complex diff fixture with one actionable finding and Executor partial fix
+      const client = createMockClient([
+        // Reviewer: one actionable finding
+        'Level: blocking_bug\nDescription: Value should be validated\nEvidence: src/fixture.ts does not check value range\nFiles: src/fixture.ts',
+        // Executor: partial fix applied with verdict
+        'verdict: partial\nrationale: Partial fix applied — added range check but not full validation',
+        // Round 2 Reviewer: no more findings
+        'NO_FINDINGS',
+      ], 100)
+      const ctx = createContext(directory, undefined, client)
+
+      const result = await handleHarden(ctx, 'feature-a')
+
+      // Should contain structured verdict in the findings section (not just in the fix text)
+      // The new format groups findings by disposition in a dedicated section
+      expect(result).toContain('disposition=partial')
+      // Should contain the rationale in the structured findings
+      expect(result).toContain('rationale: Partial fix applied')
+      // Should NOT have more than 2 rounds
+      expect(result).not.toContain('Rounds: 3')
+      // Should contain a "Findings Final State" section with grouped findings
+      expect(result).toContain('### Findings Final State')
     } finally {
       await removeFixture(directory)
     }

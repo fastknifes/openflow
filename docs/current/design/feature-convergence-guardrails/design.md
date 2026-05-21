@@ -2,11 +2,10 @@
 
 ## Human Consensus Summary
 
-`/openflow-feature` should evolve from a fixed-question, feature-name-first document generator into a gentle design assistant that accepts natural language and can start without any user-provided slug.
-
-The current feature workflow has two product-level flaws. First, it treats `/openflow-feature` as if the user must provide a valid feature name slug, even though users naturally describe intent in ordinary language and often expect the assistant to name the feature. Second, it does not decide whether the conversation is ready to enter `design.md` / `behavior.md` generation. It asks a fixed sequence of questions and then converges automatically. That behavior can reject useful Chinese/natural-language input, ask unnecessary questions, miss unresolved constraints, generate documents too early, and pull the user into code-level discussion when they are still talking about product intent or workflow experience.
-
-The improved workflow should help the user clarify an idea without making the interaction feel like a rigid form. It should infer or derive an internal feature identity from the conversation, understand what has already been said, decide whether any uncertainty still changes the design direction, ask only one valuable follow-up question when needed, and generate documents only when the feature is sufficiently converged or the user explicitly wants a draft with assumptions.
+Feature title: 前端需求 design.md ASCII 预览
+Internal slug: frontend-design-ascii-preview
+Problem or improvement target: `/openflow-feature` 生成前端类 `design.md` 时，用户缺少页面结构与交互方式的直观预览。
+Expected result: 当前端需求被识别时，`design.md` 自动包含 ASCII 页面与交互预览；非前端需求不增加该段落。
 
 ### Agreed Product Positioning
 
@@ -242,14 +241,9 @@ If behavior is not externally or process-observably changing, `behavior.md` may 
 
 ## Success Criteria
 
-- A user can start `/openflow-feature` without a feature-name argument when the current session or message context identifies the feature idea.
-- A user can pass Chinese or mixed natural-language text to `/openflow-feature` without receiving “Feature name is too short after sanitization”.
-- Generated documents and session metadata preserve a human-readable feature title or source intent separately from the filesystem-safe slug.
-- A clear feature request can produce useful documents without forcing irrelevant questions.
-- An unclear feature request causes one meaningful follow-up question instead of automatic document generation.
-- A user can skip a question and still receive a draft with assumptions clearly marked.
-- `behavior.md` describes observable behavior appropriate to the feature scenario.
-- The final response after generation summarizes consensus, assumptions, generated files, and recommended next steps without forcing implementation.
+- [ ] 前端需求生成的 `design.md` 包含 ASCII 页面与交互预览。
+- [ ] 非前端需求生成的 `design.md` 不包含该预览段落。
+- [ ] renderer 单测、typecheck、build 通过。
 
 ## Handoff Guidance
 
@@ -262,3 +256,23 @@ After document generation, OpenFlow should provide a short next-step summary:
 - whether the likely next step is planning, implementation, more clarification, or stopping here.
 
 The assistant should suggest the next step without trapping the user in the feature workflow or pushing implementation prematurely.
+
+# frontend-design-ascii-preview - Design
+
+## Scope
+
+- In scope: `src/phases/feature/design-renderer.ts` 的前端需求识别与 ASCII 预览渲染。
+- In scope: `tests/phases/feature/design-renderer.test.ts` 的前端/非前端覆盖。
+- Out of scope: 修改 OpenFlow command 注册方式或交互式 `/openflow-feature` 状态机。
+
+## Design Constraints
+
+- [must] 预览必须由 renderer 生成，保证所有 feature 文档生成路径行为一致。
+- [must] 非前端需求不能出现 `## UI / Interaction ASCII Preview`，避免污染后端/流程类设计文档。
+- [should] ASCII 预览应包含页面结构、主要动作和交互反馈路径，供用户实现前确认。
+
+## Verification
+
+- `npx bun test tests/phases/feature/design-renderer.test.ts`
+- `rtk npm build`
+- `openflow-quality-gate frontend-design-ascii-preview`

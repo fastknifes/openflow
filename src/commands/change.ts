@@ -185,8 +185,18 @@ bun test
 \`\`\`
 
 ### Next Step
+
 1. Complete the Docs-First and Code-Update procedures above
-2. Run \`/openflow-verify ${escapeMarkdown(input.feature)}\` to re-validate readiness
-3. After verification passes, run \`/openflow-archive ${escapeMarkdown(input.feature)}\` to finalize
+2. Re-validate readiness:
+
+\`\`\`
+/openflow-verify ${escapeMarkdown(input.feature)}
+\`\`\`
+
+3. After verification passes, finalize:
+
+\`\`\`
+/openflow-archive ${escapeMarkdown(input.feature)}
+\`\`\`
 `
 }

@@ -8,8 +8,6 @@ import { getImplementationState, loadAcceptanceState, saveAcceptanceState, setWa
 import {
   applyPromotionSuggestions,
   buildPromotionSuggestions,
-  generateAndSaveImplementationMapper,
-  type ImplementationMapperOptions,
 } from '../phases/archive/index.js'
 import { getBuildChanges, listBuilds } from '../utils/file-tracker.js'
 import { cleanBuild } from '../utils/build-cleaner.js'
@@ -51,7 +49,7 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
   const archiveMode = await detectMode(ctx, sanitizedFeature)
 
-  const planPath = createSafePath(ctx.directory, '.sisyphus', 'plans', `${sanitizedFeature}.md`)
+  const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${sanitizedFeature}.md`)
   const sourceChangePlanPath = await getChangePlansPath(ctx.directory, sanitizedFeature)
   const sourceDesignPath = await resolveDocumentArtifact(await getDesignCandidatePaths(ctx.directory, sanitizedFeature, ctx.config), /^(?:design|\d{8}-design)\.md$/i)
   const sourceRequirementsPath = await resolveDocumentArtifact(await getRequirementsCandidatePaths(ctx.directory, sanitizedFeature, ctx.config), /^(?:prd|\d{8}-prd)\.md$/i)
@@ -207,24 +205,11 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
       }
     }
 
-    const implementationMapperOptions: ImplementationMapperOptions = {
-      feature: sanitizedFeature,
-      projectDir: ctx.directory,
-      archiveDir: stagingDir,
-      designPath: sourceDesignPath,
-      requirementsPath: sourceRequirementsPath,
-      designExists,
-      planExists,
-      changes,
-      acceptanceState: matchingAcceptanceState,
-      ...(phasedChanges ? { phasedChanges } : {}),
-      ...(driftItems.length > 0 ? { driftItems } : {}),
-      ...(issueClarificationSourcePath ? { issueClarificationPath: issueClarificationSourcePath } : {}),
-      ...(promotionCandidateSourcePath ? { promotionCandidatePath: promotionCandidateSourcePath } : {}),
-      ...(await fileExists(sourceBehaviorPath) ? { behaviorPath: sourceBehaviorPath } : {}),
+    const sourceImplementationMapperPath = path.join(sourceChangeWorkspacePath, 'implementation-mapper.md')
+    const hasImplementationMapper = await fileExists(sourceImplementationMapperPath)
+    if (hasImplementationMapper) {
+      await fs.copyFile(sourceImplementationMapperPath, path.join(stagingDir, 'implementation-mapper.md'))
     }
-
-    await generateAndSaveImplementationMapper(implementationMapperOptions)
 
     if ((archiveMode === 'issue' || archiveMode === 'mixed') && issueClarificationSourcePath) {
       if (issueResolutionSourcePath) {
@@ -293,6 +278,7 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
       promotionCandidateExists,
       issueResolutionGenerated,
       governanceDecisionTargetPath,
+      hasImplementationMapper,
     )
   } catch (error) {
     // Clean up staging on any failure — leave source workspace untouched
@@ -873,6 +859,7 @@ function formatArchiveResult(
   promotionCandidateExists: boolean,
   issueResolutionGenerated: boolean,
   governanceDecisionTargetPath: string | null,
+  hasImplementationMapper: boolean,
 ): string {
   const safePath = escapeMarkdown(archiveDir)
   const readinessWarningBlock = legacyReadinessWarning
@@ -899,7 +886,7 @@ function formatArchiveResult(
 - Design documents: ${designExists ? '✅' : '❌'}
 - Requirements documents: ${requirementsExists ? '✅' : '❌'}
 - Plan: ${planExists ? '✅' : '❌'}
-- Implementation mapper: ✅
+- Implementation mapper: ${hasImplementationMapper ? '✅' : '❌'}
 - Behavior document: ✅
 - Acceptance changes: ${hasAcceptanceChanges ? '✅' : '❌'}
 - Known issues accepted: ${hasAcceptedKnownIssues ? '✅' : '❌'}
@@ -908,8 +895,9 @@ function formatArchiveResult(
 ### Location
 ${safePath}
 
-### Generated Files
-- \`${safePath}/implementation-mapper.md\` - Archived implementation traceability document
+### Archived Files
+${hasImplementationMapper ? `- \`${safePath}/implementation-mapper.md\` - Copied from changes workspace` : ''}
+- \`${safePath}/design.md\` - Design document (if exists)
 - \`${safePath}/design.md\` - Design document (if exists)
 - \`${safePath}/prd.md\` - Requirements / PRD document (if exists)
 - \`${safePath}/plan.md\` - Execution plan snapshot (if exists)
@@ -926,6 +914,20 @@ ${governanceBlock}
 - auto apply: ${autoPromoteCurrent ? 'enabled' : 'disabled'}
 - applied: ${promotionAppliedCount}
 ${formatPromotionSuggestions(promotionSuggestions)}
+
+### Next Step
+
+This feature workflow is complete. To start a new change cycle, run:
+
+\`\`\`
+/openflow-feature <new-feature-name>
+\`\`\`
+
+Or investigate a new issue:
+
+\`\`\`
+/openflow-issue "<problem description>"
+\`\`\`
 `
 }
 

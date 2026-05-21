@@ -345,7 +345,7 @@ Then:
     )
 
     expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
-    expect(readiness.reasonCodes).toContain('behavior_evidence_incomplete')
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -728,5 +728,987 @@ Then:
     expect(stripOpenFlowCommandTokens('```openflow-verify```')).toBe('')
     expect(stripOpenFlowCommandTokens('```my-feature```')).toBe('my-feature')
     expect(stripOpenFlowCommandTokens('`phone-change-sync-optimization`')).toBe('phone-change-sync-optimization')
+  })
+
+  test('parses new 8-column evidence table format with coverageLevel and freshness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-new-format')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'change-units.json'),
+      JSON.stringify({ version: 1, byFeature: { 'demo-feature': { changeDir: '2026-01-01-demo-feature' } } }),
+      'utf-8',
+    )
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', '2026-01-01-demo-feature')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior Contract: demo-feature
+
+## Behavior Scenarios
+
+### Scenario: core behavior
+
+Given:
+- user has input
+
+When:
+- user runs command
+
+Then:
+- output is produced
+
+## Verification Mapping
+
+| Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |
+|-------------|-------------|--------------|---------------|----------------|-----------------------|-----------|--------|
+| core behavior | critical | tests/demo.test.ts | test | exact | N/A | fresh | verified |
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('1/1 behavior scenarios verified')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('old 4-column table format still works with backward-compatible defaults', async () => {
+    const testDir = join(process.cwd(), '.test-verify-old-format-compat')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'change-units.json'),
+      JSON.stringify({ version: 1, byFeature: { 'demo-feature': { changeDir: '2026-01-01-demo-feature' } } }),
+      'utf-8',
+    )
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', '2026-01-01-demo-feature')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior Contract: demo-feature
+
+## Behavior Scenarios
+
+### Scenario: core behavior
+
+Given:
+- user has input
+
+When:
+- user runs command
+
+Then:
+- output is produced
+
+## Verification Mapping
+
+| Behavior | Evidence Type | Expected Evidence | Status |
+|---|---|---|---|
+| core behavior | test | tests/demo.test.ts | verified |
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('1/1 behavior scenarios verified')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('new format blocks on partial coverage for critical scenario', async () => {
+    const testDir = join(process.cwd(), '.test-verify-partial-blocking')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'partial',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('new format blocks on stale freshness for critical scenario', async () => {
+    const testDir = join(process.cwd(), '.test-verify-stale-blocking')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'stale',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('stale_integration_evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('new format does not block when coverage is exact and freshness is fresh', async () => {
+    const testDir = join(process.cwd(), '.test-verify-exact-fresh-pass')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('equivalent coverage without rationale downgrades to partial', async () => {
+    const testDir = join(process.cwd(), '.test-verify-equiv-no-rationale')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'change-units.json'),
+      JSON.stringify({ version: 1, byFeature: { 'demo-feature': { changeDir: '2026-01-01-demo-feature' } } }),
+      'utf-8',
+    )
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', '2026-01-01-demo-feature')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior Contract: demo-feature
+
+## Behavior Scenarios
+
+### Scenario: core behavior
+
+Given:
+- user has input
+
+When:
+- user runs command
+
+Then:
+- output is produced
+
+## Verification Mapping
+
+| Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |
+|-------------|-------------|--------------|---------------|----------------|-----------------------|-----------|--------|
+| core behavior | critical | tests/demo.test.ts | test | equivalent | N/A | fresh | verified |
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    // This should be NotReady because equivalent without rationale → partial → critical blocks
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('- status: not_ready')
+    expect(result).toContain('missing_integration_evidence')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('unknown freshness on critical scenario blocks readiness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-unknown-freshness-blocking')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'unknown',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('integration_evidence_needs_decision')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('normal criticality scenario does not block on stale freshness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-normal-stale-pass')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'normal',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'stale',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  // === Coverage / Freshness Matrix Tests (Task 3) ===
+
+  test('equivalent coverage with rationale and fresh freshness passes readiness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-equiv-rationale-pass')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'change-units.json'),
+      JSON.stringify({ version: 1, byFeature: { 'demo-feature': { changeDir: '2026-01-01-demo-feature' } } }),
+      'utf-8',
+    )
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', '2026-01-01-demo-feature')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior Contract: demo-feature
+
+## Behavior Scenarios
+
+### Scenario: core behavior
+
+Given:
+- user has input
+
+When:
+- user runs command
+
+Then:
+- output is produced
+
+## Verification Mapping
+
+| Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |
+|-------------|-------------|--------------|---------------|----------------|-----------------------|-----------|--------|
+| core behavior | critical | tests/demo.test.ts | test | equivalent | Same input/output via integration test | fresh | verified |
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('1/1 behavior scenarios verified')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('equivalent coverage without rationale at classifyReadiness level blocks readiness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-equiv-no-rationale-classify')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    // Simulate the parser downgrade: equivalent without rationale → coverageLevel: partial
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'missing_evidence',
+          coverageLevel: 'partial',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('missing coverageLevel on critical scenario blocks readiness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-missing-coverage')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'missing_evidence',
+          coverageLevel: 'missing',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('optional scenario with missing evidence produces advisory gap and does not block', async () => {
+    const testDir = join(process.cwd(), '.test-verify-optional-advisory')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Boundary: optional fallback\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'boundary-0',
+          name: 'optional fallback',
+          criticality: 'optional',
+          status: 'not_applicable',
+          coverageLevel: 'not_applicable',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('optional scenario with missing_evidence status does not block readiness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-optional-missing-no-block')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Boundary: optional fallback\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'boundary-0',
+          name: 'optional fallback',
+          criticality: 'optional',
+          status: 'missing_evidence',
+          coverageLevel: 'missing',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    // Optional scenarios should not block even with missing_evidence
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('old format (undefined freshness) does not block on freshness grounds', async () => {
+    const testDir = join(process.cwd(), '.test-verify-old-format-no-freshness-block')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    // Old format: no freshness field at all (undefined)
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          // freshness is deliberately undefined — old format
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    // Old format without freshness should pass — backward compatibility
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('classified evidence gap encodes unknown freshness as distinct code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-gap-unknown-freshness')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'unknown',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('integration_evidence_needs_decision')
+    // The classified gap should carry freshness_unknown code
+    expect(readiness.classifiedEvidenceGaps?.some(g => g.code.includes('freshness_unknown'))).toBe(true)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('classified evidence gap encodes stale freshness as distinct code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-gap-stale-freshness')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'stale',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('stale_integration_evidence')
+    expect(readiness.classifiedEvidenceGaps?.some(g => g.code.includes('freshness_stale'))).toBe(true)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('classified evidence gap encodes partial coverage as distinct code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-gap-partial-coverage')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core behavior\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core behavior',
+          criticality: 'critical',
+          status: 'missing_evidence',
+          coverageLevel: 'partial',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.classifiedEvidenceGaps?.some(g => g.code.includes('coverage_partial'))).toBe(true)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  // === Task 4: Integration Evidence Reason Code Mapping ===
+
+  test('maps coverage partial to missing_integration_evidence reason code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-partial')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'partial',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
+    expect(readiness.reasonCodes).not.toContain('behavior_evidence_incomplete')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('maps stale freshness to stale_integration_evidence reason code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-stale')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'stale',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('stale_integration_evidence')
+    expect(readiness.reasonCodes).not.toContain('behavior_evidence_incomplete')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('maps unknown freshness to integration_evidence_needs_decision reason code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-unknown')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core',
+          criticality: 'critical',
+          status: 'verified',
+          coverageLevel: 'exact',
+          freshness: 'unknown',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('integration_evidence_needs_decision')
+    expect(readiness.reasonCodes).not.toContain('behavior_evidence_incomplete')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('maps failed status to missing_integration_evidence reason code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-failed')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core',
+          criticality: 'critical',
+          status: 'failed',
+          coverageLevel: 'exact',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('maps missing evidence to missing_integration_evidence reason code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-missing')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [{
+          scenarioId: 'scenario-0',
+          name: 'core',
+          criticality: 'critical',
+          status: 'missing_evidence',
+          coverageLevel: 'missing',
+          freshness: 'fresh',
+        }],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('deduplicates multiple scenarios with same reason code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-dedup')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core\n### Scenario: edge\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [
+          {
+            scenarioId: 'scenario-0',
+            name: 'core',
+            criticality: 'critical',
+            status: 'verified',
+            coverageLevel: 'partial',
+            freshness: 'fresh',
+          },
+          {
+            scenarioId: 'scenario-1',
+            name: 'edge',
+            criticality: 'critical',
+            status: 'missing_evidence',
+            coverageLevel: 'missing',
+            freshness: 'fresh',
+          },
+        ],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    // Both scenarios map to missing_integration_evidence, should appear only once
+    const missingCount = readiness.reasonCodes.filter(c => c === 'missing_integration_evidence').length
+    expect(missingCount).toBe(1)
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('emits multiple distinct reason codes when different gap types coexist', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-multi-codes')
+    await rm(testDir, { recursive: true, force: true })
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'behavior.md'), '### Scenario: core\n### Scenario: edge\n', 'utf-8')
+
+    const readiness = await classifyReadiness(
+      createContext(testDir, { quality: [], security: [] }),
+      'demo-feature',
+      createEvidence({
+        behaviorScenarios: [
+          {
+            scenarioId: 'scenario-0',
+            name: 'core',
+            criticality: 'critical',
+            status: 'verified',
+            coverageLevel: 'exact',
+            freshness: 'stale',
+          },
+          {
+            scenarioId: 'scenario-1',
+            name: 'edge',
+            criticality: 'critical',
+            status: 'missing_evidence',
+            coverageLevel: 'missing',
+            freshness: 'fresh',
+          },
+        ],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.NotReady)
+    expect(readiness.reasonCodes).toContain('stale_integration_evidence')
+    expect(readiness.reasonCodes).toContain('missing_integration_evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('skipped quality checks do not produce quality_checks_failed reason code', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-skipped-quality')
+    await rm(testDir, { recursive: true, force: true })
+
+    const plansDir = join(testDir, '.sisyphus', 'plans')
+    await mkdir(plansDir, { recursive: true })
+    await writeFile(join(plansDir, 'demo-feature.md'), '# demo', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'design.md'), '# Design', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    // Use security: [] to avoid test isolation issues (security scanners may find
+    // leftover files from other tests in the shared working directory)
+    const result = await handleVerify(createContext(testDir, { security: [] }), 'demo-feature')
+
+    // Quality checks pass=true (skipped), so no quality_checks_failed
+    expect(result).not.toContain('quality_checks_failed')
+    expect(result).toContain('- status: ready')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('collectEvidence includes integration evidence coverage summary', async () => {
+    const testDir = join(process.cwd(), '.test-verify-task4-coverage-summary')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus'), { recursive: true })
+    await writeFile(
+      join(testDir, '.sisyphus', 'change-units.json'),
+      JSON.stringify({ version: 1, byFeature: { 'demo-feature': { changeDir: '2026-01-01-demo-feature' } } }),
+      'utf-8',
+    )
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', '2026-01-01-demo-feature')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior Contract: demo-feature
+
+## Behavior Scenarios
+
+### Scenario: core behavior
+
+Given:
+- user has input
+
+When:
+- user runs command
+
+Then:
+- output is produced
+
+## Verification Mapping
+
+| Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |
+|-------------|-------------|--------------|---------------|----------------|-----------------------|-----------|--------|
+| core behavior | critical | tests/demo.test.ts | test | exact | N/A | fresh | verified |
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('Integration evidence coverage:')
+    expect(result).toContain('1/1 critical scenarios covered')
+    expect(result).toContain('1 exact')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  // === Compilation Probe Tests (Task 8) ===
+
+  test('compilation probe detects TypeScript project and runs tsc --noEmit', async () => {
+    const testDir = join(process.cwd(), '.test-verify-compilation-ts')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'design.md'), '# Design', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    // Create tsconfig.json to trigger TypeScript detection
+    await writeFile(join(testDir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true } }), 'utf-8')
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    // Should contain compilation_probe in check results
+    expect(result).toContain('compilation:compilation_probe')
+    // Either passed (✅), failed (❌), or skipped — tsc may fail on empty project
+    expect(result).toMatch(/compilation:compilation_probe (✅|❌|⚠️)/)
+
+    // Compilation probe failure should not block readiness
+    expect(result).toContain('- status: ready')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('compilation probe skips when no project language is detected', async () => {
+    const testDir = join(process.cwd(), '.test-verify-compilation-no-lang')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# plan', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
+    await writeFile(join(testDir, 'docs', 'changes', 'demo-feature', 'design.md'), '# Design', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
+
+    // No language marker files — probe should skip
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+
+    expect(result).toContain('compilation:compilation_probe ✅ (skipped:')
+    expect(result).toContain('No compilation probe available')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('compilation probe failure does not block readiness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-compilation-no-block')
+    await rm(testDir, { recursive: true, force: true })
+
+    const context = createContext(testDir, { quality: [], security: [] })
+    const readiness = await classifyReadiness(
+      context,
+      'demo-feature',
+      createEvidence({
+        checkResults: [
+          { name: 'test', passed: true, category: 'quality', detail: 'pass' },
+          { name: 'compilation_probe', passed: false, category: 'compilation', detail: 'Compilation probe failed (exit code 1)' },
+        ],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    // Compilation failure should NOT block readiness
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).not.toContain('compilation_checks_failed')
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('compilation probe success appears in evidence', async () => {
+    const testDir = join(process.cwd(), '.test-verify-compilation-success-evidence')
+    await rm(testDir, { recursive: true, force: true })
+
+    const context = createContext(testDir, { quality: [], security: [] })
+    const readiness = await classifyReadiness(
+      context,
+      'demo-feature',
+      createEvidence({
+        checkResults: [
+          { name: 'test', passed: true, category: 'quality', detail: 'pass' },
+          { name: 'compilation_probe', passed: true, category: 'compilation', detail: 'passed: tsc --noEmit — Compilation probe passed' },
+        ],
+      }),
+      createAcceptanceState('demo-feature'),
+    )
+
+    expect(readiness.status).toBe(VerifyReadinessStatus.Ready)
+    expect(readiness.reasonCodes).toEqual(['all_checks_passed'])
+
+    await rm(testDir, { recursive: true, force: true })
   })
 })

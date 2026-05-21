@@ -180,6 +180,8 @@ export class ContractExtractor {
           !foundHeader &&
           (/scenario/i.test(line) || /given/i.test(line) || /when/i.test(line))
         ) {
+          // Skip verification mapping tables (they have Status, Freshness, Coverage columns)
+          if (/status/i.test(line) || /freshness/i.test(line) || /coverage/i.test(line)) continue
           foundHeader = true
           tableLines.push(line)
         } else if (foundHeader) {

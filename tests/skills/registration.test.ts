@@ -137,6 +137,66 @@ describe('writing-plan skill content contract', () => {
   })
 })
 
+describe('writing-plan skill content: superpowers steps', () => {
+  test('skill contains all 8 superpowers-style step labels', async () => {
+    const root = join(process.cwd(), '.test-skill-superpowers')
+    await rm(root, { recursive: true, force: true })
+
+    await registerSkills(createContext(root))
+
+    const skillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-writing-plan', 'SKILL.md')
+    const content = await readFile(skillPath, 'utf-8')
+
+    const steps = [
+      'Scope Check',
+      'File Structure',
+      'Plan Document Header',
+      'Task Structure',
+      'No Placeholders',
+      'Remember',
+      'Self-Review',
+      'Execution Handoff',
+    ]
+    for (const step of steps) {
+      expect(content).toContain(step)
+    }
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('skill includes blocking clarification language', async () => {
+    const root = join(process.cwd(), '.test-skill-blocking')
+    await rm(root, { recursive: true, force: true })
+
+    await registerSkills(createContext(root))
+
+    const skillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-writing-plan', 'SKILL.md')
+    const content = await readFile(skillPath, 'utf-8')
+
+    expect(content).toContain('stop and ask clarifying questions')
+    expect(content).not.toContain('[DECISION NEEDED]')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('skill includes Prometheus precedence and agent routing', async () => {
+    const root = join(process.cwd(), '.test-skill-prometheus')
+    await rm(root, { recursive: true, force: true })
+
+    await registerSkills(createContext(root))
+
+    const skillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-writing-plan', 'SKILL.md')
+    const content = await readFile(skillPath, 'utf-8')
+
+    expect(content).toContain('Prometheus Precedence')
+    expect(content).toContain('Prometheus wins')
+    expect(content).toContain('Agent Target')
+    expect(content).toContain('plan agent')
+
+    await rm(root, { recursive: true, force: true })
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Negative-scope: openflow-reflect must not be registered as a skill
 // The MVP uses openflow-ai-reflection as the skill name; openflow-reflect

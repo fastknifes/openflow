@@ -219,10 +219,10 @@ describe('chat-message hook', () => {
 
   test('suppresses suggestion when design documents already exist', async () => {
     const root = join(process.cwd(), '.test-chat-existing-design')
-    const feature = 'feature-767b-5f55'
+    const feature = 'user-login'
     await rm(root, { recursive: true, force: true })
-    await mkdir(join(root, 'docs', 'design', feature), { recursive: true })
-    await writeFile(join(root, 'docs', 'design', feature, '20260320-design.md'), '# design', 'utf-8')
+    await mkdir(join(root, 'docs', 'changes', feature), { recursive: true })
+    await writeFile(join(root, 'docs', 'changes', feature, 'design.md'), '# design', 'utf-8')
     try {
       const ctx = createContext(root)
       const hook = createChatMessageHook(ctx)

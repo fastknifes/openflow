@@ -96,8 +96,8 @@ describe('Guardian config defaults', () => {
     expect(defaultConfig.guardian.max_retries).toBe(3)
   })
 
-  test('defaultConfig.guardian.state_dir is correct', () => {
-    expect(defaultConfig.guardian.state_dir).toBe('.sisyphus/openflow/guardian')
+  test('defaultConfig.paths.guardian_state is correct', () => {
+    expect(defaultConfig.paths.guardian_state).toBe('.sisyphus/openflow/guardian')
   })
 })
 

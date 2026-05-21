@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "slug": "quality-gate-verify-toolchain-verify-js-bun-run-lint-typecheck-test-php-go-enoent-quality-check",
+  "symptom": "quality-gate-verify-toolchain: 质量门 verify 步骤硬编码了 JS 工具链命令（bun run lint/typecheck/test），在 PHP+Go 项目中永远失败返回 ENOENT。需要支持按项目技术栈配置或自动检测 quality check 命令。",
+  "environment": "local",
+  "status": "resolved",
+  "classification": "bugfix",
+  "confidence": "high",
+  "rootCause": "getQualityCommandSpec 函数（verify.ts L951-962）硬编码了 bun 命令，且 runQualityChecks 把 quality gate 建模为代码级 test runner。根本问题是职责边界错误：代码级验证应由实现节点/QA 节点完成，quality gate 应作为 evidence judge 判断文档与行为证据是否充分。",
+  "evidence": [
+    {
+      "source": "user_report",
+      "summary": "quality-gate-verify-toolchain: 质量门 verify 步骤硬编码了 JS 工具链命令（bun run lint/typecheck/test），在 PHP+Go 项目中永远失败返回 ENOENT。需要支持按项目技术栈配置或自动检测 quality check 命令。"
+    },
+    {
+      "source": "code_analysis",
+      "summary": "getQualityCommandSpec 硬编码 bun 命令：test → 'bun test', typecheck → 'bun run typecheck', lint → 'bun run lint', format → 'bun run format'。runQualityChecks 通过 child_process.spawn 执行这些命令，在非 JS/TS 项目中全部 ENOENT。"
+    },
+    {
+      "source": "investigation",
+      "summary": "完整代码路径：handleVerify() → collectEvidence() → runQualityChecks() → getQualityCommandSpec() → runCommand() → child_process.spawn。issue-clarification.md 记录了完整调查。"
+    }
+  ],
+  "hypotheses": [
+    "根因已确认：quality gate 的 verify 步骤绑定了代码级命令执行职责，应收敛为文档/行为证据裁判。"
+  ],
+  "recommendedAction": "删除 quality gate 中的代码级命令执行逻辑，将 lint/typecheck/test/format 标记为实现节点负责的 informational evidence。后续增强围绕 behavior evidence / integration evidence。",
+  "requiredChecks": [
+    "openflow-quality-gate"
+  ],
+  "verificationEvidence": [
+    "issue-clarification.md 完整记录了根因分析、代码路径、受影响符号",
+    "docs/changes/2026-05-20-quality-gate-evidence-judge/ 包含对应的 feature 设计文档（design.md, behavior.md, plan.md）",
+    "修复范围已明确：src/commands/verify.ts 中的 runQualityChecks, getQualityCommandSpec, runCommand"
+  ],
+  "createdAt": "2026-05-20T03:22:33.054Z",
+  "updatedAt": "2026-05-20T03:30:00.000Z"
+}

@@ -1,10 +1,8 @@
 export interface FeatureConfig {
   enabled: boolean
-  output_dir: string
   auto_trigger: boolean
   trigger_mode: FeatureTriggerMode
   generate_prd: boolean
-  prd_output_dir: string
   closure: FeatureClosureConfig
 }
 
@@ -20,7 +18,6 @@ export interface FeatureClosureConfig {
 
 export interface TddConfig {
   enabled: boolean
-  expand_threshold: number
 }
 
 export interface AdapterConfig {
@@ -59,7 +56,6 @@ export type QualityCheckType = 'lint' | 'typecheck' | 'test' | 'format'
 
 export interface ArchiveConfig {
   enabled: boolean
-  output_dir: string
   drift_check?: boolean
   auto_promote_current?: boolean
 }
@@ -81,7 +77,6 @@ export interface GuardianConfig {
   auto_start: boolean
   auto_fix: boolean
   max_retries: number
-  state_dir: string
   contract_cache: boolean
 }
 
@@ -132,6 +127,8 @@ export interface HardenResult {
   stopReason?: string
   trace?: HardenTraceEntry[]
   acceptedFindingsSummary?: string
+  coordinatorSessionId?: string
+  totalTokensConsumed?: number
 }
 
 export type HardenMode = 'quick' | 'standard' | 'deep'
@@ -141,10 +138,33 @@ export type ComplexityGrade = 'trivial' | 'simple' | 'complex'
 export interface HardenConfig {
   enabled: boolean
   maxRounds: number
-  tokenBudgetPerRound: number
-  tokenBudgetTotal: number
+  maxArgumentRoundsPerFinding: number
   reviewerModel?: string
   executorModel?: string
+}
+
+export type HardenExecutorVerdict = 'accept' | 'reject' | 'partial'
+
+export interface HardenDispositionItem {
+  findingId: string
+  verdict: HardenExecutorVerdict
+  rationale: string
+  fixSummary?: string
+}
+
+export interface HardenRebuttalRecord {
+  reviewerRebuttalSessionId: string
+  challenge: string
+  executorFinalSessionId: string
+  finalVerdict: HardenExecutorVerdict
+}
+
+export interface HardenRoundSessionIds {
+  round: number
+  reviewerSessionId: string
+  executorSessionId: string
+  reviewerRebuttalSessionId?: string
+  executorRebuttalSessionId?: string
 }
 
 export type DriftDisposition = 'auto_repaired' | 'ambiguous_needs_confirmation' | 'violation_needs_fix' | 'no_drift'
@@ -154,7 +174,6 @@ export interface DriftGuardianConfig {
   auto_start: boolean
   auto_fix: boolean
   max_retries: number
-  state_dir: string
   contract_cache: boolean
 }
 
@@ -216,7 +235,25 @@ export interface EvidenceSinkEntry {
   data: unknown
 }
 
+export interface PathsConfig {
+  changes: string
+  archive: string
+  current_requirements: string
+  current_design: string
+  current_spec: string
+  current_workflow: string
+  builds: string
+  plans: string
+  acceptance_state: string
+  feature_state: string
+  change_units: string
+  guardian_state: string
+  boulder_state: string
+  evidence_dir: string
+}
+
 export interface OpenFlowConfig {
+  paths: PathsConfig
   feature: FeatureConfig
   tdd: TddConfig
   verification: VerificationConfig
@@ -229,13 +266,27 @@ export interface OpenFlowConfig {
 }
 
 export const defaultConfig: OpenFlowConfig = {
+  paths: {
+    changes: 'docs/changes',
+    archive: 'docs/archive',
+    current_requirements: 'docs/current/requirements',
+    current_design: 'docs/current/design',
+    current_spec: 'docs/current/spec',
+    current_workflow: 'docs/current/workflow',
+    builds: '.sisyphus/builds',
+    plans: '.sisyphus/plans',
+    acceptance_state: '.sisyphus/acceptance.local.md',
+    feature_state: '.sisyphus/feature',
+    change_units: '.sisyphus/change-units.json',
+    guardian_state: '.sisyphus/openflow/guardian',
+    boulder_state: '.sisyphus/boulder.json',
+    evidence_dir: '.sisyphus/evidence',
+  },
   feature: {
     enabled: true,
-    output_dir: 'docs/changes',
     auto_trigger: true,
     trigger_mode: 'smart',
     generate_prd: true,
-    prd_output_dir: 'docs/changes',
     closure: {
       enabled: true,
       auto_transition: true,
@@ -246,7 +297,6 @@ export const defaultConfig: OpenFlowConfig = {
   },
   tdd: {
     enabled: true,
-    expand_threshold: 3,
   },
   verification: {
     in_plan: true,
@@ -265,7 +315,6 @@ export const defaultConfig: OpenFlowConfig = {
   },
   archive: {
     enabled: true,
-    output_dir: 'docs/archive',
     drift_check: true,
     auto_promote_current: true,
   },
@@ -273,15 +322,13 @@ export const defaultConfig: OpenFlowConfig = {
   harden: {
     enabled: true,
     maxRounds: 5,
-    tokenBudgetPerRound: 50000,
-    tokenBudgetTotal: 250000,
+    maxArgumentRoundsPerFinding: 2,
   },
   guardian: {
     enabled: true,
     auto_start: true,
     auto_fix: true,
     max_retries: 3,
-    state_dir: '.sisyphus/openflow/guardian',
     contract_cache: true,
   },
   executionQualityPolicy: {
@@ -365,7 +412,7 @@ export type DevelopmentPhase =
   | 'promotion_pending'
   | 'promoted'
 
-export type VerificationFailureCategory = 'quality' | 'security' | 'consistency'
+export type VerificationFailureCategory = 'quality' | 'security' | 'consistency' | 'compilation'
 
 export type PromotionType = 'ADD' | 'UPDATE' | 'REMOVE'
 
@@ -418,6 +465,9 @@ export interface BehaviorScenarioCheckResult {
   evidenceType?: string
   evidenceReference?: string
   detail?: string
+  coverageLevel?: BehaviorCoverageLevel
+  freshness?: BehaviorFreshness
+  equivalenceRationale?: string
 }
 
 export interface VerifyEvidencePacket {
@@ -435,12 +485,21 @@ export interface VerifyEvidencePacket {
 
 export type BehaviorEvidenceStatus = 'verified' | 'missing_evidence' | 'failed' | 'not_applicable'
 
+export type BehaviorCriticality = 'critical' | 'normal' | 'optional'
+export type BehaviorCoverageLevel = 'exact' | 'equivalent' | 'partial' | 'missing' | 'not_applicable'
+export type BehaviorFreshness = 'fresh' | 'stale' | 'unknown'
+
 export interface BehaviorScenarioEvidence {
   scenarioName: string
   status: BehaviorEvidenceStatus
   evidenceType: string
   evidenceReference: string
   reason: string
+  scenarioId?: string
+  criticality?: BehaviorCriticality
+  coverageLevel?: BehaviorCoverageLevel
+  equivalenceRationale?: string
+  freshness?: BehaviorFreshness
 }
 
 export interface VerifyResult {
@@ -518,6 +577,8 @@ export interface IssuePacket {
   noFixNeededReason?: string
   createdAt: string
   updatedAt: string
+  /** Session ID that created this issue. Used for session-scoped blocking. */
+  sessionID?: string
 }
 
 /** Implementation lifecycle states for stateful quality guardrails.

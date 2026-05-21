@@ -450,7 +450,7 @@ function extractFeature(value?: string): string | undefined {
   // 首先尝试模式匹配
   for (const pattern of REQUIREMENT_PATTERNS) {
     const match = value.match(pattern)
-    if (match?.[1]) return sanitizeFeatureCandidate(match[1])
+    if (match?.[1]) return sanitizeFeatureCandidate(resolveCommonFeatureAlias(match[1]) ?? match[1])
   }
 
   // 启发式规则：如果包含特征关键词，尝试提取
@@ -467,7 +467,7 @@ function extractFeature(value?: string): string | undefined {
       if (currentWord && INTENT_KEYWORDS.action.some(kw => currentWord.includes(kw))) {
         const candidate = words[i + 1]
         if (candidate && !INTENT_KEYWORDS.feature.includes(candidate) && !INTENT_KEYWORDS.requirement.includes(candidate)) {
-          return sanitizeFeatureCandidate(candidate)
+          return sanitizeFeatureCandidate(resolveCommonFeatureAlias(candidate) ?? candidate)
         }
       }
     }
@@ -481,6 +481,12 @@ function extractFeature(value?: string): string | undefined {
     return sanitizeFeatureCandidate(value)
   }
 
+  return undefined
+}
+
+function resolveCommonFeatureAlias(value: string): string | undefined {
+  if (/登录/u.test(value)) return 'user-login'
+  if (/代理平台/u.test(value)) return 'agent-platform'
   return undefined
 }
 

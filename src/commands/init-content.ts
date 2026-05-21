@@ -52,8 +52,54 @@ export type InitResult = 'initialized' | 'refreshed' | 'appended' | 'safe_repair
  * User-facing messages for init result states.
  */
 export const INIT_RESULT_MESSAGES: Readonly<Record<InitResult, string>> = Object.freeze({
-  initialized: 'initialized AGENTS.md and added OpenFlow docs guide',
-  refreshed: 'refreshed OpenFlow docs guide',
-  appended: 'appended OpenFlow docs guide',
-  safe_repair: 'appended fresh OpenFlow docs guide as safe repair',
+  initialized: `## OpenFlow Init Complete
+
+initialized AGENTS.md and added OpenFlow docs guide
+
+### Next Step
+
+Start designing your first feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\`
+
+Or investigate an issue:
+
+\`\`\`
+/openflow-issue "<problem description>"
+\`\`\``,
+  refreshed: `## OpenFlow Init Complete
+
+refreshed OpenFlow docs guide
+
+### Next Step
+
+Continue with your current workflow, or start a new feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\``,
+  appended: `## OpenFlow Init Complete
+
+appended OpenFlow docs guide
+
+### Next Step
+
+Continue with your current workflow, or start a new feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\``,
+  safe_repair: `## OpenFlow Init Complete
+
+appended fresh OpenFlow docs guide as safe repair
+
+### Next Step
+
+Continue with your current workflow, or start a new feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\``,
 })

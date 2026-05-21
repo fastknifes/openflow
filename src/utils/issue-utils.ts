@@ -54,12 +54,13 @@ export function issueSlug(rawText: string): string {
 /**
  * Resolve an issue workspace path from a name or raw case text.
  * Derives today's date and combines with slug to produce
- * docs/changes/{YYYY-MM-DD-slug} path.
+ * <changesDir>/{YYYY-MM-DD-slug} path.
  * Does NOT create directories on disk.
  */
 export function resolveIssueWorkspace(
   ctx: { directory: string },
   nameOrCase: string,
+  changesDir = 'docs/changes',
 ): { slug: string; workspacePath: string } {
   const slug = issueSlug(nameOrCase)
   const now = new Date()
@@ -68,7 +69,8 @@ export function resolveIssueWorkspace(
   const day = String(now.getDate()).padStart(2, '0')
   const datePrefix = `${year}-${month}-${day}`
   const workspaceName = `${datePrefix}-${slug}`
-  const workspacePath = `${ctx.directory}${ctx.directory.endsWith('/') || ctx.directory.endsWith('\\') ? '' : '/'}docs/changes/${workspaceName}`
+  const sep = ctx.directory.endsWith('/') || ctx.directory.endsWith('\\') ? '' : '/'
+  const workspacePath = `${ctx.directory}${sep}${changesDir}/${workspaceName}`
 
   return { slug, workspacePath }
 }
@@ -80,11 +82,12 @@ export function buildIssuePacket(input: {
   status?: IssueWorkflowStatus
   classification?: IssueClassification
   now?: string
+  sessionID?: string
 }): IssuePacket {
   const now = input.now ?? new Date().toISOString()
   const classification = input.classification ?? 'cannot_determine'
 
-  return {
+  const packet: IssuePacket = {
     version: 1,
     slug: input.slug,
     symptom: input.symptom || input.slug,
@@ -105,6 +108,12 @@ export function buildIssuePacket(input: {
     createdAt: now,
     updatedAt: now,
   }
+
+  if (input.sessionID !== undefined) {
+    packet.sessionID = input.sessionID
+  }
+
+  return packet
 }
 
 export async function readIssuePacket(workspacePath: string): Promise<IssuePacket | null> {
@@ -135,6 +144,7 @@ export async function readIssuePacket(workspacePath: string): Promise<IssuePacke
     if (parsed.verificationEvidence !== undefined) packet.verificationEvidence = parsed.verificationEvidence
     if (parsed.residualRisk !== undefined) packet.residualRisk = parsed.residualRisk
     if (parsed.noFixNeededReason !== undefined) packet.noFixNeededReason = parsed.noFixNeededReason
+    if (parsed.sessionID !== undefined) packet.sessionID = parsed.sessionID
     return packet
   } catch {
     return null

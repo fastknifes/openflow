@@ -50,7 +50,7 @@ async function cleanupLegacyWorkspaceSkillArtifacts(projectDir: string | undefin
 }
 
 export async function registerSkills(ctx: OpenFlowContext): Promise<boolean> {
-  const skills = getSkills()
+  const skills = getSkills(ctx.config)
   const projectDir = typeof ctx.directory === 'string' && ctx.directory.trim().length > 0
     ? ctx.directory
     : typeof ctx.worktree === 'string' && ctx.worktree.trim().length > 0

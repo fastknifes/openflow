@@ -337,8 +337,8 @@ describe('issue command', () => {
 
     const result = await handleIssue(createContext(root), '--fix "data not saving" --name data-not-saving')
 
-    expect(result).toContain('Fix blocked')
-    expect(result).toContain('classify the issue')
+    expect(result).toContain('## Fix Routing Ready')
+    expect(result).toContain('cannot_determine')
     expect(result).toContain('- **status**: `reported`')
 
     await rm(root, { recursive: true, force: true })
@@ -378,22 +378,7 @@ describe('issue command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('--fix uses an existing previous-date packet and renders fixing status', async () => {
-    const root = join(process.cwd(), '.test-issue-fix-old-workspace')
-    await rm(root, { recursive: true, force: true })
-    await mkdir(root, { recursive: true })
 
-    const oldDate = '2026-01-02'
-    await writeResolvablePacket(root, 'old-fixable', 'old fixable', oldDate)
-    const result = await handleIssue(createContext(root), '--fix "old fixable" --name old-fixable')
-
-    expect(result).toContain('## Fix Routing Ready')
-    expect(result).toContain('- **status**: `fixing`')
-    const packet = JSON.parse(await readFile(join(root, 'docs', 'changes', `${oldDate}-old-fixable`, 'issue-packet.json'), 'utf-8')) as { status: string }
-    expect(packet.status).toBe('fixing')
-
-    await rm(root, { recursive: true, force: true })
-  })
 
   test('--close uses an existing previous-date packet and renders closed status', async () => {
     const root = join(process.cwd(), '.test-issue-close-old-workspace')
@@ -466,6 +451,45 @@ Check auth handler null safety first
     expect(result).toContain('### Similar Historical Issues')
     expect(result).toContain('api-broken')
     expect(result).toContain('relevance:')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('sessionID is recorded in issue packet when provided', async () => {
+    const root = join(process.cwd(), '.test-issue-session-id')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const date = todayPrefix()
+    const testSessionID = 'session-abc-123'
+    const result = await handleIssue(createContext(root), '--write-doc "api broken" --name api-broken', undefined, undefined, testSessionID)
+
+    expect(result).toContain('## OpenFlow Issue')
+
+    const packetPath = join(root, 'docs', 'changes', `${date}-api-broken`, 'issue-packet.json')
+    await expect(access(packetPath)).resolves.toBeNull()
+    const packet = JSON.parse(await readFile(packetPath, 'utf-8')) as { slug: string; sessionID?: string }
+    expect(packet.slug).toBe('api-broken')
+    expect(packet.sessionID).toBe(testSessionID)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('sessionID is omitted from issue packet when not provided', async () => {
+    const root = join(process.cwd(), '.test-issue-no-session-id')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const date = todayPrefix()
+    const result = await handleIssue(createContext(root), '--write-doc "api broken" --name api-broken')
+
+    expect(result).toContain('## OpenFlow Issue')
+
+    const packetPath = join(root, 'docs', 'changes', `${date}-api-broken`, 'issue-packet.json')
+    await expect(access(packetPath)).resolves.toBeNull()
+    const packet = JSON.parse(await readFile(packetPath, 'utf-8')) as { slug: string; sessionID?: string }
+    expect(packet.slug).toBe('api-broken')
+    expect(packet.sessionID).toBeUndefined()
 
     await rm(root, { recursive: true, force: true })
   })

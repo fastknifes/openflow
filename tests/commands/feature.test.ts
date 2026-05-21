@@ -112,6 +112,30 @@ describe('feature command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('does not invoke question picker twice for the same pending question', async () => {
+    const root = join(process.cwd(), '.test-feature-question-picker-dedupe')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const tool = createQuestionToolContext(root, ['', ''], 'session-dedupe')
+
+    const first = await handleFeature(createContext(root), 'user-login', undefined, tool.context)
+    const second = await handleFeature(createContext(root), 'user-login', undefined, tool.context)
+
+    expect(first).toContain('这个功能主要要解决什么问题？')
+    expect(second).toContain('这个功能主要要解决什么问题？')
+    expect(tool.asked).toHaveLength(1)
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      questionPickerPromptedIds: string[]
+      pendingQuestionId: string
+    }
+    expect(session.questionPickerPromptedIds).toContain('problem')
+    expect(session.pendingQuestionId).toBe('problem')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('accepts Chinese natural-language feature intent without sanitization failure', async () => {
     const root = join(process.cwd(), '.test-feature-natural-language')
     await rm(root, { recursive: true, force: true })
@@ -306,6 +330,26 @@ describe('feature command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('invokes question picker for the next pending question after an answer advances state', async () => {
+    const root = join(process.cwd(), '.test-feature-question-picker-next-pending')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const questionContext = createQuestionToolContext(root, ['支持新场景', 'workflow'], 'session-next-question')
+    const first = await handleFeature(createContext(root), 'user-login', undefined, questionContext.context)
+    questionContext.context.messageID = 'message-2'
+    const second = await handleFeature(createContext(root), 'user-login', undefined, questionContext.context)
+
+    expect(first).toContain('这次需求更接近哪一种范围？')
+    expect(second).toContain('这次设计最需要考虑的一个约束是什么？')
+    expect(questionContext.asked.map(item => item.question)).toEqual([
+      '这个功能主要要解决什么问题？',
+      '这次需求更接近哪一种范围？',
+    ])
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('does not advance on low-signal formal answer', async () => {
     const root = join(process.cwd(), '.test-feature-low-signal')
     await rm(root, { recursive: true, force: true })
@@ -346,7 +390,7 @@ describe('feature command', () => {
     expect(result).toContain('Assumptions:')
     expect(result).toContain('Pending confirmations:')
     expect(result).toContain('Constraints:')
-    expect(result).toContain('Suggested next step:')
+    expect(result).toContain('Suggested user action:')
 
     const changeDirs = await readdir(join(root, 'docs', 'changes'))
     const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
@@ -393,52 +437,139 @@ describe('feature command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('asks whether to deep-verify generated design docs and reports when accepted', async () => {
-    const root = join(process.cwd(), '.test-feature-deep-verify-accepted')
+  test('post-design confirmation: interactive "进入开发计划" proceeds to plan', async () => {
+    const root = join(process.cwd(), '.test-feature-post-design-proceed')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
-    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-deep-verify', 'message-0'))
-    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-deep-verify', 'message-1'))
-    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-deep-verify', 'message-2'))
-    const { asked, context } = createQuestionToolContext(root, ['执行深度校验'], 'session-deep-verify')
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-post-proceed', 'message-0'))
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-post-proceed', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-post-proceed', 'message-2'))
+    const { asked, context } = createQuestionToolContext(root, ['进入开发计划'], 'session-post-proceed')
 
     const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', {
       ...context,
       messageID: 'message-3',
     })
 
-    expect(asked.some((item) => item.header === '深度校验')).toBe(true)
+    expect(asked.some((item) => item.header === '下一步行动')).toBe(true)
     expect(result).toContain('Feature Design Complete')
-    expect(result).toContain('## Deep Feature Design Verification')
-    expect(result).toContain('prevent implementation from starting')
-    expect(result).toContain('Document set')
-    expect(result).toContain('Boundary cases')
-    expect(result).toContain('Flow branch coverage')
-    expect(result).not.toContain('verification.md')
+    expect(result).toContain('Post-Design Confirmation')
+    expect(result).toContain('/openflow-writing-plan user-login')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      postDesignDecision?: string
+    }
+    expect(session.postDesignDecision).toBe('proceed_to_plan')
 
     await rm(root, { recursive: true, force: true })
   })
 
-  test('asks whether to deep-verify generated design docs and skips when declined', async () => {
-    const root = join(process.cwd(), '.test-feature-deep-verify-skipped')
+  test('post-design confirmation: interactive "检查约束充分性" triggers document review', async () => {
+    const root = join(process.cwd(), '.test-feature-post-design-review')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
 
-    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-deep-skip', 'message-0'))
-    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-deep-skip', 'message-1'))
-    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-deep-skip', 'message-2'))
-    const { asked, context } = createQuestionToolContext(root, ['跳过校验'], 'session-deep-skip')
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-post-review', 'message-0'))
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-post-review', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-post-review', 'message-2'))
+    const { asked, context } = createQuestionToolContext(root, ['检查约束充分性'], 'session-post-review')
 
     const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', {
       ...context,
       messageID: 'message-3',
     })
 
-    expect(asked.some((item) => item.header === '深度校验')).toBe(true)
-    expect(result).toContain('Feature Design Complete')
-    expect(result).toContain('Deep design verification skipped by user choice.')
-    expect(result).not.toContain('## Deep Feature Design Verification')
+    expect(asked.some((item) => item.header === '下一步行动')).toBe(true)
+    expect(result).toContain('Design Document Review')
+    expect(result).toContain('design.md')
+    expect(result).toContain('behavior.md')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      postDesignDecision?: string
+    }
+    expect(session.postDesignDecision).toBe('review_docs')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('post-design confirmation: interactive "查看文档" returns document paths', async () => {
+    const root = join(process.cwd(), '.test-feature-post-design-inspect')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-post-inspect', 'message-0'))
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-post-inspect', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-post-inspect', 'message-2'))
+    const { asked, context } = createQuestionToolContext(root, ['查看文档'], 'session-post-inspect')
+
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', {
+      ...context,
+      messageID: 'message-3',
+    })
+
+    expect(asked.some((item) => item.header === '下一步行动')).toBe(true)
+    expect(result).toContain('Documents Ready')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      postDesignDecision?: string
+    }
+    expect(session.postDesignDecision).toBe('inspect')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('post-design confirmation: non-interactive fallback shows next step options', async () => {
+    const root = join(process.cwd(), '.test-feature-post-design-non-interactive')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const toolContext = createToolContext(root, 'session-post-non-interactive')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-post-non-interactive', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-post-non-interactive', 'message-2'))
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-post-non-interactive', 'message-3'))
+
+    expect(result).toContain('## Next Step Options')
+    expect(result).toContain('进入开发计划')
+    expect(result).toContain('检查约束充分性')
+    expect(result).toContain('查看文档')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      postDesignDecision?: string
+    }
+    expect(session.postDesignDecision).toBeUndefined()
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('post-design confirmation: re-display of completed session does not ask again', async () => {
+    const root = join(process.cwd(), '.test-feature-post-design-redisplay')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    // Generate with interactive context and pick "进入开发计划"
+    await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-post-redisplay', 'message-0'))
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-post-redisplay', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-post-redisplay', 'message-2'))
+    const { asked: firstAsked, context: firstContext } = createQuestionToolContext(root, ['进入开发计划'], 'session-post-redisplay')
+    const firstResult = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', {
+      ...firstContext,
+      messageID: 'message-3',
+    })
+    expect(firstAsked.some((item) => item.header === '下一步行动')).toBe(true)
+    expect(firstResult).toContain('Post-Design Confirmation')
+
+    // Re-display with a fresh question context — should NOT ask again
+    const { asked: secondAsked, context: secondContext } = createQuestionToolContext(root, [], 'session-post-redisplay')
+    const secondResult = await handleFeature(createContext(root), 'user-login', undefined, {
+      ...secondContext,
+      messageID: 'message-4',
+    })
+
+    expect(secondAsked).toHaveLength(0)
+    expect(secondResult).toContain('Feature Design Complete')
+    expect(secondResult).not.toContain('下一步行动')
 
     await rm(root, { recursive: true, force: true })
   })
@@ -493,7 +624,7 @@ describe('feature command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('similar natural-language feature descriptions derive distinct safe slugs without overwriting sessions', async () => {
+  test('similar natural-language descriptions with same extracted words map to the same feature', async () => {
     const root = join(process.cwd(), '.test-feature-slug-collision-safety')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
@@ -504,12 +635,8 @@ describe('feature command', () => {
     const files = (await readdir(join(root, '.sisyphus', 'feature')))
       .filter((file) => file.startsWith('quality-gate-evidence-ledger') && file.endsWith('.json'))
 
-    expect(files).toHaveLength(2)
-    expect(new Set(files).size).toBe(2)
-
-    const first = await readFile(join(root, '.sisyphus', 'feature', files[0]!), 'utf-8')
-    const second = await readFile(join(root, '.sisyphus', 'feature', files[1]!), 'utf-8')
-    expect(first).not.toBe(second)
+    // Same extracted words → same slug → single session file
+    expect(files).toHaveLength(1)
 
     await rm(root, { recursive: true, force: true })
   })

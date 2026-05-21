@@ -7,7 +7,8 @@ interface ChangeUnitIndex {
   byFeature: Record<string, { changeDir: string; archiveDir?: string }>
 }
 
-const CHANGE_UNITS_INDEX_PATH = ['.sisyphus', 'change-units.json'] as const
+const DEFAULT_CHANGE_UNITS_INDEX_PATH = '.sisyphus/change-units.json'
+const DEFAULT_CHANGES_DIR = 'docs/changes'
 
 function getTodayDirPrefix(): string {
   return new Date().toISOString().split('T')[0] ?? new Date().toISOString().slice(0, 10)
@@ -17,12 +18,12 @@ function buildDatedDirName(feature: string, datePrefix = getTodayDirPrefix()): s
   return `${datePrefix}-${sanitizeFeatureName(feature)}`
 }
 
-function getIndexPath(projectDir: string): string {
-  return createSafePath(projectDir, ...CHANGE_UNITS_INDEX_PATH)
+function getIndexPath(projectDir: string, changeUnitsPath = DEFAULT_CHANGE_UNITS_INDEX_PATH): string {
+  return createSafePath(projectDir, changeUnitsPath)
 }
 
-async function loadIndex(projectDir: string): Promise<ChangeUnitIndex> {
-  const indexPath = getIndexPath(projectDir)
+async function loadIndex(projectDir: string, changeUnitsPath?: string): Promise<ChangeUnitIndex> {
+  const indexPath = getIndexPath(projectDir, changeUnitsPath)
   try {
     const raw = await fs.readFile(indexPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<ChangeUnitIndex>
@@ -35,15 +36,15 @@ async function loadIndex(projectDir: string): Promise<ChangeUnitIndex> {
   }
 }
 
-async function saveIndex(projectDir: string, index: ChangeUnitIndex): Promise<void> {
-  const indexPath = getIndexPath(projectDir)
+async function saveIndex(projectDir: string, index: ChangeUnitIndex, changeUnitsPath?: string): Promise<void> {
+  const indexPath = getIndexPath(projectDir, changeUnitsPath)
   await fs.mkdir(path.dirname(indexPath), { recursive: true })
   await fs.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8')
 }
 
-async function directoryExists(projectDir: string, dirName: string): Promise<boolean> {
+async function directoryExists(projectDir: string, dirName: string, changesDir = DEFAULT_CHANGES_DIR): Promise<boolean> {
   try {
-    const fullPath = createSafePath(projectDir, 'docs', 'changes', dirName)
+    const fullPath = createSafePath(projectDir, changesDir, dirName)
     const stats = await fs.stat(fullPath)
     return stats.isDirectory()
   } catch {
@@ -51,9 +52,9 @@ async function directoryExists(projectDir: string, dirName: string): Promise<boo
   }
 }
 
-export async function ensureChangeUnitDir(projectDir: string, feature: string): Promise<string> {
+export async function ensureChangeUnitDir(projectDir: string, feature: string, changeUnitsPath?: string): Promise<string> {
   const sanitizedFeature = sanitizeFeatureName(feature)
-  const index = await loadIndex(projectDir)
+  const index = await loadIndex(projectDir, changeUnitsPath)
   const existing = index.byFeature[sanitizedFeature]?.changeDir
   if (existing) return existing
 
@@ -62,24 +63,24 @@ export async function ensureChangeUnitDir(projectDir: string, feature: string): 
     ...(index.byFeature[sanitizedFeature] ?? {}),
     changeDir,
   }
-  await saveIndex(projectDir, index)
+  await saveIndex(projectDir, index, changeUnitsPath)
   return changeDir
 }
 
-export async function resolveChangeUnitDir(projectDir: string, feature: string): Promise<string> {
+export async function resolveChangeUnitDir(projectDir: string, feature: string, changesDir = DEFAULT_CHANGES_DIR, changeUnitsPath?: string): Promise<string> {
   const sanitizedFeature = sanitizeFeatureName(feature)
-  const index = await loadIndex(projectDir)
+  const index = await loadIndex(projectDir, changeUnitsPath)
   const mapped = index.byFeature[sanitizedFeature]?.changeDir
-  if (mapped && await directoryExists(projectDir, mapped)) return mapped
-  const discovered = await findExistingChangeUnitDir(projectDir, sanitizedFeature)
+  if (mapped && await directoryExists(projectDir, mapped, changesDir)) return mapped
+  const discovered = await findExistingChangeUnitDir(projectDir, sanitizedFeature, changesDir)
   if (discovered) return discovered
   return sanitizedFeature
 }
 
-async function findExistingChangeUnitDir(projectDir: string, sanitizedFeature: string): Promise<string | null> {
-  const changesDir = createSafePath(projectDir, 'docs', 'changes')
+async function findExistingChangeUnitDir(projectDir: string, sanitizedFeature: string, changesDir = DEFAULT_CHANGES_DIR): Promise<string | null> {
+  const changesFullPath = createSafePath(projectDir, changesDir)
   try {
-    const entries = await fs.readdir(changesDir, { withFileTypes: true })
+    const entries = await fs.readdir(changesFullPath, { withFileTypes: true })
     const matches = entries
       .filter(entry => entry.isDirectory())
       .map(entry => entry.name)
@@ -92,9 +93,9 @@ async function findExistingChangeUnitDir(projectDir: string, sanitizedFeature: s
   }
 }
 
-export async function ensureArchiveUnitDir(projectDir: string, feature: string): Promise<string> {
+export async function ensureArchiveUnitDir(projectDir: string, feature: string, changeUnitsPath?: string): Promise<string> {
   const sanitizedFeature = sanitizeFeatureName(feature)
-  const index = await loadIndex(projectDir)
+  const index = await loadIndex(projectDir, changeUnitsPath)
   const changeDir = index.byFeature[sanitizedFeature]?.changeDir ?? buildDatedDirName(sanitizedFeature)
   const archiveDir = index.byFeature[sanitizedFeature]?.archiveDir ?? changeDir
 
@@ -102,13 +103,13 @@ export async function ensureArchiveUnitDir(projectDir: string, feature: string):
     changeDir,
     archiveDir,
   }
-  await saveIndex(projectDir, index)
+  await saveIndex(projectDir, index, changeUnitsPath)
   return archiveDir
 }
 
-export async function resolveArchiveUnitDir(projectDir: string, feature: string): Promise<string> {
+export async function resolveArchiveUnitDir(projectDir: string, feature: string, changeUnitsPath?: string): Promise<string> {
   const sanitizedFeature = sanitizeFeatureName(feature)
-  const index = await loadIndex(projectDir)
+  const index = await loadIndex(projectDir, changeUnitsPath)
   return index.byFeature[sanitizedFeature]?.archiveDir
     ?? index.byFeature[sanitizedFeature]?.changeDir
     ?? sanitizedFeature

@@ -455,35 +455,75 @@ Then enable the plugin in your `opencode.json`:
 
 ## ⚙️ Configuration
 
-Customize the behavior further in your `opencode.json`:
+OpenFlow supports three configuration sources, in priority order:
+
+1. **`openflow.json`** in your project root
+2. **`openflow.jsonc`** in your project root (with comments)
+3. **`opencode.json`** under the top-level `openflow` key
+
+The first source found wins; there is no deep-merge across sources.
+
+### Standalone Config File (`openflow.json` or `openflow.jsonc`)
+
+Create `openflow.json` (or `openflow.jsonc`) in your project root. The file contains the OpenFlow config object directly:
 
 ```json
 {
+  "paths": {
+    "changes": "docs/changes",
+    "archive": "docs/archive",
+    "current_requirements": "docs/current/requirements",
+    "current_design": "docs/current/design",
+    "current_spec": "docs/current/spec",
+    "current_workflow": "docs/current/workflow",
+    "builds": ".sisyphus/builds",
+    "plans": ".sisyphus/plans",
+    "acceptance_state": ".sisyphus/acceptance.local.md",
+    "feature_state": ".sisyphus/feature",
+    "change_units": ".sisyphus/change-units.json",
+    "guardian_state": ".sisyphus/openflow/guardian"
+  },
+  "feature": {
+    "enabled": true,
+    "auto_trigger": true,
+    "trigger_mode": "smart"
+  },
+  "tdd": {
+    "enabled": true,
+    "expand_threshold": 3
+  },
+  "verification": {
+    "in_plan": true,
+    "security": ["secret", "vuln"],
+    "quality": ["lint", "typecheck", "test"]
+  },
+  "archive": {
+    "enabled": true,
+    "auto_promote_current": true
+  },
+  "writingPlan": {
+    "enabled": true
+  },
+  "guardian": {
+    "enabled": true,
+    "auto_fix": true
+  }
+}
+```
+
+### Embedding in `opencode.json`
+
+If you prefer to keep everything in `opencode.json`, use the top-level `openflow` object. This is the lowest-priority source:
+
+```json
+{
+  "plugins": ["@fastknife/openflow"],
   "openflow": {
+    "paths": {
+      "plans": ".custom/plans"
+    },
     "feature": {
-      "enabled": true,
-      "auto_trigger": true,
-      "trigger_mode": "smart"
-    },
-    "tdd": {
-      "enabled": true,
-      "expand_threshold": 3
-    },
-    "verification": {
-      "in_plan": true,
-      "security": ["secret", "vuln"],
-      "quality": ["lint", "typecheck", "test"]
-    },
-    "archive": {
-      "enabled": true,
-      "auto_promote_current": true
-    },
-    "writingPlan": {
-      "enabled": true
-    },
-    "guardian": {
-      "enabled": true,
-      "auto_fix": true
+      "trigger_mode": "always"
     }
   }
 }

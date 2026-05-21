@@ -19,9 +19,9 @@ export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): 
     return '## Writing Plan Disabled\n\nWriting plan feature is disabled in OpenFlow configuration.'
   }
 
-  const designContext = await readDesignContextPacket(ctx.directory, sanitizedFeature)
-  const primaryPlanPath = await getChangePlansPath(ctx.directory, sanitizedFeature)
-  const omoPlanPath = getPlanPath(ctx.directory, sanitizedFeature)
+  const designContext = await readDesignContextPacket(ctx.directory, sanitizedFeature, ctx.config)
+  const primaryPlanPath = await getChangePlansPath(ctx.directory, sanitizedFeature, ctx.config)
+  const omoPlanPath = getPlanPath(ctx.directory, sanitizedFeature, ctx.config)
 
   return `## OpenFlow Writing Plan Packet
 
@@ -30,12 +30,21 @@ export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): 
 ### Design Context
 ${designContext || `> No design documents found for feature \`${escapeMarkdown(sanitizedFeature)}\`. Consider running \`/openflow-feature ${escapeMarkdown(sanitizedFeature)}\` first.`}
 
+### Agent Target
+
+The execution environment determines which planning agent handles this plan:
+- **OMO detected** -> Prometheus (interview, clearance, and execution)
+- **Non-OMO** -> OpenCode native \`plan\` agent
+
+OpenFlow prepares the design context and constraints; the target agent owns the planning conversation.
+
 ### Plan Output Paths
 
 - **Primary** (change workspace): \`${escapeMarkdown(primaryPlanPath)}\`
 - **OMO copy** (active oh-my-openagent / Prometheus execution is detected OR \`.sisyphus/\` directory exists): \`${escapeMarkdown(omoPlanPath)}\`
 - If both copies are written, the initial saved content must be identical.
 - After execution starts, the \`.sisyphus/plans/\` copy may diverge as OMO / Prometheus records task progress; the \`docs/changes/\` plan remains the canonical planning artifact.
+- Paths come from OpenFlow configuration; defaults are shown above.
 
 ### Plan Format Rules
 
@@ -93,13 +102,29 @@ Before writing the plan file, verify:
 ### OMO / Prometheus Compatibility
 
 This skill does NOT replace or disable any OMO/Prometheus built-in capabilities. Prometheus exploration, brainstorming, and task planning remain fully available. Use this skill to produce the plan artifact, then let Prometheus continue its normal workflow.
+
+### Blocking Clarification
+
+> If the design context above is insufficient or requirements are unclear, **stop and ask clarifying questions** before generating the plan. Do NOT proceed with placeholders or assumptions.
+
+### Next Step
+
+1. Review the plan structure above and write the plan to the output paths
+2. After the plan is written, start implementation (e.g. with omo /startwork or OpenCode plan/build)
+3. Once implementation is complete, invoke the quality gate:
+
+\`\`\`
+openflow-quality-gate
+\`\`\`
+
+Do not claim completion until the quality gate reports readiness.
 `
 }
 
-export async function readDesignContextPacket(baseDir: string, feature: string): Promise<string | null> {
+export async function readDesignContextPacket(baseDir: string, feature: string, config?: import('../types.js').OpenFlowConfig): Promise<string | null> {
   const candidatePaths = [
-    ...await getDesignCandidatePaths(baseDir, feature),
-    ...await findDatedChangeCandidatePaths(baseDir, feature),
+    ...await getDesignCandidatePaths(baseDir, feature, config),
+    ...await findDatedChangeCandidatePaths(baseDir, feature, config),
   ]
 
   for (const candidatePath of candidatePaths) {
@@ -125,8 +150,8 @@ export async function readDesignContextPacket(baseDir: string, feature: string):
   return null
 }
 
-async function findDatedChangeCandidatePaths(baseDir: string, feature: string): Promise<string[]> {
-  const changesDir = path.join(baseDir, 'docs', 'changes')
+async function findDatedChangeCandidatePaths(baseDir: string, feature: string, config?: import('../types.js').OpenFlowConfig): Promise<string[]> {
+  const changesDir = path.join(baseDir, config?.paths.changes ?? 'docs/changes')
   const suffix = `-${feature}`
 
   try {

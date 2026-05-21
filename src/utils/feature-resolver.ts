@@ -1,6 +1,5 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { createHash } from 'node:crypto'
 import type { OpenFlowContext } from '../types.js'
 import { createSafePath, sanitizeFeatureName } from './security.js'
 
@@ -19,7 +18,7 @@ export interface FeatureSessionCandidate {
 }
 
 export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | null> {
-  const plansDir = createSafePath(ctx.directory, '.sisyphus', 'plans')
+  const plansDir = createSafePath(ctx.directory, ctx.config.paths.plans)
   try {
     const files = await fs.readdir(plansDir)
     const mdFiles = files.filter(file => file.endsWith('.md'))
@@ -27,7 +26,7 @@ export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | 
 
     let latestFeature: { name: string; mtime: number } | null = null
     for (const file of mdFiles) {
-      const filePath = createSafePath(ctx.directory, '.sisyphus', 'plans', file)
+      const filePath = createSafePath(ctx.directory, ctx.config.paths.plans, file)
       const stat = await fs.stat(filePath)
       if (!latestFeature || stat.mtimeMs > latestFeature.mtime) {
         latestFeature = {
@@ -44,12 +43,11 @@ export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | 
 
 export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
   const trimmed = input.trim()
-  const hash = createHash('sha256').update(trimmed).digest('hex').slice(0, 8)
   const direct = trySanitizeFeatureName(trimmed)
   if (direct && direct === trimmed.toLowerCase()) {
     if (isGenericFeatureSlug(direct)) {
       return {
-        slug: `feature-${hash}`,
+        slug: direct,
         title: trimmed,
         sourceIntent: trimmed,
         lowConfidenceReason: 'generic_slug',
@@ -60,7 +58,7 @@ export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
 
   if (looksLikeGenericFeatureInstruction(trimmed)) {
     return {
-      slug: `feature-${hash}`,
+      slug: trySanitizeFeatureName(trimmed) ?? 'untitled-feature',
       title: trimmed,
       sourceIntent: trimmed,
       lowConfidenceReason: 'generic_instruction',
@@ -73,7 +71,7 @@ export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
     .filter((word) => !isIgnoredFeatureWord(word))
   const base = meaningfulWords.slice(0, 8).join('-')
   const lowConfidenceReason = base ? undefined : 'generic_instruction'
-  const slug = trySanitizeFeatureName(base ? `${base}-${hash}` : `feature-${hash}`) ?? `feature-${hash}`
+  const slug = (base ? trySanitizeFeatureName(base) : undefined) ?? trySanitizeFeatureName(trimmed) ?? 'untitled-feature'
 
   return {
     slug,
@@ -83,14 +81,14 @@ export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
   }
 }
 
-export async function findIncompleteFeatureSessions(projectDir: string): Promise<FeatureSessionCandidate[]> {
-  const featureDir = createSafePath(projectDir, '.sisyphus', 'feature')
+export async function findIncompleteFeatureSessions(projectDir: string, featureStateDir = '.sisyphus/feature'): Promise<FeatureSessionCandidate[]> {
+  const featureDir = createSafePath(projectDir, featureStateDir)
   try {
     const files = await fs.readdir(featureDir)
     const candidates: FeatureSessionCandidate[] = []
 
     for (const file of files.filter((entry) => entry.endsWith('.json') && entry !== 'active.json' && entry !== 'recent-completed.json')) {
-      const filePath = createSafePath(projectDir, '.sisyphus', 'feature', file)
+      const filePath = createSafePath(projectDir, featureStateDir, file)
       try {
         const content = JSON.parse(await fs.readFile(filePath, 'utf-8')) as Record<string, unknown>
         if (content.workflowState === 'completed') continue
@@ -99,14 +97,14 @@ export async function findIncompleteFeatureSessions(projectDir: string): Promise
           slug: path.basename(file, '.json'),
           title: typeof content.featureTitle === 'string' ? content.featureTitle : undefined,
           sourceIntent: typeof content.sourceIntent === 'string' ? content.sourceIntent : undefined,
-          updatedAt: typeof content.updatedAt === 'string' ? content.updatedAt : stat.mtime.toISOString(),
+          updatedAt: new Date(stat.mtimeMs).toISOString(),
         })
       } catch {
-        continue
+        // Skip unreadable files
       }
     }
 
-    return candidates.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    return candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
   } catch {
     return []
   }

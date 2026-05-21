@@ -1,0 +1,311 @@
+{
+  "feature": "drg-task-scheduler",
+  "featureTitle": "DRG 全局任务调度器",
+  "sourceIntent": "用户需要一个全局任务调度基础设施，能创建对话、管理依赖和资源冲突",
+  "convergenceStatus": "draft_with_assumptions",
+  "assumptions": [
+    "调度器是 OpenFlow 内部基础设施，不直接面向终端用户",
+    "调度核心不依赖 LLM 或 OpenCode conversation API",
+    "executor 通过 registry 扩展，调度器不写死具体任务类型",
+    "第一版只支持 in-process 调度，不支持多进程分布式"
+  ],
+  "pendingConfirmations": [
+    "是否需要支持 cron 表达式触发（第一版不做）",
+    "是否需要支持任务优先级插队（第一版不做）"
+  ],
+  "constraints": [
+    {
+      "id": "c-0001",
+      "category": "compatibility",
+      "severity": "must",
+      "description": "调度核心不得依赖 LLM",
+      "rationale": "调度是纯确定性逻辑，LLM 只能作为 executor 的调用方能力",
+      "verificationMethod": "检查 DagEngine、ResourceLockManager、StateStore 源码，确认无 LLM 调用",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "c-0002",
+      "category": "compatibility",
+      "severity": "must",
+      "description": "调度核心不得依赖 OpenCode conversation API",
+      "rationale": "第一版不绑定对话创建能力，避免硬依赖外部 API",
+      "verificationMethod": "检查调度核心模块，确认无 conversation/session 创建调用",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "c-0003",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "状态写入必须原子化",
+      "rationale": "避免写一半崩溃导致状态文件损坏",
+      "verificationMethod": "检查 StateStore 实现，确认使用 tmp + rename 模式",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "c-0004",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "非法状态转换必须拒绝并抛出明确错误",
+      "rationale": "防止调度器进入不一致状态",
+      "verificationMethod": "单元测试覆盖非法转换场景，验证是否抛错",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "c-0005",
+      "category": "maintainability",
+      "severity": "should",
+      "description": "状态文件人类可读",
+      "rationale": "方便调试和问题排查",
+      "verificationMethod": "检查输出文件是否为带缩进的 JSON",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "c-0006",
+      "category": "maintainability",
+      "severity": "should",
+      "description": "模块间耦合度低",
+      "rationale": "DagEngine、ResourceLockManager、StateStore 可独立测试",
+      "verificationMethod": "检查模块间 import 关系，确认无循环依赖",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "c-0007",
+      "category": "compatibility",
+      "severity": "may",
+      "description": "向后兼容",
+      "rationale": "未来版本升级时，旧状态文件可迁移",
+      "verificationMethod": "状态文件包含 version 字段",
+      "sourceQuestionId": "constraints"
+    },
+    {
+      "id": "c-0008",
+      "category": "scope",
+      "severity": "must",
+      "description": "第一版不得自动创建 OpenCode conversation",
+      "rationale": "调度器是内部基础设施，对话创建属于 executor 或上层编排职责",
+      "verificationMethod": "检查调度核心无 conversation/session 创建调用",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0009",
+      "category": "scope",
+      "severity": "must",
+      "description": "公开 API 限定为 submitTask/getTask/listTasks/cancelTask/retryTask/registerExecutor/startScheduler/stopScheduler",
+      "rationale": "避免实现计划扩大到 CLI、项目编排或用户命令层",
+      "verificationMethod": "检查导出 API 与实现计划任务边界",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0010",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "重启恢复时旧 running 任务转为 failed，错误码为 SCHEDULER_INTERRUPTED",
+      "rationale": "避免在无法确认副作用状态时重复执行任务",
+      "verificationMethod": "StateStore/Scheduler 恢复测试覆盖 running 任务中断场景",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0011",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "状态机合法转换必须显式编码并测试",
+      "rationale": "防止调度器进入不一致生命周期状态",
+      "verificationMethod": "单元测试覆盖合法与非法状态转换",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0012",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "资源必须使用 { kind, id, mode }，file 资源 id 加锁前必须规范化",
+      "rationale": "避免路径别名绕过资源冲突检测",
+      "verificationMethod": "ResourceLockManager 测试覆盖 ./a 与 a 等价冲突",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0013",
+      "category": "performance",
+      "severity": "must",
+      "description": "ready 任务按 runAfter 到期、createdAt 升序、id 升序确定性调度",
+      "rationale": "保证测试稳定并避免调度顺序依赖对象遍历",
+      "verificationMethod": "SchedulerLoop 测试覆盖多个 ready 任务的执行顺序",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0014",
+      "category": "security",
+      "severity": "must",
+      "description": "状态文件不得保存 key 名包含 secret/token/password 的敏感字段",
+      "rationale": "任务 payload/result/error 会持久化，必须避免泄露凭据",
+      "verificationMethod": "StateStore 或 submitTask 测试覆盖敏感字段拒绝或脱敏",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0015",
+      "category": "compatibility",
+      "severity": "must",
+      "description": "executor 契约固定为 execute(task, context): Promise<unknown>",
+      "rationale": "固定 executor 形状可以稳定 timeout、cancel、日志和测试语义",
+      "verificationMethod": "类型定义与 executor registry 测试覆盖入参、返回值、AbortSignal",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0016",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "startScheduler/stopScheduler 语义必须固定，stop 默认 drain，abortRunning 才中断 running",
+      "rationale": "避免停止调度时隐式中断任务副作用",
+      "verificationMethod": "SchedulerLoop 测试覆盖 start 幂等、stop drain、stop abortRunning",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0017",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "自依赖、缺失依赖、循环依赖必须在 submitTask 阶段拒绝",
+      "rationale": "任务图结构错误不应进入运行期再变成 blocked/failed",
+      "verificationMethod": "submitTask 测试覆盖 SELF_DEPENDENCY、DEPENDENCY_NOT_FOUND、CYCLE_DETECTED",
+      "sourceQuestionId": "implementation-constraints"
+    },
+    {
+      "id": "c-0018",
+      "category": "maintainability",
+      "severity": "must",
+      "description": "所有 API 错误必须使用稳定结构 { code, message, taskId? }",
+      "rationale": "稳定错误码是调用方恢复和自动化测试的基础",
+      "verificationMethod": "单元测试断言错误 code/message/taskId 形状",
+      "sourceQuestionId": "implementation-constraints"
+    }
+  ],
+  "scopeBoundary": {
+    "inScope": [
+      "全局任务注册",
+      "依赖调度",
+      "资源锁管理",
+      "执行器注册",
+      "状态持久化",
+      "任务生命周期管理"
+    ],
+    "outOfScope": [
+      "大需求拆解",
+      "feature 编排",
+      "项目自动化",
+      "cron 表达式解析",
+      "多进程分布式锁",
+      "自动创建 OpenCode conversation",
+      "CLI 或用户命令层"
+    ],
+    "touchedModules": [
+      "src/orchestrator/",
+      "src/contracts/runtime.ts",
+      "src/types.ts",
+      "src/config.ts"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "ac-0001",
+      "description": "可以 submit 一个无依赖任务并执行成功",
+      "category": "功能"
+    },
+    {
+      "id": "ac-0002",
+      "description": "可以 submit A → B，A 成功后 B 自动 ready",
+      "category": "功能"
+    },
+    {
+      "id": "ac-0003",
+      "description": "两个写同一文件的任务不会并发运行",
+      "category": "功能"
+    },
+    {
+      "id": "ac-0004",
+      "description": "executor 失败时任务进入 failed 并记录 error",
+      "category": "功能"
+    },
+    {
+      "id": "ac-0005",
+      "description": "重启后能从 tasks.json 恢复状态",
+      "category": "可靠性"
+    },
+    {
+      "id": "ac-0006",
+      "description": "tasks.json 损坏时能从 tasks.json.bak 恢复",
+      "category": "可靠性"
+    },
+    {
+      "id": "ac-0007",
+      "description": "list/status 能展示当前任务图",
+      "category": "功能"
+    },
+    {
+      "id": "ac-0008",
+      "description": "任务取消时 running executor 收到 AbortSignal",
+      "category": "功能"
+    },
+    {
+      "id": "ac-0009",
+      "description": "启动时自动清理孤儿资源锁",
+      "category": "可靠性"
+    }
+  ],
+  "goals": [
+    "统一后台任务模型",
+    "依赖调度自动推进",
+    "资源冲突协调",
+    "跨 session 状态恢复",
+    "可扩展 executor 机制",
+    "不绑定上层业务语义"
+  ],
+  "nonGoals": [
+    "大需求拆解",
+    "feature 编排",
+    "项目自动化",
+    "cron 表达式解析",
+    "多进程分布式锁",
+    "CLI 或用户命令层"
+  ],
+  "problemStatement": "OpenFlow 目前有命令、hook、ContractRuntime、GuardianConsumer 等执行期组件，但缺少一个统一的后台任务调度基础设施：没有统一的后台任务生命周期管理；没有统一的任务依赖图与 ready/running/done 状态推进；没有全局任务状态持久化与恢复；多个运行期组件若都需要后台执行，只能各自实现局部队列，容易重复和冲突。",
+  "targetUsers": "OpenFlow 内部模块（Guardian、hooks、commands、future orchestrator）",
+  "expectedModules": [
+    {
+      "path": "src/orchestrator/drg-engine.ts",
+      "purpose": "Dependency/Resource Graph 核心引擎"
+    },
+    {
+      "path": "src/orchestrator/resource-lock-manager.ts",
+      "purpose": "文件/状态/自定义资源锁管理"
+    },
+    {
+      "path": "src/orchestrator/state-store.ts",
+      "purpose": "任务状态 JSON 持久化"
+    },
+    {
+      "path": "src/orchestrator/scheduler-loop.ts",
+      "purpose": "ready 检测与执行触发"
+    },
+    {
+      "path": "src/orchestrator/executor-registry.ts",
+      "purpose": "task.type → executor 映射"
+    }
+  ],
+  "risks": [
+    {
+      "description": "调度器成为性能瓶颈，大量任务导致内存或 I/O 压力",
+      "mitigation": "第一版限制最大任务数（如 100 个 active 任务），状态文件定期压缩历史"
+    },
+    {
+      "description": "资源锁设计不当导致死锁",
+      "mitigation": "running 任务结束后必须释放锁，启动时清理孤儿锁，锁必须有超时机制"
+    },
+    {
+      "description": "状态文件损坏导致整个调度器无法启动",
+      "mitigation": "原子写入 + .bak 备份 + 损坏时优雅降级（标记 corrupted 而非崩溃）"
+    },
+    {
+      "description": "executor 抛未捕获异常导致调度循环崩溃",
+      "mitigation": "executor 调用用 try/catch 包裹，异常任务标记为 failed，调度循环继续"
+    }
+  ],
+  "testingStrategy": "DagEngine 单元测试：依赖解锁、循环依赖检测、失败传播、拓扑排序。ResourceLockManager 单元测试：read/write 冲突矩阵、死锁预防、孤儿锁清理。StateStore 单元测试：正常保存、bak 恢复、损坏文件降级、并发写入安全。SchedulerLoop 集成测试：完整生命周期 submit → ready → running → succeeded/failed。边界测试：空依赖图、自依赖、循环依赖、超时任务、取消任务。"
+}

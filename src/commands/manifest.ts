@@ -22,7 +22,7 @@ export const OPENFLOW_TOOL_COMMANDS = {
   },
   archive: {
     name: 'openflow-archive',
-    description: 'OpenFlow archive command. Archives a completed feature/issue — copies design docs, generates implementation-mapper.md, promotes current facts, and cleans up build data. Requires verify readiness.',
+    description: 'OpenFlow archive command. Archives a completed feature/issue — copies design docs, promotes current facts, and cleans up build data. Requires verify readiness. The implementation-mapper.md is generated during the quality-gate phase.',
   },
   qualityGate: {
     name: 'openflow-quality-gate',
@@ -69,4 +69,5 @@ export const OPENFLOW_REGISTERED_SKILL_NAMES = [
   'openflow-quality-gate',
   'openflow-ai-reflection',
   'openflow-issue',
+  'openflow-tdd',
 ] as const

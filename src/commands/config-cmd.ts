@@ -3,27 +3,33 @@ import { escapeMarkdown } from '../utils/security.js'
 
 export function handleConfig(ctx: OpenFlowContext): string {
   const config = ctx.config
-  const featureWorkflowConfig = (config as unknown as Record<string, {
-    enabled: boolean
-    output_dir: string
-    auto_trigger: boolean
-    trigger_mode: string
-  }>)['feature']!
 
   return `## OpenFlow Configuration
 
 \`\`\`json
 {
   "openflow": {
+    "paths": {
+      "changes": "${escapeMarkdown(config.paths.changes)}",
+      "archive": "${escapeMarkdown(config.paths.archive)}",
+      "current_requirements": "${escapeMarkdown(config.paths.current_requirements)}",
+      "current_design": "${escapeMarkdown(config.paths.current_design)}",
+      "current_spec": "${escapeMarkdown(config.paths.current_spec)}",
+      "current_workflow": "${escapeMarkdown(config.paths.current_workflow)}",
+      "builds": "${escapeMarkdown(config.paths.builds)}",
+      "plans": "${escapeMarkdown(config.paths.plans)}",
+      "acceptance_state": "${escapeMarkdown(config.paths.acceptance_state)}",
+      "feature_state": "${escapeMarkdown(config.paths.feature_state)}",
+      "change_units": "${escapeMarkdown(config.paths.change_units)}",
+      "guardian_state": "${escapeMarkdown(config.paths.guardian_state)}"
+    },
     "feature": {
-      "enabled": ${featureWorkflowConfig.enabled},
-      "output_dir": "${escapeMarkdown(featureWorkflowConfig.output_dir)}",
-      "auto_trigger": ${featureWorkflowConfig.auto_trigger},
-      "trigger_mode": "${escapeMarkdown(featureWorkflowConfig.trigger_mode)}"
+      "enabled": ${config.feature.enabled},
+      "auto_trigger": ${config.feature.auto_trigger},
+      "trigger_mode": "${escapeMarkdown(config.feature.trigger_mode)}"
     },
     "tdd": {
-      "enabled": ${config.tdd.enabled},
-      "expand_threshold": ${config.tdd.expand_threshold}
+      "enabled": ${config.tdd.enabled}
     },
     "verification": {
       "in_plan": ${config.verification.in_plan},
@@ -33,7 +39,8 @@ export function handleConfig(ctx: OpenFlowContext): string {
     },
     "archive": {
       "enabled": ${config.archive.enabled},
-      "output_dir": "${escapeMarkdown(config.archive.output_dir)}"
+      "drift_check": ${config.archive.drift_check ?? false},
+      "auto_promote_current": ${config.archive.auto_promote_current ?? false}
     }
   }
 }

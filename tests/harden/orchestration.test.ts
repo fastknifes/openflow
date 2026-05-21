@@ -72,19 +72,17 @@ async function removeFixture(directory: string): Promise<void> {
   }
 }
 
-describe('harden orchestration - single session per run', () => {
-  test('one harden run creates exactly one session', async () => {
+describe('harden orchestration - independent sessions per round', () => {
+  test('one harden run creates at least coordinator and reviewer sessions (>= 2)', async () => {
     const directory = await createGitFixture('single-session')
     try {
       let createCallCount = 0
-      let capturedSessionId: string | null = null
       
       const client = {
         session: {
           create: async () => {
             createCallCount++
             const sessionId = `harden-session-${createCallCount}`
-            capturedSessionId = sessionId
             return { id: sessionId }
           },
           prompt: async () => ({
@@ -101,18 +99,26 @@ describe('harden orchestration - single session per run', () => {
       const ctx = createContext(directory, undefined, client)
       await handleHarden(ctx, 'feature-a')
       
-      expect(createCallCount).toBe(1)
-      expect(capturedSessionId).toBe('harden-session-1')
+      // New behavior: Coordinator session + independent Reviewer session = at least 2
+      // When reviewer returns NO_FINDINGS, only Round 1 Reviewer runs, so exactly 2 sessions.
+      expect(createCallCount).toBeGreaterThanOrEqual(2)
     } finally {
       await removeFixture(directory)
     }
   })
 
-  test('multi-round harden reuses same session for reviewer and executor', async () => {
+  test('multi-round harden uses different sessions for reviewer and executor', async () => {
     const directory = await createGitFixture('multi-round-reuse')
     try {
       let createCallCount = 0
-      const sessionIds: string[] = []
+      const sessionPromptMap: Array<{ sessionId: string; promptIndex: number }> = []
+      let promptIndex = 0
+      const responses = [
+        // Round 1: Reviewer finds issues, Executor fixes, Round 2: Reviewer re-checks
+        'Level: blocking_bug\nDescription: Bug found\nEvidence: src/fixture.ts has a bug\nFiles: src/fixture.ts',
+        'Root cause: value changed\nDiff: minimal patch applied\nVerify: rerun tests',
+        'NO_FINDINGS',
+      ]
       
       const client = {
         session: {
@@ -122,11 +128,18 @@ describe('harden orchestration - single session per run', () => {
             return { id: sessionId }
           },
           prompt: async () => {
-            // Track which session was used
-            sessionIds.push(`harden-session-${createCallCount}`)
+            // Capture which session was active at prompt time
+            // In new behavior: each role gets its own session, so the prompt
+            // is sent to the session that was most recently created for that role.
+            sessionPromptMap.push({
+              sessionId: `harden-session-${createCallCount}`,
+              promptIndex: promptIndex,
+            })
+            const text = responses[promptIndex] ?? 'NO_FINDINGS'
+            promptIndex++
             return {
               data: {
-                parts: [{ type: 'text', text: 'NO_FINDINGS' }],
+                parts: [{ type: 'text', text }],
                 info: {
                   tokens: { input: 100, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
                 },
@@ -139,9 +152,69 @@ describe('harden orchestration - single session per run', () => {
       const ctx = createContext(directory, undefined, client)
       await handleHarden(ctx, 'feature-a')
       
-      // All prompts should use the same session
-      expect(createCallCount).toBe(1)
-      expect(sessionIds.every(id => id === 'harden-session-1')).toBe(true)
+      // New behavior: Reviewer and Executor prompts are sent to DIFFERENT session IDs
+      // Find reviewer prompts (promptIndex 0, 2) and executor prompt (promptIndex 1)
+      const reviewerPrompts = sessionPromptMap.filter(e => e.promptIndex === 0 || e.promptIndex === 2)
+      const executorPrompts = sessionPromptMap.filter(e => e.promptIndex === 1)
+      
+      // Both should exist in a multi-round scenario
+      expect(reviewerPrompts.length).toBeGreaterThan(0)
+      expect(executorPrompts.length).toBeGreaterThan(0)
+      
+      // Reviewer and Executor MUST use different session IDs
+      const reviewerSessionIds = reviewerPrompts.map(p => p.sessionId)
+      const executorSessionIds = executorPrompts.map(p => p.sessionId)
+      for (const rId of reviewerSessionIds) {
+        for (const eId of executorSessionIds) {
+          expect(rId).not.toBe(eId)
+        }
+      }
+    } finally {
+      await removeFixture(directory)
+    }
+  })
+
+  test('session titles include round and role', async () => {
+    const directory = await createGitFixture('session-titles')
+    try {
+      const capturedTitles: string[] = []
+      
+      const client = {
+        session: {
+          create: async (options: unknown) => {
+            // Capture the title from the create call body
+            const opts = options as { body?: { title?: string } }
+            const title = opts.body?.title ?? '(no title)'
+            capturedTitles.push(title)
+            return { id: `harden-session-${capturedTitles.length}` }
+          },
+          prompt: async () => ({
+            data: {
+              parts: [{ type: 'text', text: 'NO_FINDINGS' }],
+              info: {
+                tokens: { input: 100, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              },
+            },
+          }),
+        },
+      }
+      
+      const ctx = createContext(directory, undefined, client)
+      await handleHarden(ctx, 'feature-a')
+      
+      // Should have at least 2 sessions: Coordinator + Reviewer
+      expect(capturedTitles.length).toBeGreaterThanOrEqual(2)
+      
+      // Coordinator session title should include the feature name
+      expect(capturedTitles[0]).toContain('Harden')
+      expect(capturedTitles[0]).toContain('feature-a')
+      
+      // Reviewer session title should include round number and role
+      const reviewerTitle = capturedTitles.find(t => t.includes('Reviewer'))
+      expect(reviewerTitle).toBeDefined()
+      expect(reviewerTitle!).toContain('Round')
+      expect(reviewerTitle!).toMatch(/Round \d+\/\d+/)
+      expect(reviewerTitle!).toContain('Reviewer')
     } finally {
       await removeFixture(directory)
     }
@@ -210,7 +283,7 @@ describe('harden orchestration - single session per run', () => {
     }
   })
 
-  test('session fallback: maintains single visible child session even if agent switching not supported', async () => {
+  test('session fallback: creates independent sessions even if agent switching not supported', async () => {
     const directory = await createGitFixture('session-fallback')
     try {
       let createCallCount = 0
@@ -236,8 +309,9 @@ describe('harden orchestration - single session per run', () => {
       const ctx = createContext(directory, undefined, client)
       await handleHarden(ctx, 'feature-a')
       
-      // Even without agent switching support, should still only create one session
-      expect(createCallCount).toBe(1)
+      // New behavior: Even without agent switching support, should create
+      // independent sessions for Coordinator + Reviewer (at least 2)
+      expect(createCallCount).toBeGreaterThanOrEqual(2)
     } finally {
       await removeFixture(directory)
     }

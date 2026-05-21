@@ -17,7 +17,6 @@ interface DesignDocSummary {
 }
 
 const DESIGN_CONTEXT_HEADER = '## Design Context'
-const TDD_EXPANDED_HEADER = '## TDD Expanded Tasks'
 const VERIFICATION_HEADER = '## Verification Phase'
 const BUDGET_WARNING_HEADER = '## Plan Budget Warning'
 
@@ -59,26 +58,13 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
     let enhancementAdded = false
 
     if (featureName && featureWorkflowConfig.enabled) {
-      const designSummary = await readDesignDocuments(baseDir, featureName)
+      const designSummary = await readDesignDocuments(baseDir, featureName, config)
       if (designSummary) {
         const withDesignContext = addDesignContextSection(enhancedContent, designSummary, featureName)
         if (withDesignContext !== enhancedContent) {
           enhancedContent = withDesignContext
           enhancementAdded = true
           logger.info('Added design context to plan', { feature: featureName })
-        }
-      }
-    }
-
-    if (config.tdd.enabled) {
-      const implementationTasks = tasks.filter((t) => t.isImplementation)
-
-      if (implementationTasks.length >= config.tdd.expand_threshold) {
-        const withTddExpansion = addTddExpansionComment(enhancedContent, implementationTasks)
-        if (withTddExpansion !== enhancedContent) {
-          enhancedContent = withTddExpansion
-          enhancementAdded = true
-          logger.info('Added TDD expansion hints', { count: implementationTasks.length })
         }
       }
     }
@@ -115,11 +101,12 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
 
 async function readDesignDocuments(
   baseDir: string,
-  feature: string
+  feature: string,
+  config?: import('../types.js').OpenFlowConfig,
 ): Promise<DesignDocSummary | null> {
-  const candidatePaths = await getDesignCandidatePaths(baseDir, feature)
+  const candidatePaths = await getDesignCandidatePaths(baseDir, feature, config)
   const workspacePaths = new Set<string>()
-  const designContext = await readDesignContextPacket(baseDir, feature)
+  const designContext = await readDesignContextPacket(baseDir, feature, config)
   const summary: DesignDocSummary = {}
 
   if (designContext) {
@@ -260,62 +247,6 @@ ${sections.join('\n\n')}
 
 `
   return insertAfterTopTitle(content, designSection)
-}
-
-function addTddExpansionComment(content: string, tasks: ParsedTask[]): string {
-  if (content.includes(TDD_EXPANDED_HEADER)) return content
-
-  const tddExpandedTasks: string[] = []
-  
-  for (const task of tasks) {
-    tddExpandedTasks.push(`
-### Task ${task.id}: ${escapeMarkdown(task.title)} (TDD)
-
-**Files:**
-- Test: \`tests/unit/path/to/test.ts\`
-- Implementation: \`src/path/to/file.ts\`
-
-**Step 1: RED - Write failing test**
-\`\`\`typescript
-// Write test for ${task.title}
-describe('${task.title}', () => {
-  it('should work correctly', () => {
-    // Arrange
-    // Act
-    // Assert
-  })
-})
-\`\`\`
-
-**Step 2: Run test to verify it fails**
-Run: \`bun test tests/unit/path/to/test.ts\`
-Expected: FAIL
-
-**Step 3: GREEN - Implement minimal code**
-\`\`\`typescript
-// Minimal implementation to pass
-\`\`\`
-
-**Step 4: Run test to verify it passes**
-Run: \`bun test tests/unit/path/to/test.ts\`
-Expected: PASS
-
-**Step 5: REFACTOR - Clean up while keeping tests green**
-`)
-  }
-
-  const tddSection = `
-
----
-${TDD_EXPANDED_HEADER}
-
-> Procedural TDD guidance. Each implementation task follows Red-Green-Refactor cycle.
-> These are not executable checklist items; follow the cycle for each task.
-
-${tddExpandedTasks.join('\n')}
-
-`
-  return content + tddSection
 }
 
 function addVerificationSection(content: string, verification: OpenFlowConfig['verification']): string {

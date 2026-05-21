@@ -2,13 +2,14 @@ import { execSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { join } from 'node:path'
-import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, OpenFlowContext, QualityGateApplicabilityResult, QualityGateContextKind, QualityGateTaskKind } from '../types.js'
+import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, OpenFlowConfig, OpenFlowContext, QualityGateApplicabilityResult, QualityGateContextKind, QualityGateTaskKind } from '../types.js'
 import { VerifyReadinessStatus } from '../types.js'
 import type { EvidenceFreshnessResult, VerifyResult } from '../types.js'
 import { handleHarden } from './harden.js'
 import { handleVerify } from './verify.js'
-import { getPlanPath } from '../config.js'
+import { getPlanPath, getChangeBehaviorPath, getChangeWorkspacePath } from '../config.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
+import { generateBehaviorCodeMapper, saveImplementationMapperDocument } from '../phases/archive/index.js'
 import { loadAcceptanceState, markImplementationBlocked, markImplementationVerified, saveAcceptanceState } from '../utils/acceptance-state.js'
 import { decideQualityGateRisk, type QualityGateRiskInput } from '../utils/risk-assessment.js'
 import { captureCurrentWorkspaceState, classifyEvidenceFreshness } from '../utils/evidence-freshness.js'
@@ -118,6 +119,7 @@ export async function handleQualityGate(
     fullDiffText,
     allUntrackedFiles,
     implementationScopeFiles,
+    ctx.config,
   )
   const diffText = scopedWorkspace.diffText
   const untrackedFiles = scopedWorkspace.untrackedFiles
@@ -237,7 +239,30 @@ export async function handleQualityGate(
     await saveAcceptanceState(ctx.directory, latestAcceptanceState)
   }
 
-  // ── 9. Build markdown report ────────────────────────────────────────────
+  // ── 9. Generate implementation mapper if behavior doc exists ────────────
+  if (sanitizedFeature && (readiness === 'ready' || readiness === 'ready_with_doc_updates')) {
+    try {
+      const behaviorPath = await getChangeBehaviorPath(ctx.directory, sanitizedFeature, ctx.config)
+      await fs.access(behaviorPath)
+      const changeWorkspacePath = await getChangeWorkspacePath(ctx.directory, sanitizedFeature, ctx.config)
+      const fileChanges: Array<{ filePath: string; tool: 'write' | 'edit' }> = changedFiles.map(filePath => ({
+        filePath,
+        tool: 'edit' as const,
+      }))
+      const mapperContent = await generateBehaviorCodeMapper({
+        feature: sanitizedFeature,
+        projectDir: ctx.directory,
+        behaviorPath,
+        changes: fileChanges,
+        readiness,
+      })
+      await saveImplementationMapperDocument(changeWorkspacePath, mapperContent)
+    } catch {
+      // Behavior doc or change workspace not available; skip mapper generation
+    }
+  }
+
+  // ── 10. Build markdown report ───────────────────────────────────────────
   return buildQualityGateReport({
     feature: sanitizedFeature || '(unresolved)',
     contextKind,
@@ -442,7 +467,8 @@ async function scopeQualityGateWorkspace(
   contextKind: QualityGateContextKind,
   fullDiffText: string,
   allUntrackedFiles: string[],
-  implementationChangedFiles?: string[],
+  implementationChangedFiles: string[] | undefined,
+  config: OpenFlowConfig,
 ): Promise<QualityGateScopedWorkspace> {
   if (!feature || contextKind === 'limited' || contextKind === 'none') {
     return {
@@ -455,8 +481,8 @@ async function scopeQualityGateWorkspace(
 
   const primaryScopeFiles = (implementationChangedFiles ?? []).map(file => file.replace(/\\/g, '/'))
   if (primaryScopeFiles.length > 0) {
-    const diffScope = scopeDiffToFiles(fullDiffText, primaryScopeFiles)
-    const untrackedScope = filterPathsToExactScope(allUntrackedFiles, primaryScopeFiles)
+    const diffScope = scopeDiffToFiles(fullDiffText, primaryScopeFiles, config.paths.archive)
+    const untrackedScope = filterPathsToExactScope(allUntrackedFiles, primaryScopeFiles, config.paths.archive)
     const omittedFiles = [...new Set([...diffScope.omittedPaths, ...untrackedScope.omittedPaths])].sort()
 
     return {
@@ -467,9 +493,9 @@ async function scopeQualityGateWorkspace(
     }
   }
 
-  const planPath = getPlanPath(projectDir, feature)
+  const planPath = getPlanPath(projectDir, feature, config)
   const planContent = await readOptionalFile(planPath)
-  const contextPaths = await findQualityGateContextPaths(projectDir, feature)
+  const contextPaths = await findQualityGateContextPaths(projectDir, feature, config)
   const contextContent = await readExistingFiles(contextPaths)
 
   if (!planContent.trim() && !contextContent.trim()) {
@@ -481,9 +507,9 @@ async function scopeQualityGateWorkspace(
     }
   }
 
-  const diffScope = scopeDiffToFeature(projectDir, feature, fullDiffText, planPath, contextPaths, planContent, contextContent)
-  const featureScope = collectFeatureScope(projectDir, feature, planPath, contextPaths, planContent, contextContent)
-  const untrackedScope = filterPathsToFeatureScope(allUntrackedFiles, featureScope)
+  const diffScope = scopeDiffToFeature(projectDir, feature, fullDiffText, planPath, contextPaths, planContent, contextContent, config.paths.changes, config.paths.plans, config.paths.archive)
+  const featureScope = collectFeatureScope(projectDir, feature, planPath, contextPaths, planContent, contextContent, config.paths.changes, config.paths.plans)
+  const untrackedScope = filterPathsToFeatureScope(allUntrackedFiles, featureScope, config.paths.archive)
   const omittedFiles = [...new Set([...diffScope.omittedPaths, ...untrackedScope.omittedPaths])].sort()
 
   return {
@@ -494,12 +520,13 @@ async function scopeQualityGateWorkspace(
   }
 }
 
-async function findQualityGateContextPaths(projectDir: string, feature: string): Promise<string[]> {
+async function findQualityGateContextPaths(projectDir: string, feature: string, config: OpenFlowConfig): Promise<string[]> {
+  const changesPath = config.paths.changes
   const candidates = [
-    join(projectDir, 'docs', 'changes', feature, 'design.md'),
-    join(projectDir, 'docs', 'changes', feature, 'issue-clarification.md'),
+    join(projectDir, changesPath, feature, 'design.md'),
+    join(projectDir, changesPath, feature, 'issue-clarification.md'),
     ...(await tryGetChangeDirPatterns(projectDir, feature)),
-    ...(await tryGetChangeUnitContextPaths(projectDir, feature)),
+    ...(await tryGetChangeUnitContextPaths(projectDir, feature, changesPath)),
   ]
   const existing: string[] = []
   const seen = new Set<string>()
@@ -516,14 +543,14 @@ async function findQualityGateContextPaths(projectDir: string, feature: string):
   return existing
 }
 
-async function tryGetChangeUnitContextPaths(projectDir: string, feature: string): Promise<string[]> {
+async function tryGetChangeUnitContextPaths(projectDir: string, feature: string, changesPath = 'docs/changes'): Promise<string[]> {
   try {
-    const changesDir = join(projectDir, 'docs', 'changes')
+    const changesDir = join(projectDir, changesPath)
     const dirs = await fs.readdir(changesDir)
     const fileNames = ['design.md', 'issue-clarification.md', 'requirements.md', 'behavior.md', 'plan.md']
     return dirs
       .filter(d => d.includes(feature))
-      .flatMap(d => fileNames.map(fileName => join(projectDir, 'docs', 'changes', d, fileName)))
+      .flatMap(d => fileNames.map(fileName => join(projectDir, changesPath, d, fileName)))
   } catch {
     return []
   }
@@ -619,7 +646,7 @@ async function resolveContextKind(
 
   // Check for plan file — project-root safe
   try {
-    await fs.access(join(projectDir, '.sisyphus', 'plans', `${feature}.md`))
+    await fs.access(join(projectDir, ctx.config.paths.plans, `${feature}.md`))
     return 'plan'
   } catch { /* not found */ }
 
@@ -662,17 +689,18 @@ function extractReadinessFromOutput(verifyOutput: string): string {
 }
 
 function parseFindingsSummary(hardenOutput: string): HardenFindingSummary[] {
-  if (!hardenOutput.includes('### Findings Summary')) {
+  if (!hardenOutput.includes('### Findings Summary') && !hardenOutput.includes('### Findings Final State')) {
     return []
   }
 
   const findings: HardenFindingSummary[] = []
   const lines = hardenOutput.split('\n')
   let inBlock = false
+  let currentGroup = ''
 
   for (const line of lines) {
     const trimmed = line.trim()
-    if (trimmed === '### Findings Summary') {
+    if (trimmed === '### Findings Summary' || trimmed === '### Findings Final State') {
       inBlock = true
       continue
     }
@@ -685,15 +713,23 @@ function parseFindingsSummary(hardenOutput: string): HardenFindingSummary[] {
       break
     }
 
+    if (trimmed.startsWith('#### ')) {
+      currentGroup = trimmed.slice(5).trim()
+      continue
+    }
+
     if (!trimmed) {
       continue
     }
 
     if (!trimmed.startsWith('-')) {
-      break
+      continue
     }
 
     const raw = trimmed.slice(1).trim()
+    if (!raw || raw === 'None') {
+      continue
+    }
     const parts = raw.split('|').map(part => part.trim()).filter(Boolean)
     const id = parts[0] ?? ''
     if (!id) {
@@ -711,6 +747,10 @@ function parseFindingsSummary(hardenOutput: string): HardenFindingSummary[] {
       if (key) {
         fields[key] = value
       }
+    }
+
+    if (currentGroup && !fields.group) {
+      fields.group = currentGroup
     }
 
     findings.push({
@@ -788,11 +828,11 @@ function evaluateHardenReadiness(
       case 'pass_with_risks':
       case 'skipped':
       case 'disabled':
-      case 'budget_exhausted':
-      case 'max_rounds_reached':
       case 'known_issues_accepted':
         blocker = null
         break
+      case 'budget_exhausted':
+      case 'max_rounds_reached':
       case 'needs_human':
         blocker = VerifyReadinessStatus.NeedsDecision
         break
@@ -838,7 +878,7 @@ function applyHardenReadinessGate(
 }
 
 function extractBudgetConsumed(hardenOutput: string): number {
-  const match = hardenOutput.match(/Budget consumed:\s*(\d+)/u)
+  const match = hardenOutput.match(/(?:Budget consumed|Total tokens consumed):\s*(\d+)/u)
   return Number(match?.[1] ?? '0')
 }
 
@@ -1110,20 +1150,26 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
 
   // ── Next Step section ─────────────────────────────────────────────────
   let nextStep = ''
+  let nextCommand = ''
   if (effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates) {
-    nextStep = `Feature \`${escapeMarkdown(feature)}\` is ready for archive. Run \`/openflow-archive ${escapeMarkdown(feature)}\` to finalize.`
+    nextStep = `Quality gate passed for \`${escapeMarkdown(feature)}\`. Archive requires explicit user confirmation before proceeding.`
+    nextCommand = `/openflow-archive ${escapeMarkdown(feature)}`
   } else if (effectiveReadiness === VerifyReadinessStatus.NeedsDecision) {
     nextStep = 'Resolve the blocking decision, then rerun the quality gate or verify.'
+    nextCommand = `/openflow-verify ${escapeMarkdown(feature)}`
   } else if (effectiveReadiness === 'needs_workflow_stage') {
     nextStep = 'Enter the explicit feature/planning workflow before archive readiness. Do not create a minimal plan or design merely to satisfy the gate.'
+    nextCommand = `/openflow-feature ${escapeMarkdown(feature)}`
   } else {
     nextStep = 'Address the readiness issues identified above, then rerun the quality gate.'
+    nextCommand = `/openflow-verify ${escapeMarkdown(feature)}`
   }
 
   const nextStepSection = [
     '### Next Step',
     '',
     nextStep,
+    ...(nextCommand ? ['', '```', nextCommand, '```'] : []),
     '',
   ].join('\n')
 

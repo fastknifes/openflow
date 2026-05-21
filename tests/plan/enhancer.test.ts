@@ -70,7 +70,7 @@ describe('plan enhancer', () => {
     await rm(TEST_ROOT, { recursive: true, force: true })
   })
 
-  test('TDD expansion guidance sections do not add - [ ] checkbox items', async () => {
+  test('TDD expansion is no longer added to plans', async () => {
     await rm(TEST_ROOT, { recursive: true, force: true })
     await mkdir(PLAN_DIR, { recursive: true })
 
@@ -92,9 +92,7 @@ describe('plan enhancer', () => {
         enabled: false,
       },
       tdd: {
-        ...defaultConfig.tdd,
         enabled: true,
-        expand_threshold: 2,
       },
       verification: {
         ...defaultConfig.verification,
@@ -110,21 +108,8 @@ describe('plan enhancer', () => {
 
     const enhanced = await readFile(PLAN_PATH, 'utf-8')
 
-    // Verify TDD section was added
-    expect(enhanced).toContain('## TDD Expanded Tasks')
-
-    // Extract just the TDD Expanded Tasks section
-    const tddStart = enhanced.indexOf('## TDD Expanded Tasks')
-    const tddEnd = enhanced.indexOf('## Verification Phase', tddStart)
-    const tddSection = tddEnd > tddStart
-      ? enhanced.substring(tddStart, tddEnd)
-      : enhanced.substring(tddStart)
-
-    // The TDD guidance steps (RED, GREEN, REFACTOR) are procedural instructions,
-    // not actionable plan tasks. They must NOT use - [ ] checkbox items.
-    const checkboxCount = countOccurrences(tddSection, '- [ ]')
-    // If checkboxes exist in TDD section, the contract is violated
-    expect(checkboxCount).toBe(0)
+    // TDD expansion has been removed; plans should NOT contain TDD sections
+    expect(enhanced).not.toContain('## TDD Expanded Tasks')
 
     await rm(TEST_ROOT, { recursive: true, force: true })
   })

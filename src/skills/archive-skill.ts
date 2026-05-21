@@ -7,7 +7,7 @@ export function getArchiveSkill(): SkillInfo {
     content: `# OpenFlow Archive Command Reference
 
 ## Overview
-Archive completed features with a frozen implementation mapper and copied source artifacts.
+Archive completed features with copied source artifacts and promoted current facts.
 
 ## When to Use
 - Feature implementation is complete
@@ -43,25 +43,14 @@ Use LSP tools to extract symbols from modified files:
 lsp_symbols(filePath)
 \`\`\`
 
-### 4. Generate Archive Mapper
-Create:
-\`docs/archive/{YYYY-MM-DD-feature}/implementation-mapper.md\`
-
-Include:
-- Feature overview
-- Archived design / requirements / plans snapshot
-- Code implementation mapping table (from Session + LSP)
-- Modified files list
-- Acceptance and drift notes
-
-### 5. Copy Documents
+### 4. Copy Documents
 Copy to archive (only if source files exist):
-- Design 鈫?\`docs/archive/{YYYY-MM-DD-feature}/design.md\`
-- Proposal 鈫?\`docs/archive/{YYYY-MM-DD-feature}/proposal.md\` (conditional)
-- Decisions 鈫?\`docs/archive/{YYYY-MM-DD-feature}/decisions.md\` (conditional)
-- Plan 鈫?\`docs/archive/{YYYY-MM-DD-feature}/plan.md\` (conditional)
-- Requirements / PRD 鈫?\`docs/archive/{YYYY-MM-DD-feature}/prd.md\` (conditional)
-- \`implementation-mapper.md\` is always generated.
+- Design -> \`docs/archive/{YYYY-MM-DD-feature}/design.md\`
+- Proposal -> \`docs/archive/{YYYY-MM-DD-feature}/proposal.md\` (conditional)
+- Decisions -> \`docs/archive/{YYYY-MM-DD-feature}/decisions.md\` (conditional)
+- Plan -> \`docs/archive/{YYYY-MM-DD-feature}/plan.md\` (conditional)
+- Requirements / PRD -> \`docs/archive/{YYYY-MM-DD-feature}/prd.md\` (conditional)
+- \`implementation-mapper.md\` -> copied from changes workspace if generated during quality-gate
 
 ## Example
 
@@ -72,12 +61,12 @@ Copy to archive (only if source files exist):
 This will create:
 \`\`\`
 docs/archive/2026-04-17-user-login/
-鈹溾攢鈹€ implementation-mapper.md  (always)
-鈹溾攢鈹€ design.md                 (if design exists)
-鈹溾攢鈹€ proposal.md               (conditional)
-鈹溾攢鈹€ decisions.md              (conditional)
-鈹溾攢鈹€ prd.md                    (conditional)
-鈹斺攢鈹€ plan.md                   (conditional)
+- implementation-mapper.md  (if generated during quality-gate)
+- design.md                 (if design exists)
+- proposal.md               (conditional)
+- decisions.md              (conditional)
+- prd.md                    (conditional)
+- plan.md                   (conditional)
 \`\`\`
 `,
   }
