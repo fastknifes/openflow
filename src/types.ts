@@ -250,6 +250,8 @@ export interface PathsConfig {
   guardian_state: string
   boulder_state: string
   evidence_dir: string
+  implementation_runs: string
+  worktree_dir: string
 }
 
 export interface OpenFlowConfig {
@@ -281,6 +283,8 @@ export const defaultConfig: OpenFlowConfig = {
     guardian_state: '.sisyphus/openflow/guardian',
     boulder_state: '.sisyphus/boulder.json',
     evidence_dir: '.sisyphus/evidence',
+    implementation_runs: '.sisyphus/openflow/runs',
+    worktree_dir: '.sisyphus/worktree',
   },
   feature: {
     enabled: true,
@@ -602,6 +606,59 @@ export interface ImplementationStateMetadata {
   gitHead?: string
   /** Whether the state transition was from a verify success */
   fromVerify?: boolean
+}
+
+/** Status of an implementation run */
+export type ImplementationRunStatus =
+  | 'created'
+  | 'starting_backend'
+  | 'running'
+  | 'quality_gate_pending'
+  | 'quality_gate_running'
+  | 'ready_for_archive'
+  | 'archiving'
+  | 'archived'
+  | 'blocked'
+  | 'cancelled'
+
+/** Backend type for implementation execution */
+export type ImplementationBackend = 'omo' | 'opencode'
+
+/** Container mode for implementation run isolation */
+export type ImplementationContainerMode = 'session' | 'worktree'
+
+/** A single implementation run tracking record */
+export interface ImplementationRun {
+  /** Unique run identifier */
+  runID: string
+  /** Feature slug this run belongs to */
+  feature: string
+  /** Session ID that owns this run */
+  sessionID: string
+  /** Message ID that triggered this run */
+  messageID: string
+  /** Agent name executing this run */
+  agent: string
+  /** Working directory for the run */
+  directory: string
+  /** Git worktree path if using worktree isolation */
+  worktree?: string
+  /** Backend executing the run */
+  backend: ImplementationBackend
+  /** Command used to invoke the backend */
+  backendCommand: string
+  /** Current run status */
+  status: ImplementationRunStatus
+  /** Isolation mode for the run */
+  containerMode: ImplementationContainerMode
+  /** ISO-8601 timestamp when run was created */
+  startedAt: string
+  /** ISO-8601 timestamp when run was last updated */
+  updatedAt: string
+  /** Path to run events log */
+  eventsPath: string
+  /** Path to run observations log */
+  observationsPath: string
 }
 
 export interface AcceptanceState {

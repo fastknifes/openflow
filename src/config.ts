@@ -59,6 +59,8 @@ const pathsConfigSchema = z.object({
   guardian_state: configPathSchema.optional(),
   boulder_state: configPathSchema.optional(),
   evidence_dir: configPathSchema.optional(),
+  implementation_runs: configPathSchema.optional(),
+  worktree_dir: configPathSchema.optional(),
 }).strict().optional()
 
 const openFlowConfigOverrideSchema: z.ZodType<Record<string, unknown>> = z.object({
