@@ -44,8 +44,9 @@ describe('OpenFlowPlugin', () => {
 
     expect(Object.keys(plugin.tool).sort()).toEqual([
           'openflow-archive',
-          'openflow-feature',
-           'openflow-init',
+           'openflow-feature',
+           'openflow-implement',
+            'openflow-init',
            'openflow-issue',
           'openflow-migrate-docs',
            'openflow-quality-gate',
@@ -184,8 +185,9 @@ describe('OpenFlowPlugin', () => {
 
     expect(Object.keys(plugin.tool).sort()).toEqual([
           'openflow-archive',
-          'openflow-feature',
-           'openflow-init',
+           'openflow-feature',
+           'openflow-implement',
+            'openflow-init',
            'openflow-issue',
           'openflow-migrate-docs',
            'openflow-quality-gate',
