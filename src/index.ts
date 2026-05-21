@@ -12,6 +12,7 @@ import { GuardianConsumer } from './drift/guardian-consumer.js'
 import { createChatMessageHook } from './hooks/chat-message.js'
 import { createToolBeforeHook } from './hooks/tool-before.js'
 import { createToolAfterHook } from './hooks/tool-after.js'
+import { createImplementationObserver } from './hooks/implementation-observer.js'
 import { OPENFLOW_TOOL_COMMANDS } from './commands/manifest.js'
 
 type OpenFlowContext = BaseOpenFlowContext & PluginInput
@@ -84,6 +85,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
   const chatMessageHook = createChatMessageHook(openflowCtx)
   const toolBeforeHook = createToolBeforeHook(openflowCtx)
   const toolAfterHook = createToolAfterHook(openflowCtx)
+  const implementationObserver = createImplementationObserver(openflowCtx)
 
   return {
     tool: {
@@ -165,13 +167,25 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
     },
 
     'chat.message': async (input, output) => {
+      await implementationObserver['chat.message'](input, output)
       await chatMessageHook(input, output)
     },
     'tool.execute.before': async (input, output) => {
+      await implementationObserver['tool.execute.before'](input, output)
       await toolBeforeHook(input, output)
     },
     'tool.execute.after': async (input, output) => {
       await toolAfterHook(input, output)
+      await implementationObserver['tool.execute.after'](input, output)
+    },
+    'command.execute.before': async (input, output) => {
+      await implementationObserver['command.execute.before'](input, output)
+    },
+    'shell.env': async (input, output) => {
+      await implementationObserver['shell.env'](input, output)
+    },
+    event: async (input) => {
+      await implementationObserver.event(input)
     },
 
     config: async (cfg) => {
