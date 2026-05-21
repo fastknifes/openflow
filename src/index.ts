@@ -6,7 +6,7 @@ import { registerSkills } from './skills/registration.js'
 import { loadConfig } from './config.js'
 import { discoverConfig } from './utils/config-loader.js'
 import { logger, OpenFlowError } from './utils/index.js'
-import { handleInit, handleWritingPlan, handleFeature, handleIssue, handleArchive, handleQualityGate, handleMigrateDocs, type QualityGateArgs } from './commands/index.js'
+import { handleInit, handleWritingPlan, handleFeature, handleIssue, handleArchive, handleQualityGate, handleMigrateDocs, handleImplement, type QualityGateArgs } from './commands/index.js'
 import { getContractRuntime } from './contracts/runtime.js'
 import { GuardianConsumer } from './drift/guardian-consumer.js'
 import { createChatMessageHook } from './hooks/chat-message.js'
@@ -162,6 +162,16 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
         execute: async (args: { sourceDir?: string; targetDir?: string; dryRun?: boolean; answer?: string }, toolContext) => {
           void toolContext
           return safeExecute(() => handleMigrateDocs(openflowCtx, args))
+        },
+      }),
+      [OPENFLOW_TOOL_COMMANDS.implement.name]: tool({
+        description: OPENFLOW_TOOL_COMMANDS.implement.description,
+        args: {
+          feature: tool.schema.string().max(128).optional(),
+          useWorktree: tool.schema.boolean().optional(),
+        },
+        execute: async (args: { feature?: string; useWorktree?: boolean }, toolContext) => {
+          return safeExecute(() => handleImplement(openflowCtx, args.feature, args.useWorktree, toolContext, implementationObserver))
         },
       }),
     },

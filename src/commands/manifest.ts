@@ -32,6 +32,10 @@ export const OPENFLOW_TOOL_COMMANDS = {
     name: 'openflow-migrate-docs',
     description: 'Migrate documentation from other workflow tools into OpenFlow docs structure',
   },
+  implement: {
+    name: 'openflow-implement',
+    description: 'OpenFlow implementation command. Creates an ImplementationRun and delegates to the selected backend (omo /start-work or OpenCode native build).',
+  },
 } as const satisfies Record<string, OpenFlowCommandMetadata>
 
 export const OPENFLOW_COMMAND_FILES: readonly OpenFlowCommandMetadata[] = [
@@ -61,6 +65,7 @@ export const OPENFLOW_COMMAND_FILES: readonly OpenFlowCommandMetadata[] = [
     name: OPENFLOW_TOOL_COMMANDS.issue.name,
     description: 'OpenFlow issue clarification and triage command for uncertain problems',
   },
+  OPENFLOW_TOOL_COMMANDS.implement,
 ]
 
 export const OPENFLOW_REGISTERED_SKILL_NAMES = [
