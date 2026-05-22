@@ -310,10 +310,14 @@ describe.serial('handleImplement', () => {
         const observer = createImplementationObserver(ctx)
 
         await handleImplement(ctx, feature, false, createToolContext(testDir, 'test-session-observer-events'), observer)
-        expect(observer.getActiveRun('test-session-observer-events')).toBeDefined()
+
+        // Verify handleImplement auto-refreshed the observer after backend handoff
+        const activeRun = observer.getActiveRun('test-session-observer-events')
+        expect(activeRun).toBeDefined()
+        expect(activeRun!.backendCommand).toBe('opencode build')
+        expect(activeRun!.status).toBe('running')
 
         const run = await readRunForFeature(ctx, feature)
-        observer.setActiveRun(run)
         await observer.toolBeforeHook({ sessionID: 'test-session-observer-events', tool: 'opencode build', callID: 'call-1' }, {})
         await observer.toolAfterHook({ sessionID: 'test-session-observer-events', tool: 'opencode build', callID: 'call-1' }, {})
 
