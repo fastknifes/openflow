@@ -56,13 +56,9 @@ describe('OpenFlowPlugin runtime registration', () => {
     const featureSkillPath = join(os.homedir(), '.config', 'opencode', 'skills', 'openflow-feature', 'SKILL.md')
     await expect(access(featureSkillPath)).rejects.toBeDefined()
 
-    // 5. openflow-issue command file is created with correct description
+    // 5. Negative-scope: openflow-issue command file must NOT be created (removed)
     const issueCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-issue.md')
-    const issueCommandContent = await readFile(issueCommandPath, 'utf-8')
-    expect(issueCommandContent).toContain('description:')
-    expect(issueCommandContent).toContain('openflow-issue')
-    expect(issueCommandContent).toContain('OpenFlow issue clarification and triage command for uncertain problems')
-    expect(issueCommandContent).toContain('OpenFlow command: /openflow-issue $ARGUMENTS')
+    await expect(access(issueCommandPath)).rejects.toBeDefined()
 
     // 6. Negative-scope: openflow-reflect command file must NOT be created
     const reflectCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-reflect.md')
@@ -75,22 +71,6 @@ describe('OpenFlowPlugin runtime registration', () => {
     // 8. Negative-scope: openflow-ai-reflection is skill-only; no command file
     const aiReflectionCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-ai-reflection.md')
     await expect(access(aiReflectionCommandPath)).rejects.toBeDefined()
-
-    await rm(root, { recursive: true, force: true })
-  })
-
-  test('registerCommands creates openflow-issue.md when run standalone', async () => {
-    const root = join(process.cwd(), '.test-plugin-issue-registration')
-    await rm(root, { recursive: true, force: true })
-
-    await OpenFlowPlugin(createPluginInput(root) as never)
-
-    const issueCommandPath = join(os.homedir(), '.config', 'opencode', 'commands', 'openflow-issue.md')
-    const content = await readFile(issueCommandPath, 'utf-8')
-    expect(content).toContain('OpenFlow issue clarification and triage command for uncertain problems')
-    expect(content).toContain('/openflow-issue $ARGUMENTS')
-    // Verify command file has valid frontmatter format
-    expect(content).toMatch(/^---\ndescription:/)
 
     await rm(root, { recursive: true, force: true })
   })

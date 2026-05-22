@@ -6,6 +6,7 @@ import { logger } from '../../utils/logger.js'
 import { generateCodeMappingTable } from './code-mapper.js'
 import { collectTraceabilityItems, type TraceabilityResult } from './traceability.js'
 import { fileExists } from '../../hooks/file-utils.js'
+import { t } from '../../i18n/index.js'
 
 export interface ImplementationMapperOptions {
   feature: string
@@ -75,12 +76,12 @@ export async function generateImplementationMapper(options: ImplementationMapper
 **Date**: ${date}
 **Status**: Archived
 
-## 1. 概述
+## ${t('templates.implementationMapper.overviewTitle')}
 
-本次变更解决了与 \`${safeFeature}\` 相关的实现追溯需求。
+${t('templates.implementationMapper.scopeLabel', { feature: safeFeature })}
 
-**归档时间**: ${date}
-**追溯范围**: 本次变更覆盖需求到实现的完整追溯链。
+**Date**: ${date}
+**Scope**: ${t('templates.implementationMapper.traceLabel')}
 `
 
   if (hasGlobalDeps) {
@@ -568,7 +569,7 @@ async function generateImplementationMappingSection(
   }
 ): Promise<string> {
   if (changes.length === 0 && traceability.items.length === 0) {
-    return '未记录到需求/提案/设计追溯项，也没有检测到代码变更。\n'
+    return t('templates.implementationMapper.noTrace')
   }
 
   const generateOptions = {
@@ -580,17 +581,17 @@ async function generateImplementationMappingSection(
   const mappings = await generateCodeMappingTable(feature, changes, generateOptions)
 
   if (mappings.length === 0) {
-    return '未生成可用的追溯映射。\n'
+    return t('templates.implementationMapper.noMapping')
   }
 
-  const header = '| 追溯来源 | 需求/决策 | 代码文件 | 关键符号 | 关联说明 | 验证证据 |'
+  const header = t('templates.implementationMapper.tableHeader')
   const sep = '|----------|-----------|----------|----------|----------|----------|'
   const rows = mappings.map(mapping => (
     `| ${escapeMarkdown(mapping.source)} | ${escapeMarkdown(mapping.step)} | ${escapeMarkdown(mapping.filePath)} | ${escapeMarkdown(mapping.symbol || 'file-level fallback')} | ${escapeMarkdown(mapping.description || '')} | ${escapeMarkdown(mapping.verificationEvidence || '')} |`
   ))
 
   const note = traceability.usedDesignFallback
-    ? '> 未发现 requirements / proposal 追溯项，已回退使用 design 文档生成追溯关系。\n'
+    ? t('templates.implementationMapper.fallbackNotice')
     : ''
 
   return [note, header, sep, ...rows].filter(Boolean).join('\n') + '\n'

@@ -3,12 +3,14 @@ import * as path from 'node:path'
 import type { CurrentPromotionSuggestion } from '../../types.js'
 import { createSafePath } from '../../utils/security.js'
 
-interface PromotionAreaConfig {
-  area: 'design' | 'requirements' | 'behavior'
-  archiveFile: 'design.md' | 'prd.md' | 'behavior.md'
-  currentBaseDir: string
-  currentFileName: 'design.md' | 'prd.md' | 'behavior.md'
-  currentFilePattern: RegExp
+type ArchiveFileName = 'design.md' | 'prd.md' | 'behavior.md'
+type CurrentFileName = 'design.md' | 'spec.md' | 'requirements.md'
+type PromotionTargetArea = CurrentPromotionSuggestion['targetArea']
+
+interface BoundedContextConfig {
+  context: string
+  currentDir: string
+  files: CurrentFileName[]
 }
 
 interface DocumentProfile {
@@ -30,27 +32,36 @@ interface MatchCandidate {
   score: number
 }
 
-const PROMOTION_AREAS: PromotionAreaConfig[] = [
+const BOUNDED_CONTEXTS: BoundedContextConfig[] = [
   {
-    area: 'design',
-    archiveFile: 'design.md',
-    currentBaseDir: path.join('docs', 'current', 'design'),
-    currentFileName: 'design.md',
-    currentFilePattern: /^(?:design|\d{8}-design)\.md$/i,
+    context: 'feature-lifecycle',
+    currentDir: path.join('docs', 'current', 'feature-lifecycle'),
+    files: ['design.md', 'spec.md', 'requirements.md'],
   },
   {
-    area: 'requirements',
-    archiveFile: 'prd.md',
-    currentBaseDir: path.join('docs', 'current', 'requirements'),
-    currentFileName: 'prd.md',
-    currentFilePattern: /^(?:prd|\d{8}-prd)\.md$/i,
+    context: 'issue-investigation',
+    currentDir: path.join('docs', 'current', 'issue-investigation'),
+    files: ['design.md', 'spec.md', 'requirements.md'],
   },
   {
-    area: 'behavior',
-    archiveFile: 'behavior.md',
-    currentBaseDir: path.join('docs', 'current', 'spec'),
-    currentFileName: 'behavior.md',
-    currentFilePattern: /^(?:behavior|\d{8}-behavior)\.md$/i,
+    context: 'quality-governance',
+    currentDir: path.join('docs', 'current', 'quality-governance'),
+    files: ['design.md', 'spec.md', 'requirements.md'],
+  },
+  {
+    context: 'drift-guardian',
+    currentDir: path.join('docs', 'current', 'drift-guardian'),
+    files: ['design.md', 'spec.md', 'requirements.md'],
+  },
+  {
+    context: 'archive-authority',
+    currentDir: path.join('docs', 'current', 'archive-authority'),
+    files: ['design.md', 'spec.md', 'requirements.md'],
+  },
+  {
+    context: 'workflow-conventions',
+    currentDir: path.join('docs', 'current', 'workflow-conventions'),
+    files: ['design.md', 'spec.md', 'requirements.md'],
   },
 ]
 
@@ -74,6 +85,7 @@ export interface BuildPromotionSuggestionsOptions {
 export interface ApplyPromotionSuggestionsOptions {
   projectDir: string
   suggestions: CurrentPromotionSuggestion[]
+  signal?: AbortSignal
 }
 
 export interface PromotionResult {
@@ -84,62 +96,89 @@ export interface PromotionResult {
 export async function buildPromotionSuggestions(
   options: BuildPromotionSuggestionsOptions
 ): Promise<CurrentPromotionSuggestion[]> {
-  const { projectDir, archiveDir, feature } = options
+  const { projectDir, archiveDir } = options
   const suggestions: CurrentPromotionSuggestion[] = []
 
-  for (const area of PROMOTION_AREAS) {
-    const sourcePath = createSafePath(archiveDir, area.archiveFile)
-    const directTargetPath = createSafePath(projectDir, area.currentBaseDir, feature, area.currentFileName)
-    const sourceExists = await pathExists(sourcePath)
-    const directTargetExists = await pathExists(directTargetPath)
+  for (const boundedContext of BOUNDED_CONTEXTS) {
+    for (const currentFile of boundedContext.files) {
+      const archiveFile = archiveFileForCurrentFile(currentFile)
+      const targetArea = targetAreaForCurrentFile(currentFile)
+      const sourcePath = createSafePath(archiveDir, archiveFile)
+      const directTargetPath = createSafePath(projectDir, boundedContext.currentDir, currentFile)
+      const sourceExists = await pathExists(sourcePath)
+      const directTargetExists = await pathExists(directTargetPath)
 
-    if (sourceExists) {
-      const match = await findHistoricalMatch({
-        currentAreaRoot: createSafePath(projectDir, area.currentBaseDir),
-        directTargetPath,
-        sourcePath,
-        filePattern: area.currentFilePattern,
-      })
-
-      if (match) {
-        suggestions.push({
-          type: 'UPDATE',
-          targetArea: area.area,
+      if (sourceExists) {
+        const match = await findHistoricalMatch({
+          currentDir: createSafePath(projectDir, boundedContext.currentDir),
+          directTargetPath,
           sourcePath,
-          targetPath: match.path,
-          strategy: 'synthesized_refresh',
-          reason: `reliable historical ${area.area} match found (heading overlap ${match.headingOverlap.toFixed(2)}, token overlap ${match.tokenOverlap.toFixed(2)})`,
+          candidateFiles: boundedContext.files,
         })
-        continue
+
+        if (match) {
+          suggestions.push({
+            type: 'UPDATE',
+            targetArea,
+            sourcePath,
+            targetPath: match.path,
+            strategy: 'synthesized_refresh',
+            reason: `reliable historical ${targetArea} match found in ${boundedContext.context} (heading overlap ${match.headingOverlap.toFixed(2)}, token overlap ${match.tokenOverlap.toFixed(2)})`,
+          })
+          continue
+        }
+
+        suggestions.push({
+          type: directTargetExists ? 'UPDATE' : 'ADD',
+          targetArea,
+          sourcePath,
+          targetPath: directTargetPath,
+          strategy: 'direct_migration',
+          reason: directTargetExists
+            ? `no reliable historical ${targetArea} match in ${boundedContext.context}; refreshing direct current document`
+            : `no reliable historical ${targetArea} match in ${boundedContext.context}; migrating archive document into current`,
+        })
       }
-
-      suggestions.push({
-        type: directTargetExists ? 'UPDATE' : 'ADD',
-        targetArea: area.area,
-        sourcePath,
-        targetPath: directTargetPath,
-        strategy: 'direct_migration',
-        reason: directTargetExists
-          ? `no reliable historical ${area.area} match; refreshing direct current document`
-          : `no reliable historical ${area.area} match; migrating archive document into current`,
-      })
-      continue
     }
-
-
   }
 
   return suggestions
 }
 
+function archiveFileForCurrentFile(currentFile: CurrentFileName): ArchiveFileName {
+  switch (currentFile) {
+    case 'design.md':
+      return 'design.md'
+    case 'requirements.md':
+      return 'prd.md'
+    case 'spec.md':
+      return 'behavior.md'
+  }
+}
+
+function targetAreaForCurrentFile(currentFile: CurrentFileName): PromotionTargetArea {
+  switch (currentFile) {
+    case 'design.md':
+      return 'design'
+    case 'requirements.md':
+      return 'requirements'
+    case 'spec.md':
+      return 'behavior'
+  }
+}
+
 export async function applyPromotionSuggestions(
   options: ApplyPromotionSuggestionsOptions
 ): Promise<PromotionResult> {
-  const { suggestions } = options
+  const { suggestions, signal } = options
   const applied: CurrentPromotionSuggestion[] = []
   const skipped: CurrentPromotionSuggestion[] = []
 
   for (const suggestion of suggestions) {
+    if (signal?.aborted) {
+      throw new Error('Promotion aborted: task was cancelled')
+    }
+
     if (suggestion.type === 'REMOVE') {
       await fs.rm(suggestion.targetPath, { recursive: true, force: true })
       applied.push(suggestion)
@@ -177,12 +216,12 @@ export async function applyPromotionSuggestions(
 }
 
 async function findHistoricalMatch(options: {
-  currentAreaRoot: string
+  currentDir: string
   directTargetPath: string
   sourcePath: string
-  filePattern: RegExp
+  candidateFiles: readonly CurrentFileName[]
 }): Promise<MatchCandidate | null> {
-  const { currentAreaRoot, directTargetPath, sourcePath, filePattern } = options
+  const { currentDir, directTargetPath, sourcePath, candidateFiles } = options
   const sourceContent = await fs.readFile(sourcePath, 'utf-8')
   const sourceProfile = profileMarkdown(sourceContent)
   const directCandidate = await scoreCandidate(directTargetPath, sourceProfile)
@@ -190,7 +229,7 @@ async function findHistoricalMatch(options: {
     return directCandidate
   }
 
-  const candidatePaths = await listCurrentDocuments(currentAreaRoot, filePattern)
+  const candidatePaths = candidateFiles.map(candidateFile => createSafePath(currentDir, candidateFile))
   let best: MatchCandidate | null = null
   const normalizedDirectTargetPath = path.resolve(directTargetPath)
 
@@ -232,36 +271,6 @@ function isReliableMatch(candidate: MatchCandidate): boolean {
     && candidate.headingOverlap >= RELIABLE_HEADING_OVERLAP
     && candidate.tokenOverlap >= RELIABLE_TOKEN_OVERLAP
 }
-
-async function listCurrentDocuments(rootPath: string, filePattern: RegExp): Promise<string[]> {
-  if (!(await pathExists(rootPath))) {
-    return []
-  }
-
-  const results: string[] = []
-  const stack = [rootPath]
-
-  while (stack.length > 0) {
-    const currentPath = stack.pop()
-    if (!currentPath) continue
-
-    const entries = await fs.readdir(currentPath, { withFileTypes: true })
-    for (const entry of entries) {
-      const entryPath = path.join(currentPath, entry.name)
-      if (entry.isDirectory()) {
-        stack.push(entryPath)
-        continue
-      }
-
-      if (entry.isFile() && filePattern.test(entry.name)) {
-        results.push(entryPath)
-      }
-    }
-  }
-
-  return results.sort((left, right) => left.localeCompare(right))
-}
-
 async function synthesizeCurrentDocument(sourcePath: string, targetPath: string): Promise<string> {
   const [sourceContent, targetContent] = await Promise.all([
     fs.readFile(sourcePath, 'utf-8'),

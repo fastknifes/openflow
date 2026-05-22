@@ -528,7 +528,7 @@ describe('handleQualityGate', () => {
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
 
-  test('implementation change without workflow context returns needs_workflow_stage', async () => {
+  test('implementation change without workflow context returns limited_context and runs verify only', async () => {
     const directory = await createGitFixture('applicability-missing-workflow', 'no-diff')
     const callLog: CallLog = { order: [] }
     const ctx = createStandardContext(directory)
@@ -541,10 +541,24 @@ describe('handleQualityGate', () => {
       overrideVerify: createMockVerify(callLog),
     })
 
-    expect(output).toContain('NeedsWorkflowStage')
-    expect(output).toContain('implementation_missing_workflow_context')
-    expect(output).toContain('Do not create a minimal plan or design automatically')
-    expect(callLog.order).toEqual([])
+    const state = await loadAcceptanceState(directory)
+    const stateFile = await readFile(getAcceptanceStatePath(directory), 'utf-8')
+
+    expect(output).toContain('LimitedContext')
+    expect(output).toContain('limited_context')
+    expect(output).toContain('semantic_context_limited')
+    expect(output).toContain('technical verification')
+    expect(output).toContain('Archive Readiness Eligible')
+    expect(output).toContain('❌ no')
+    expect(output).not.toContain('NeedsWorkflowStage')
+    expect(output).not.toContain('needs_workflow_stage')
+    expect(callLog.order).toEqual(['verify'])
+    expect(state?.qualityGateApplicability?.status).toBe('limited_context')
+    expect(state?.qualityGateApplicability?.shouldRunVerify).toBe(true)
+    expect(state?.qualityGateApplicability?.shouldRunHarden).toBe(false)
+    expect(state?.qualityGateApplicability?.archiveReadinessEligible).toBe(false)
+    expect(state?.postHocIssue).toBe(true)
+    expect(stateFile).toContain('postHocIssue: true')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
@@ -1126,26 +1140,28 @@ Summary: one design divergence was accepted as a known issue after verify eviden
 
   // ── Feature context (design-based) ────────────────────────────────────────
 
-  test('resolves context kind as feature when design.md exists in docs/changes', async () => {
-    const directory = await createGitFixture('feature-context', 'trivial')
+  test('implementation change with design.md remains applicable feature context', async () => {
+    const directory = await createGitFixture('feature-context', 'no-diff')
     const callLog: CallLog = { order: [] }
     const ctx = createStandardContext(directory)
 
     // Create design.md in docs/changes/{feature} so context is resolved as feature
     await mkdir(join(directory, 'docs', 'changes', FEATURE_A), { recursive: true })
     await writeFile(join(directory, 'docs', 'changes', FEATURE_A, 'design.md'), '# Design\n\nFeature context test', 'utf-8')
+    await writeFile(join(directory, 'src', 'app.ts'), 'export const appVersion = "2.0"\n', 'utf-8')
 
     const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
       overrideVerify: createMockVerify(callLog),
     })
 
     // Context kind should be feature (not plan or limited)
+    expect(output).toContain('Applicable')
     expect(output).toContain('`feature`')
     expect(output).not.toContain('`plan`')
     expect(output).not.toContain('`limited`')
 
-    expect(output).toContain('NotApplicable')
-    expect(callLog.order).not.toContain('verify')
+    expect(output).not.toContain('NotApplicable')
+    expect(callLog.order).toContain('verify')
 
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)

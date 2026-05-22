@@ -51,6 +51,7 @@ const FIELD_PREFIXES = {
   implementationStateGitHead: 'implementationStateGitHead:',
   implementationStateFromVerify: 'implementationStateFromVerify:',
   qualityGateApplicability: 'qualityGateApplicability:',
+  postHocIssue: 'postHocIssue:',
   evidenceFreshnessGitHead: 'evidenceFreshnessGitHead:',
   evidenceFreshnessChangedFiles: 'evidenceFreshnessChangedFiles:',
   evidenceFreshnessDiffHash: 'evidenceFreshnessDiffHash:',
@@ -214,6 +215,9 @@ function parseStateFile(content: string): AcceptanceState | null {
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.qualityGateApplicability)) {
       try { result.qualityGateApplicability = JSON.parse(extractFieldValue(trimmed, FIELD_PREFIXES.qualityGateApplicability)) } catch { /* ignore */ }
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.postHocIssue)) {
+      result.postHocIssue = extractFieldValue(trimmed, FIELD_PREFIXES.postHocIssue) === 'true'
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessGitHead)) {
       freshnessMeta.gitHead = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessGitHead)
@@ -438,6 +442,9 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.qualityGateApplicability) {
     state.qualityGateApplicability = result.qualityGateApplicability as QualityGateApplicabilityResult
   }
+  if (result.postHocIssue !== undefined) {
+    state.postHocIssue = result.postHocIssue
+  }
   
   return state
 }
@@ -518,6 +525,9 @@ function serializeState(state: AcceptanceState): string {
   }
   if (state.qualityGateApplicability) {
     pushOptionalLine(lines, FIELD_PREFIXES.qualityGateApplicability, JSON.stringify(state.qualityGateApplicability))
+  }
+  if (state.postHocIssue !== undefined) {
+    lines.push(`${FIELD_PREFIXES.postHocIssue} ${state.postHocIssue}`)
   }
   pushOptionalLine(lines, FIELD_PREFIXES.mode, state.mode)
   pushOptionalLine(lines, FIELD_PREFIXES.issueSlug, state.issueSlug)
@@ -817,7 +827,7 @@ export async function saveVerifyResult(
   // Guard: if the loaded state belongs to a different feature, create a new
   // acceptance state for the target feature instead of overwriting the stale one.
   if (feature && state.feature !== feature) {
-    logger.warn('Acceptance state feature mismatch 鈥?creating target-feature state for verify result', {
+    logger.warn('Acceptance state feature mismatch — creating target-feature state for verify result', {
       expectedFeature: feature,
       staleFeature: state.feature,
     })

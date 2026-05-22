@@ -18,13 +18,12 @@ import {
 } from './feature-workflow.js'
 import { getContractRuntime } from '../contracts/runtime.js'
 import { dispatchOpenFlowCommand, extractOpenFlowCommand } from './chat-command-dispatch.js'
-import { findActiveIssueWorkspace } from './issue-workspace.js'
 import { getImplementationState, isFreshReadiness } from '../utils/acceptance-state.js'
+import { tArray } from '../i18n/index.js'
 
-const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive', 'implemented', 'completed', 'ready for delivery', 'implementation complete']
+const COMPLETION_PHRASES = tArray('signals.completion.phrases')
 const GUARD_BLOCK_TITLE = '## OpenFlow: Completion Blocked Until Quality Gate'
 const GUARD_VERIFY_TITLE = '## OpenFlow: Verification Suggested'
-const ISSUE_ACTIVE_NOTICE_TITLE = '## OpenFlow: Issue Investigation Active'
 
 function isCompletionMessage(message: string): boolean {
   const lower = message.toLowerCase()
@@ -48,23 +47,6 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     if (message.includes(GUARD_BLOCK_TITLE) || message.includes(GUARD_VERIFY_TITLE)) return
 
     if (await dispatchOpenFlowCommand(ctx, input, output, message)) return
-
-    const activeIssueWorkspace = await findActiveIssueWorkspace(ctx.directory, input.sessionID)
-    if (activeIssueWorkspace) {
-      if (!hasNotice(output, ISSUE_ACTIVE_NOTICE_TITLE)) {
-        appendGuardMessage(output, `${ISSUE_ACTIVE_NOTICE_TITLE}
-
-Active issue workspace detected: \`${activeIssueWorkspace.workspacePath}\`.
-
-Feature-design and feature-harden suggestions are suppressed while issue context is active.
-
-Recommended issue flow:
-- Continue gathering evidence with \`/openflow-issue <problem> --continue\`
-- If the fix is already complete, record it with \`/openflow-issue <problem> --resolve\`
-- Then invoke the \`openflow-quality-gate\` skill to verify readiness`)
-      }
-      return
-    }
 
     // ── Guardian session events (before completion guard, non-blocking) ─
     if (ctx.config.guardian?.enabled) {

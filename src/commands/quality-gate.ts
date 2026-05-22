@@ -18,6 +18,7 @@ import { buildMinimalSummary } from '../utils/harden-ledger.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { detectMode } from '../utils/issue-utils.js'
 import { collectFeatureScope, filterPathsToExactScope, filterPathsToFeatureScope, scopeDiffToFeature, scopeDiffToFiles } from '../utils/diff-scope.js'
+import { logger } from '../utils/logger.js'
 
 export interface QualityGateArgs {
   /** Optional feature name override */
@@ -89,8 +90,12 @@ export async function handleQualityGate(
 ): Promise<string> {
   const featureArg = args?.feature?.trim()
   const requestedSessionID = args?.sessionID
+  logger.info('quality_gate', 'quality gate started', { feature: featureArg, sessionID: requestedSessionID })
 
   let activeRun = await findActiveImplementationRun(ctx, featureArg ? sanitizeFeatureName(featureArg) : undefined, requestedSessionID)
+  if (activeRun) {
+    logger.info('quality_gate', 'active implementation run found', { runID: activeRun.runID, status: activeRun.status })
+  }
   const sessionID = requestedSessionID ?? activeRun?.sessionID
   let runCompletionRecorded = false
   const executionRoot = activeRun ? resolveImplementationRunExecutionRoot(ctx, activeRun) : ctx.directory
@@ -120,10 +125,12 @@ export async function handleQualityGate(
       resolvedFeature = acceptanceState.feature
     }
   }
+  logger.info('quality_gate', 'feature resolved', { feature: sanitizedFeature })
 
   // ── 2. Determine context kind ───────────────────────────────────────────
   const contextKind = await resolveContextKind(executionCtx, sanitizedFeature)
   const limitedContext = contextKind === 'limited' || contextKind === 'none'
+  logger.info('quality_gate', 'context kind determined', { contextKind, limitedContext })
 
   const acceptanceState = await loadAcceptanceState(executionCtx.directory)
   const implementationScopeFiles = getMatchingImplementationScopeFiles(acceptanceState, sanitizedFeature, sessionID)
@@ -154,6 +161,12 @@ export async function handleQualityGate(
     changedFiles,
     acceptancePhase: acceptanceState?.phase,
   })
+  logger.info('quality_gate', 'applicability classified', {
+    status: applicability.status,
+    reasonCode: applicability.reasonCode,
+    shouldRunHarden: applicability.shouldRunHarden,
+    shouldRunVerify: applicability.shouldRunVerify,
+  })
 
   if (acceptanceState && acceptanceState.feature === sanitizedFeature) {
     acceptanceState.qualityGateApplicability = applicability
@@ -161,6 +174,7 @@ export async function handleQualityGate(
   }
 
   if (applicability.status === 'not_applicable' || applicability.status === 'needs_workflow_stage') {
+    logger.info('quality_gate', 'quality gate not applicable, returning early', { status: applicability.status })
     const report = buildApplicabilityOnlyReport({
       feature: sanitizedFeature || '(unresolved)',
       contextKind,
@@ -183,6 +197,7 @@ export async function handleQualityGate(
     : { files: changedFiles, diffLines, hasNewExports }
 
   const riskResult = decideQualityGateRisk(riskInput)
+  logger.info('quality_gate', 'risk assessment completed', { riskLevel: riskResult.risk, shouldHarden: riskResult.shouldHarden, reasons: riskResult.reasons })
 
   // ── 5. Evidence freshness check ─────────────────────────────────────────
   const workspaceState = buildScopedWorkspaceState(
@@ -192,14 +207,17 @@ export async function handleQualityGate(
     scopedWorkspace.scoped,
   )
   const freshnessResult = classifyEvidenceFreshness(acceptanceState, workspaceState)
+  logger.info('quality_gate', 'evidence freshness checked', { status: freshnessResult.status, reason: freshnessResult.reason })
 
   // ── 6. Harden decision ──────────────────────────────────────────────────
   let hardenOutput = ''
   let hardenStatus: string | undefined
   let hardenDecision: 'none' | 'risk-based' | 'final' = 'none'
 
-  if (riskResult.shouldHarden && executionCtx.config.harden.enabled) {
+  if (applicability.shouldRunHarden && riskResult.shouldHarden && executionCtx.config.harden.enabled) {
     hardenDecision = 'risk-based'
+    logger.info('quality_gate', 'harden decision made', { decision: hardenDecision, shouldRunHarden: applicability.shouldRunHarden, shouldHarden: riskResult.shouldHarden, hardenEnabled: executionCtx.config.harden.enabled })
+    logger.info('quality_gate', 'starting harden', { feature: sanitizedFeature })
     try {
       if (internalOpts?.overrideHarden) {
         hardenOutput = await internalOpts.overrideHarden(executionCtx, sanitizedFeature, sessionID)
@@ -207,21 +225,27 @@ export async function handleQualityGate(
         hardenOutput = await handleHarden(executionCtx, sanitizedFeature, undefined, sessionID)
       }
       hardenStatus = extractHardenStatus(hardenOutput)
+      logger.info('quality_gate', 'harden completed', { status: hardenStatus })
     } catch (err) {
+      const hardenError = err instanceof Error ? err : new Error(String(err))
       hardenStatus = 'error'
-      hardenOutput = `Harden execution failed: ${err instanceof Error ? err.message : String(err)}`
+      hardenOutput = `Harden execution failed: ${hardenError.message}`
+      logger.error('quality_gate', 'harden execution failed', hardenError, { feature: sanitizedFeature })
     }
-  } else if (!riskResult.shouldHarden) {
+  } else if (!applicability.shouldRunHarden || !riskResult.shouldHarden) {
     hardenDecision = 'none'
     hardenStatus = 'skipped'
+    logger.info('quality_gate', 'harden decision made', { decision: hardenDecision, shouldRunHarden: applicability.shouldRunHarden, shouldHarden: riskResult.shouldHarden, hardenEnabled: executionCtx.config.harden.enabled })
   } else {
     hardenDecision = 'none'
     hardenStatus = 'disabled'
+    logger.info('quality_gate', 'harden decision made', { decision: hardenDecision, shouldRunHarden: applicability.shouldRunHarden, shouldHarden: riskResult.shouldHarden, hardenEnabled: executionCtx.config.harden.enabled })
   }
 
   // ── 7. Evidence-aware verify ────────────────────────────────────────────
   let verifyOutput = ''
   try {
+    logger.info('quality_gate', 'starting verify', { feature: sanitizedFeature })
     if (internalOpts?.overrideVerify) {
       // Preserve accepted failures for mock verify too; stale-evidence re-verify
       // should not silently clear a previous --accept-failures decision.
@@ -236,13 +260,16 @@ export async function handleQualityGate(
       verifyOutput = await handleVerify(executionCtx, sanitizedFeature, preserveAccepted, undefined, sessionID)
     }
   } catch (err) {
-    verifyOutput = `## Verify\n\nError: verify execution failed: ${err instanceof Error ? err.message : String(err)}`
+    const verifyError = err instanceof Error ? err : new Error(String(err))
+    verifyOutput = `## Verify\n\nError: verify execution failed: ${verifyError.message}`
+    logger.error('quality_gate', 'verify execution failed', verifyError, { feature: sanitizedFeature })
   }
 
   // ── 8. Extract readiness from verify output ─────────────────────────────
   const hardenUnavailableReason = parseHardenUnavailableReason(hardenOutput)
   const hardenGate = applyHardenReadinessGate(extractReadinessFromOutput(verifyOutput), hardenStatus, hardenOutput)
   const readiness = hardenGate.readiness
+  logger.info('quality_gate', 'readiness determined', { readiness, hardenStatus, hardenReadinessBlocker: hardenGate.blocker })
   const verifyContent = stripOpenFlowHeader(verifyOutput)
 
   if (applicability.status === 'applicable') {
@@ -257,6 +284,9 @@ export async function handleQualityGate(
   const latestAcceptanceState = await loadAcceptanceState(executionCtx.directory)
   if (latestAcceptanceState && latestAcceptanceState.feature === sanitizedFeature) {
     latestAcceptanceState.qualityGateApplicability = applicability
+    if (applicability.status === 'limited_context' && (readiness === 'ready' || readiness === 'ready_with_doc_updates')) {
+      latestAcceptanceState.postHocIssue = true
+    }
     if (hardenOutput.trim()) {
       latestAcceptanceState.hardenSummary = buildHardenSummaryForAcceptanceState(hardenStatus, hardenOutput, hardenGate.findings, readiness)
     }
@@ -292,7 +322,7 @@ export async function handleQualityGate(
     runCompletionRecorded = true
   }
 
-  return buildQualityGateReport({
+  const report = buildQualityGateReport({
     feature: sanitizedFeature || '(unresolved)',
     contextKind,
     limitedContext,
@@ -312,7 +342,10 @@ export async function handleQualityGate(
     omittedFiles: scopedWorkspace.omittedFiles,
     diffLines,
   })
+  logger.info('quality_gate', 'quality gate completed', { feature: sanitizedFeature, readiness })
+  return report
   } catch (error) {
+    logger.error('quality_gate', 'quality gate uncaught error', error instanceof Error ? error : new Error(String(error)))
     if (activeRun && !runCompletionRecorded) {
       await recordQualityGateRunCompletion(ctx, activeRun, 'error', 'blocked')
     }
@@ -333,6 +366,7 @@ async function findActiveImplementationRun(
   feature: string | undefined,
   sessionID: string | undefined,
 ): Promise<ImplementationRun | null> {
+  logger.debug('quality_gate', 'finding active implementation run', { feature, sessionID })
   if (feature) {
     const featureRun = await implementationRunStore.getActiveRun(ctx, feature, sessionID)
     if (featureRun) {
@@ -429,19 +463,6 @@ function classifyQualityGateApplicability(input: ApplicabilityInput): QualityGat
       shouldRunHarden: false,
       archiveReadinessEligible: false,
       nextStep: 'No quality gate is required. Do not create workflow artifacts merely to satisfy readiness.',
-    }
-  }
-
-  if (hasCodeChange && input.feature && input.contextKind === 'limited') {
-    return {
-      status: 'needs_workflow_stage',
-      reasonCode: 'implementation_missing_workflow_context',
-      reason: 'Implementation-like changes were detected, but the feature lacks explicit design or plan workflow context.',
-      taskKind,
-      shouldRunVerify: false,
-      shouldRunHarden: false,
-      archiveReadinessEligible: false,
-      nextStep: 'Ask whether to enter the feature/planning workflow. Do not create a minimal plan or design automatically.',
     }
   }
 

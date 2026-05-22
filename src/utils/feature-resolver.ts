@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { OpenFlowContext } from '../types.js'
 import { createSafePath, sanitizeFeatureName } from './security.js'
+import { tArray, tPatterns } from '../i18n/index.js'
 
 export interface DerivedFeatureIdentity {
   slug: string
@@ -137,32 +138,21 @@ function looksLikeGenericFeatureInstruction(input: string): boolean {
     return true
   }
 
+  const collectWords = tArray('resolver.collectConstraints')
+  const excludedFeatureTags = new Set(['quality', 'naming', 'rename', 'login', 'coupon', 'deduction', 'frontend', 'preview', 'stage', 'applicability', 'trigger', 'boundary'])
+  const excludedFeaturePatterns = tPatterns('resolver.featureKeywords')
+    .filter((keyword) => keyword.tags.some((tag) => excludedFeatureTags.has(tag)))
+    .map((keyword) => keyword.pattern)
+
   return /^请/u.test(input)
-    && /(?:收集|生成|创建|整理)/u.test(input)
+    && new RegExp(`(?:${collectWords.join('|')})`, 'u').test(input)
     && /(?:约束|文档|相关文档|资料)/u.test(input)
-    && !/(?:质量门|命名|重命名|登录|优惠券|扣减|前端|预览|阶段|适用性|触发|边界)/u.test(input)
+    && !new RegExp(`(?:${excludedFeaturePatterns.join('|')})`, 'u').test(input)
 }
 
 function inferChineseFeatureWords(input: string): string[] {
   const dictionary: Array<[RegExp, string[]]> = [
-    [/质量门/u, ['quality', 'gate']],
-    [/门禁/u, ['gate']],
-    [/阶段/u, ['stage']],
-    [/适用性/u, ['applicability']],
-    [/判定|分类/u, ['classifier']],
-    [/触发/u, ['trigger']],
-    [/边界/u, ['boundary']],
-    [/命名/u, ['naming']],
-    [/重命名/u, ['rename']],
-    [/登录/u, ['login']],
-    [/优惠券/u, ['coupon']],
-    [/扣减/u, ['deduction']],
-    [/规则/u, ['rule']],
-    [/配置/u, ['config']],
-    [/前端/u, ['frontend']],
-    [/设计/u, ['design']],
-    [/预览/u, ['preview']],
-    [/约束/u, ['constraints']],
+    ...tPatterns('resolver.featureKeywords').map((keyword) => [new RegExp(keyword.pattern, 'u'), keyword.tags] as [RegExp, string[]]),
   ]
 
   return dictionary.flatMap(([pattern, words]) => pattern.test(input) ? words : [])

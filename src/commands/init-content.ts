@@ -64,11 +64,7 @@ Start designing your first feature:
 /openflow-feature <feature-name>
 \`\`\`
 
-Or investigate an issue:
-
-\`\`\`
-/openflow-issue "<problem description>"
-\`\`\``,
+Or describe a problem in natural conversation to investigate an issue.`,
   refreshed: `## OpenFlow Init Complete
 
 refreshed OpenFlow docs guide

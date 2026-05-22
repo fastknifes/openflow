@@ -1,4 +1,5 @@
 import type { RequirementModel } from './requirement-model.js'
+import { t } from '../../i18n/index.js'
 
 const NOT_SPECIFIED = 'Not specified.'
 
@@ -27,7 +28,7 @@ function renderDraftNotice(model: RequirementModel): string {
     return ''
   }
 
-  return ['> **Draft with Assumptions / 带假设的草稿**', '', 'Assumptions in this behavior document are not confirmed facts.'].join('\n')
+  return [`> **${t('templates.draftWarning.title')}**`, '', t('templates.draftWarning.behavior')].join('\n')
 }
 
 function renderConsensusSummary(model: RequirementModel): string {

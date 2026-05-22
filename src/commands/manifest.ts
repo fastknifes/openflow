@@ -16,10 +16,6 @@ export const OPENFLOW_TOOL_COMMANDS = {
     name: 'openflow-feature',
     description: 'OpenFlow feature command for natural-language design clarification. Starts or continues feature design without requiring a user-provided slug; feature identity is resolved from context or description.',
   },
-  issue: {
-    name: 'openflow-issue',
-    description: 'OpenFlow issue investigation command. Starts or resumes structured issue packets for uncertain problems before routing to fix, feature, data, config, or environment actions.',
-  },
   archive: {
     name: 'openflow-archive',
     description: 'OpenFlow archive command. Archives a completed feature/issue — copies design docs, promotes current facts, and cleans up build data. Requires verify readiness. The implementation-mapper.md is generated during the quality-gate phase.',
@@ -61,10 +57,6 @@ export const OPENFLOW_COMMAND_FILES: readonly OpenFlowCommandMetadata[] = [
     description: 'OpenFlow config command',
   },
   OPENFLOW_TOOL_COMMANDS.migrateDocs,
-  {
-    name: OPENFLOW_TOOL_COMMANDS.issue.name,
-    description: 'OpenFlow issue clarification and triage command for uncertain problems',
-  },
   OPENFLOW_TOOL_COMMANDS.implement,
 ]
 
@@ -73,6 +65,5 @@ export const OPENFLOW_REGISTERED_SKILL_NAMES = [
   'openflow-brainstorm',
   'openflow-quality-gate',
   'openflow-ai-reflection',
-  'openflow-issue',
   'openflow-tdd',
 ] as const

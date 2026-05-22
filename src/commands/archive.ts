@@ -15,7 +15,9 @@ import { getSessionFileChanges, getPhasedFileChanges } from '../utils/session.js
 import { detectDrift } from '../utils/drift-detector.js'
 import { logger } from '../utils/logger.js'
 import {
+  buildIssueResolution,
   detectMode,
+  detectPostHocIssueMode,
   ISSUE_CLARIFICATION_FILENAME,
   ISSUE_RESOLUTION_FILENAME,
   PROMOTION_CANDIDATE_FILENAME,
@@ -31,6 +33,7 @@ import {
 import { stripOpenFlowCommandTokens } from './verify.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { implementationRunStore } from '../utils/implementation-run.js'
+import { getSchedulerLoop } from '../index.js'
 
 const RECENT_BUILDS_WINDOW = 5
 
@@ -94,8 +97,10 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const hardenTerminalSummary = matchingAcceptanceState?.hardenTerminalSummary
   const hasAcceptedKnownIssues = (hardenTerminalSummary?.acceptedKnownIssueCount ?? 0) > 0 || acceptedKnownIssues.length > 0
   const gateApplicability = matchingAcceptanceState?.qualityGateApplicability
+  const isPostHocIssue = await detectPostHocIssueMode(ctx, sanitizedFeature, matchingAcceptanceState)
+  const postHocIssueReady = isPostHocIssue && (readiness === VerifyReadinessStatus.Ready || readiness === VerifyReadinessStatus.ReadyWithDocUpdates)
 
-  if (gateApplicability && !gateApplicability.archiveReadinessEligible) {
+  if (gateApplicability && !gateApplicability.archiveReadinessEligible && !postHocIssueReady) {
     return formatQualityGateApplicabilityBlock(sanitizedFeature, gateApplicability.status, gateApplicability.nextStep)
   }
 
@@ -166,25 +171,25 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   try {
     await fs.mkdir(stagingDir, { recursive: true })
 
-    if (sourceDesignPath && await fileExists(sourceDesignPath)) {
+    if (!postHocIssueReady && sourceDesignPath && await fileExists(sourceDesignPath)) {
       await fs.copyFile(sourceDesignPath, path.join(stagingDir, 'design.md'))
       trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceDesignPath)
     }
 
-    if (changePlanExists) {
+    if (!postHocIssueReady && changePlanExists) {
       await fs.copyFile(sourceChangePlanPath, path.join(stagingDir, 'plan.md'))
       trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceChangePlanPath)
-    } else if (planExists) {
+    } else if (!postHocIssueReady && planExists) {
       await fs.copyFile(planPath, path.join(stagingDir, 'plan.md'))
     }
 
-    if (sourceRequirementsPath && await fileExists(sourceRequirementsPath)) {
+    if (!postHocIssueReady && sourceRequirementsPath && await fileExists(sourceRequirementsPath)) {
       await fs.copyFile(sourceRequirementsPath, path.join(stagingDir, 'prd.md'))
       trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceRequirementsPath)
     }
 
     const sourceBehaviorPath = path.join(sourceChangeWorkspacePath, 'behavior.md')
-    if (await fileExists(sourceBehaviorPath)) {
+    if (!postHocIssueReady && await fileExists(sourceBehaviorPath)) {
       await fs.copyFile(sourceBehaviorPath, path.join(stagingDir, 'behavior.md'))
       trackArchivedChangeWorkspaceSource(archivedChangeWorkspaceSources, sourceChangeWorkspacePath, sourceBehaviorPath)
     }
@@ -244,6 +249,16 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
       )
     }
 
+    if (postHocIssueReady) {
+      await writePostHocIssueArtifacts({
+        writeDir: stagingDir,
+        feature: sanitizedFeature,
+        acceptanceState: matchingAcceptanceState,
+        changes,
+      })
+      issueResolutionGenerated = true
+    }
+
     const promotionSuggestions = await buildPromotionSuggestions({
       projectDir: ctx.directory,
       archiveDir: stagingDir,
@@ -251,9 +266,42 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     })
 
     const autoPromoteCurrent = Boolean(ctx.config.archive.auto_promote_current)
-    const promotionResult = autoPromoteCurrent
-      ? await applyPromotionSuggestions({ projectDir: ctx.directory, suggestions: promotionSuggestions })
-      : { applied: [] as CurrentPromotionSuggestion[], skipped: promotionSuggestions }
+    let promotionResult: { applied: CurrentPromotionSuggestion[]; skipped: CurrentPromotionSuggestion[] }
+    let promotionTaskId: string | undefined
+
+    if (autoPromoteCurrent) {
+      const scheduler = getSchedulerLoop()
+      if (scheduler !== undefined) {
+        const resources = promotionSuggestions
+          .filter((s) => s.type !== 'REMOVE')
+          .map((s) => ({
+            kind: 'file' as const,
+            id: path.relative(ctx.directory, s.targetPath).replace(/\\/g, '/'),
+            mode: 'write' as const,
+          }))
+        promotionTaskId = scheduler.submitTask({
+          type: 'current-promotion',
+          payload: {
+            projectDir: ctx.directory,
+            suggestions: promotionSuggestions,
+          },
+          resources,
+        })
+        promotionResult = { applied: [], skipped: promotionSuggestions }
+      } else if (ctx.config.archive.sync_promotion_fallback !== false) {
+        promotionResult = await applyPromotionSuggestions({
+          projectDir: ctx.directory,
+          suggestions: promotionSuggestions,
+        })
+      } else {
+        throw new OpenFlowError(
+          ErrorCode.OPERATION_FAILED,
+          'DRG scheduler is not started and sync promotion fallback is disabled. Enable fallback or start the scheduler.',
+        )
+      }
+    } else {
+      promotionResult = { applied: [], skipped: promotionSuggestions }
+    }
 
     // All staged operations succeeded — rename staging to final archive path
     await fs.mkdir(archiveRoot, { recursive: true })
@@ -271,7 +319,7 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
       await recordArchiveRunEvent(ctx, implementationRun)
     }
 
-    return formatArchiveResult(
+    const archiveResult = formatArchiveResult(
       sanitizedFeature,
       finalArchiveDir,
       designExists,
@@ -288,11 +336,18 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
       hasAcceptedKnownIssues,
       archiveMode,
       issueClarificationExists,
-      promotionCandidateExists,
+      promotionCandidateExists || (postHocIssueReady && shouldGeneratePostHocPromotionCandidate(matchingAcceptanceState)),
       issueResolutionGenerated,
       governanceDecisionTargetPath,
       hasImplementationMapper,
+      postHocIssueReady,
     )
+
+    if (promotionTaskId) {
+      return `${archiveResult}\n\n### Current Promotion (Async)\n- DRG task submitted: \`${escapeMarkdown(promotionTaskId)}\`\n- Query status with the scheduler API.`
+    }
+
+    return archiveResult
   } catch (error) {
     // Clean up staging on any failure — leave source workspace untouched
     try {
@@ -721,6 +776,67 @@ async function applyGovernancePromotionIfConfirmed(
   return targetPath
 }
 
+async function writePostHocIssueArtifacts(options: {
+  writeDir: string
+  feature: string
+  acceptanceState: AcceptanceState | null
+  changes: Array<{ filePath: string; tool: 'write' | 'edit'; timestamp?: number }>
+}): Promise<void> {
+  const { writeDir, feature, acceptanceState, changes } = options
+  const symptom = acceptanceState?.rawIssue ?? feature
+  const verificationEvidence = buildPostHocVerificationEvidence(acceptanceState)
+  const classification = acceptanceState?.primaryClassification ?? 'bugfix'
+  const filesInvolved = changes.map(change => change.filePath)
+  const governanceStatus = acceptanceState?.governancePromotionStatus ?? 'none'
+  const pendingDocUpdates = acceptanceState?.pendingDocUpdates ?? []
+  const reasonCodes = acceptanceState?.verifyResult?.reasonCodes ?? []
+  const rootCause = acceptanceState?.primaryClassification
+    ? `Classified as ${acceptanceState.primaryClassification}; addressed through post-hoc technical verification.`
+    : 'Addressed through post-hoc technical verification'
+  const baseResolution = buildIssueResolution({
+    symptom,
+    rootCause,
+    fixSummary: 'Fixed through limited-context technical verification without pre-existing design or issue clarification.',
+    filesInvolved,
+    verificationEvidence,
+    recurrenceSignature: `Monitor for similar symptoms matching ${feature}.`,
+    futureAIGuidance: 'Check acceptance state and verify result before similar changes.',
+  })
+  const evidenceSection = `## Evidence\n\n${verificationEvidence}\n\n`
+  const governanceSection = `## Governance Promotion\n\n- status: ${governanceStatus}\n${pendingDocUpdates.length > 0 ? pendingDocUpdates.map(update => `- pending doc update: \`${update.file}\`${update.reason ? ` — ${update.reason}` : ''}`).join('\n') : '- no governance promotion or current-doc update was recorded'}\n\n`
+  const residualRiskSection = `## Residual Risk\n\n${reasonCodes.length > 0 ? reasonCodes.map(code => `- ${code}`).join('\n') : '- No additional residual risk was recorded in the post-hoc archive inputs.'}\n`
+  const resolutionContent = baseResolution
+    .replace(/^## Root Cause$/m, `${evidenceSection}## Root Cause`)
+    .replace(/^## Fix Summary$/m, '## Implementation Summary')
+    .replace(/^## Files Involved$/m, '## Changed Files')
+    .trimEnd()
+    + `\n\n${governanceSection}${residualRiskSection}`
+
+  await fs.writeFile(path.join(writeDir, ISSUE_RESOLUTION_FILENAME), resolutionContent, 'utf-8')
+
+  const clarificationContent = `# Issue Clarification\n\n## Symptom\n${symptom}\n\n## Evidence\n${verificationEvidence}\n\n## Classification\n${classification}\n\n## Next Action\nResolved via post-hoc archive.\n`
+  await fs.writeFile(path.join(writeDir, ISSUE_CLARIFICATION_FILENAME), clarificationContent, 'utf-8')
+
+  if (shouldGeneratePostHocPromotionCandidate(acceptanceState)) {
+    const promotionContent = `# Promotion Candidate\n\n## Source\nGenerated during post-hoc issue archive for \`${feature}\`.\n\n## Governance Status\n${governanceStatus}\n\n## Pending Document Updates\n${pendingDocUpdates.length > 0 ? pendingDocUpdates.map(update => `- \`${update.file}\`${update.reason ? ` — ${update.reason}` : ''}`).join('\n') : '- No pending document updates were recorded.'}\n`
+    await fs.writeFile(path.join(writeDir, PROMOTION_CANDIDATE_FILENAME), promotionContent, 'utf-8')
+  }
+}
+
+function buildPostHocVerificationEvidence(acceptanceState: AcceptanceState | null): string {
+  const verifyResult = acceptanceState?.verifyResult
+  if (verifyResult?.evidenceSummary) return verifyResult.evidenceSummary
+  if (verifyResult?.constraintsChecked && verifyResult.constraintsChecked.length > 0) {
+    return `Verified constraints: ${verifyResult.constraintsChecked.join(', ')}`
+  }
+  return 'Technical verification completed via quality gate.'
+}
+
+function shouldGeneratePostHocPromotionCandidate(acceptanceState: AcceptanceState | null): boolean {
+  return (acceptanceState?.pendingDocUpdates.length ?? 0) > 0
+    || (acceptanceState?.governancePromotionStatus ?? 'none') !== 'none'
+}
+
 async function writeIssueResolution(options: {
   projectDir: string
   archiveDir: string
@@ -911,8 +1027,10 @@ function formatArchiveResult(
   issueResolutionGenerated: boolean,
   governanceDecisionTargetPath: string | null,
   hasImplementationMapper: boolean,
+  postHocIssueReady: boolean,
 ): string {
   const safePath = escapeMarkdown(archiveDir)
+  const reportedArchiveMode = postHocIssueReady ? 'post_hoc_issue' : archiveMode
   const readinessWarningBlock = legacyReadinessWarning
     ? `\n### Readiness\n- ⚠️ acceptance readiness is missing; proceeding with legacy drift/security fallback checks\n`
     : ''
@@ -921,8 +1039,10 @@ function formatArchiveResult(
     : ''
   const issueArtifactsBlock = archiveMode === 'issue' || archiveMode === 'mixed'
     ? `- \`${safePath}/${ISSUE_CLARIFICATION_FILENAME}\` - Issue clarification snapshot${issueClarificationExists ? '' : ' (not found)'}\n- \`${safePath}/${ISSUE_RESOLUTION_FILENAME}\` - Issue resolution archive${issueResolutionGenerated ? '' : ' (not generated)'}\n${promotionCandidateExists ? `- \`${safePath}/${PROMOTION_CANDIDATE_FILENAME}\` - Governance promotion candidate snapshot\n` : ''}`
+    : postHocIssueReady
+    ? `- \`${safePath}/${ISSUE_CLARIFICATION_FILENAME}\` - Generated post-hoc issue clarification snapshot\n- \`${safePath}/${ISSUE_RESOLUTION_FILENAME}\` - Generated post-hoc issue resolution archive\n${promotionCandidateExists ? `- \`${safePath}/${PROMOTION_CANDIDATE_FILENAME}\` - Generated post-hoc governance promotion candidate snapshot\n` : ''}`
     : ''
-  const governanceBlock = archiveMode === 'issue' || archiveMode === 'mixed'
+  const governanceBlock = archiveMode === 'issue' || archiveMode === 'mixed' || postHocIssueReady
     ? `\n### Governance Promotion\n- decision applied: ${governanceDecisionTargetPath ? `✅ ${escapeMarkdown(governanceDecisionTargetPath)}` : '❌ none'}\n`
     : ''
   
@@ -941,7 +1061,7 @@ function formatArchiveResult(
 - Behavior document: ✅
 - Acceptance changes: ${hasAcceptanceChanges ? '✅' : '❌'}
 - Known issues accepted: ${hasAcceptedKnownIssues ? '✅' : '❌'}
-- Archive mode: ${escapeMarkdown(archiveMode)}
+- Archive mode: ${escapeMarkdown(reportedArchiveMode)}
 
 ### Location
 ${safePath}
@@ -973,11 +1093,7 @@ This feature workflow is complete. To start a new change cycle, run:
 /openflow-feature <new-feature-name>
 \`\`\`
 
-Or investigate a new issue:
-
-\`\`\`
-/openflow-issue "<problem description>"
-\`\`\`
+Or describe a problem in natural conversation to investigate an issue.
 `
 }
 

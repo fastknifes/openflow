@@ -21,10 +21,10 @@ describe('current promotion', () => {
     const root = createRoot('.test-current-promotion-suggestions')
     const feature = 'archive-improvements'
     const archiveDir = join(root, 'docs', 'archive', feature)
-    const historicalCurrentPath = join(root, 'docs', 'current', 'design', 'archive-docs', '20260401-design.md')
+    const historicalCurrentPath = join(root, 'docs', 'current', 'archive-authority', 'design.md')
 
     await mkdir(archiveDir, { recursive: true })
-    await mkdir(join(root, 'docs', 'current', 'design', 'archive-docs'), { recursive: true })
+    await mkdir(join(root, 'docs', 'current', 'archive-authority'), { recursive: true })
     await writeFile(
       join(archiveDir, 'design.md'),
       '# Archive Command Improvements\n\n## Problem Statement\nArchive cleanup must keep current docs aligned.\n\n## Current Promotion\nRefresh current docs by merging archive sections with history.\n',
@@ -42,14 +42,14 @@ describe('current promotion', () => {
       feature,
     })
 
-    expect(suggestions).toHaveLength(1)
-    expect(suggestions[0]).toMatchObject({
+    expect(suggestions).toHaveLength(6)
+    expect(suggestions).toContainEqual(expect.objectContaining({
       type: 'UPDATE',
       targetArea: 'design',
       targetPath: historicalCurrentPath,
       strategy: 'synthesized_refresh',
-    })
-    expect(suggestions[0]?.reason).toContain('reliable historical design match')
+    }))
+    expect(suggestions.find(suggestion => suggestion.targetPath === historicalCurrentPath)?.reason).toContain('reliable historical design match')
   })
 
   test('falls back to direct migration when no reliable historical current doc exists', async () => {
@@ -58,14 +58,14 @@ describe('current promotion', () => {
     const archiveDir = join(root, 'docs', 'archive', feature)
 
     await mkdir(archiveDir, { recursive: true })
-    await mkdir(join(root, 'docs', 'current', 'design', 'other-feature'), { recursive: true })
+    await mkdir(join(root, 'docs', 'current', 'archive-authority'), { recursive: true })
     await writeFile(
       join(archiveDir, 'design.md'),
       '# Archive Command Improvements\n\n## Promotion Flow\nRefresh archive aligned current docs.\n',
       'utf-8'
     )
     await writeFile(
-      join(root, 'docs', 'current', 'design', 'other-feature', '20260401-design.md'),
+      join(root, 'docs', 'current', 'archive-authority', 'design.md'),
       '# Brainstorm Workflow\n\n## Question Flow\nPrompt the user for missing details.\n',
       'utf-8'
     )
@@ -76,23 +76,29 @@ describe('current promotion', () => {
       feature,
     })
 
-    expect(suggestions).toHaveLength(1)
-    expect(suggestions[0]).toMatchObject({
+    expect(suggestions).toHaveLength(6)
+    expect(suggestions).toContainEqual(expect.objectContaining({
+      type: 'UPDATE',
+      targetArea: 'design',
+      targetPath: join(root, 'docs', 'current', 'archive-authority', 'design.md'),
+      strategy: 'direct_migration',
+    }))
+    expect(suggestions).toContainEqual(expect.objectContaining({
       type: 'ADD',
       targetArea: 'design',
-      targetPath: join(root, 'docs', 'current', 'design', feature, 'design.md'),
+      targetPath: join(root, 'docs', 'current', 'feature-lifecycle', 'design.md'),
       strategy: 'direct_migration',
-    })
+    }))
     expect(suggestions[0]?.reason).toContain('no reliable historical design match')
   })
 
   test('synthesizes current docs by refreshing matched sections and preserving unrelated history', async () => {
     const root = createRoot('.test-current-promotion-apply')
     const source = join(root, 'docs', 'archive', 'promo-b', 'design.md')
-    const target = join(root, 'docs', 'current', 'design', 'archive-docs', '20260401-design.md')
+    const target = join(root, 'docs', 'current', 'archive-authority', 'design.md')
 
     await mkdir(join(root, 'docs', 'archive', 'promo-b'), { recursive: true })
-    await mkdir(join(root, 'docs', 'current', 'design', 'archive-docs'), { recursive: true })
+    await mkdir(join(root, 'docs', 'current', 'archive-authority'), { recursive: true })
     await writeFile(
       source,
       '# Archive Command Improvements\n\n## Problem Statement\nArchive cleanup must keep current docs aligned.\n\n## Current Promotion\nRefresh current docs by merging archive sections with history.\n\n## New Section\nPromote archive results by default.\n',

@@ -1,7 +1,7 @@
 import type { Hooks } from '@opencode-ai/plugin'
 import type { OpenFlowContext } from '../types.js'
 import { handleFeature } from '../commands/feature.js'
-import { handleArchive, handleInit, handleStatus, handleConfig, handleMigrateDocs, handleIssue } from '../commands/index.js'
+import { handleArchive, handleInit, handleStatus, handleConfig, handleMigrateDocs } from '../commands/index.js'
 import { handleChange } from '../commands/change.js'
 import { handleWritingPlan } from '../commands/writing-plan.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
@@ -129,18 +129,6 @@ export async function dispatchOpenFlowCommand(
 
   if (trimmed.match(/^\/openflow-harden(?:\s+(.+))?$/)) {
     appendGuardMessage(output, '`/openflow-harden` is deprecated. Use the `openflow-quality-gate` skill instead, which automatically assesses risk and runs harden only when required as part of its quality gate process.')
-    return true
-  }
-
-  const issueMatch = trimmed.match(/^\/openflow-issue(?:\s+(.+))?$/)
-  if (issueMatch) {
-    const feature = issueMatch[1]?.trim()
-    try {
-      const result = await handleIssue(ctx, feature || undefined, undefined, undefined, input.sessionID)
-      appendGuardMessage(output, result)
-    } catch (err) {
-      appendGuardMessage(output, err instanceof Error ? err.message : String(err))
-    }
     return true
   }
 

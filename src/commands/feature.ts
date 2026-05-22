@@ -3,6 +3,7 @@ import * as path from 'node:path'
 import { ZodError } from 'zod'
 import type { OpenFlowContext } from '../types.js'
 import { ensureChangeWorkspacePath } from '../config.js'
+import { t, tArray } from '../i18n/index.js'
 import { clearRecentFeatureCompletion, markRecentFeatureCompletion } from '../hooks/feature-workflow.js'
 import { evaluateFeatureConvergence, detectFlowSignal } from '../phases/feature/convergence.js'
 import { buildRequirementModel } from '../phases/feature/constraint-derivation.js'
@@ -13,6 +14,7 @@ import { RequirementModelSchema } from '../phases/feature/requirement-model.js'
 import type { RequirementModel } from '../phases/feature/requirement-model.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
+import { logger } from '../utils/logger.js'
 import { deriveFeatureIdentity, findActiveFeature, findIncompleteFeatureSessions, type DerivedFeatureIdentity, type FeatureSessionCandidate } from '../utils/feature-resolver.js'
 import {
   applyFeatureAnswer,
@@ -32,21 +34,12 @@ import {
   type PostDesignDecision,
   shouldGenerateDesign,
 } from '../phases/feature/state-machine.js'
-
-interface FeatureQuestionInput {
-  question: string
-  header: string
-  options: FeatureOption[]
-  multiple?: boolean
-  custom?: boolean
-}
-
-type FeatureQuestionAnswer = string[]
-
-interface FeatureInteractiveToolContext {
-  sessionID?: string
-  askQuestion(input: { questions: FeatureQuestionInput[] }): Promise<FeatureQuestionAnswer[]>
-}
+import {
+  askGuardedQuestion,
+  hasAskQuestion,
+  type QuestionToolContext,
+  type QuestionGuardResult,
+} from '../utils/question-guard.js'
 
 interface FeatureSessionIndex {
   bySessionID: Record<string, { feature: string; updatedAt: string }>
@@ -193,11 +186,29 @@ export async function handleFeature(
   await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
 
   if (hasAskQuestion(toolContext) && !answer?.trim() && isAwaitingFormalAnswer(session) && !wasQuestionPickerAlreadyPrompted) {
-    session = markQuestionPickerPrompted(session, pendingQuestion.id)
+    logger.info('feature', 'invoking question picker', { questionId: pendingQuestion.id, feature: sanitizedFeature })
+    const guardResult = await askSingleQuestion(session, pendingQuestion, toolContext)
+
+    // Update session with guard state so recursive calls see the persisted prompt record.
+    // NOTE: we intentionally do NOT set lastConsumedMessageId here.
+    // lastConsumedMessageId tracks the user's answer message, not the question prompt.
+    // Setting it here would cause the recursive call to hit the duplicate-message guard
+    // in handleFeature before applyFeatureAnswer runs, skipping answer application.
+    if (guardResult.updatedPromptedIds.length > session.questionPickerPromptedIds.length) {
+      session = markQuestionPickerPrompted(session, pendingQuestion.id)
+    }
     await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
-    const interactiveAnswer = await askSingleQuestion(session, pendingQuestion, toolContext)
-    if (interactiveAnswer) {
-      return handleFeature(ctx, sanitizedFeature, interactiveAnswer, toolContext)
+
+    if (guardResult.answer) {
+      logger.info('feature', 'question answered, recursing handleFeature', { questionId: pendingQuestion.id, answerLength: guardResult.answer.length })
+      return handleFeature(ctx, sanitizedFeature, guardResult.answer, toolContext)
+    }
+
+    // Defense: if guard prevented re-prompt (duplicate message or already prompted),
+    // return text guidance instead of hanging or popping the picker again.
+    if (guardResult.wasAlreadyPrompted || guardResult.wasDuplicateMessage) {
+      logger.info('feature', 'question guard prevented re-prompt', { questionId: pendingQuestion.id, wasAlreadyPrompted: guardResult.wasAlreadyPrompted, wasDuplicateMessage: guardResult.wasDuplicateMessage })
+      return `${formatQuestionPrompt(sanitizedFeature, session, pendingQuestion, convergence.rationale)}\n\n> ${t('commands.feature.guardAlreadyPrompted')}`
     }
   }
 
@@ -257,10 +268,6 @@ async function finalizeFeature(
       }
     }
 
-    if (!hasAskQuestion(toolContext)) {
-      return `${baseResult}\n\n${formatNextStepOptions()}`
-    }
-
     return baseResult
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -291,21 +298,27 @@ async function prepareRequirementModel(
 async function askSingleQuestion(
   session: FeatureSession,
   question: FeatureQuestion,
-  toolContext: FeatureInteractiveToolContext
-): Promise<string | undefined> {
-  const answers = await toolContext.askQuestion({
-    questions: [
-      {
-        question: question.question,
-        header: question.header,
-        options: getRecommendedOptions(session, question),
-        multiple: false,
-        custom: true,
-      },
-    ],
-  })
-
-  return normalizeInteractiveAnswer(answers[0])
+  toolContext: QuestionToolContext
+): Promise<QuestionGuardResult> {
+  return askGuardedQuestion(
+    {
+      sessionID: toolContext.sessionID,
+      messageID: getToolMessageID(toolContext),
+      askQuestion: toolContext.askQuestion,
+    },
+    {
+      id: question.id,
+      header: question.header,
+      question: question.question,
+      options: getRecommendedOptions(session, question),
+      multiple: false,
+      custom: true,
+    },
+    {
+      promptedIds: session.questionPickerPromptedIds,
+      lastMessageId: session.lastConsumedMessageId,
+    },
+  )
 }
 
 async function resolveFeature(ctx: OpenFlowContext, feature: string | undefined, toolContext: unknown): Promise<FeatureResolution> {
@@ -359,8 +372,10 @@ async function resolveFeature(ctx: OpenFlowContext, feature: string | undefined,
 
 function looksLikeFeatureContinuationRequest(value: string): boolean {
   const normalized = value.trim().toLowerCase()
-  return /(?:同意|确认|采用|就按|生成.*文档|proceed|go with|generate.*docs)/iu.test(normalized)
-    && !/(?:实现|开发|新增|添加|修复|登录|优惠券|质量门|前端|预览|命名|阶段|适用)/u.test(value)
+  const continuationKeywords = tArray('signals.feature.continuation.keywords')
+  const excludeKeywords = tArray('signals.feature.continuation.exclude')
+  return new RegExp(`(?:${continuationKeywords.join('|')})`, 'iu').test(normalized)
+    && !new RegExp(`(?:${excludeKeywords.join('|')})`, 'u').test(value)
 }
 
 async function resolveContinuationFeature(ctx: OpenFlowContext, toolContext: unknown): Promise<DerivedFeatureIdentity | undefined> {
@@ -683,13 +698,7 @@ function looksLikeCommandEcho(answer: string): boolean {
   return answer.startsWith('/openflow-') || answer.includes('skill(name="openflow-feature"') || answer.includes("skill(name='openflow-feature'")
 }
 
-function hasAskQuestion(value: unknown): value is FeatureInteractiveToolContext {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  return 'askQuestion' in value && typeof value.askQuestion === 'function'
-}
+// hasAskQuestion moved to ../utils/question-guard.js
 
 async function generateDesignDocument(
   ctx: OpenFlowContext,
@@ -761,32 +770,32 @@ function getToolMessageID(toolContext: unknown): string | undefined {
 async function askPostDesignConfirmation(toolContext: unknown, _model?: RequirementModel): Promise<PostDesignDecision | undefined> {
   if (!hasAskQuestion(toolContext)) return undefined
 
-  const answers = await toolContext.askQuestion({
-    questions: [
-      {
-        question: '设计文档已生成。您希望如何继续？',
-        header: '下一步行动',
-        options: [
-          { label: '进入开发计划', description: '查看推荐命令，手动进入 implementation plan 生成。' },
-          { label: '检查约束充分性', description: '让 assistant/runtime 复查 design.md 与 behavior.md 的约束是否充分。' },
-          { label: '查看文档', description: '先检查已生成的设计文档，再决定后续动作。' },
-        ],
-        multiple: false,
-        custom: false,
-      },
-    ],
-  })
+  const result = await askGuardedQuestion(
+    toolContext,
+    {
+      id: 'post-design-confirmation',
+      header: t('commands.feature.nextStepHeader'),
+      question: t('commands.feature.nextStepQuestion'),
+      options: [
+        { label: t('commands.feature.nextStepOptionPlan'), description: t('commands.feature.nextStepOptionPlanDesc') },
+        { label: t('commands.feature.nextStepOptionReview'), description: t('commands.feature.nextStepOptionReviewDesc') },
+        { label: t('commands.feature.nextStepOptionInspect'), description: t('commands.feature.nextStepOptionInspectDesc') },
+      ],
+      multiple: false,
+      custom: false,
+    },
+  )
 
-  const answer = normalizeInteractiveAnswer(answers[0])
-  if (answer === '进入开发计划') {
+  const answer = result.answer
+  if (answer === t('commands.feature.nextStepOptionPlan')) {
     return 'proceed_to_plan'
   }
 
-  if (answer === '检查约束充分性') {
+  if (answer === t('commands.feature.nextStepOptionReview')) {
     return 'review_docs'
   }
 
-  if (answer === '查看文档') {
+  if (answer === t('commands.feature.nextStepOptionInspect')) {
     return 'inspect'
   }
 
@@ -835,9 +844,9 @@ Assistant/runtime instruction: review whether these constraints are sufficient f
 function formatNextStepOptions(): string {
   return `## Next Step Options
 
-- 进入开发计划: manually run \`/openflow-writing-plan <feature>\` when ready.
-- 检查约束充分性: review \`design.md\` and \`behavior.md\` for constraint sufficiency before planning.
-- 查看文档: inspect the generated design documents first.`
+- ${t('commands.feature.nextStepOptionPlan')}: manually run \`/openflow-writing-plan <feature>\` when ready.
+- ${t('commands.feature.nextStepOptionReview')}: review \`design.md\` and \`behavior.md\` for constraint sufficiency before planning.
+- ${t('commands.feature.nextStepOptionInspect')}: inspect the generated design documents first.`
 }
 
 function formatQuestionPrompt(feature: string, session: FeatureSession, question: FeatureQuestion, rationale?: string): string {
@@ -931,20 +940,18 @@ ${pending}
 Constraints:
 ${constraints}
 
-### Next Step (Advisory)
+## Next Step Options
 
-Design documents are complete. You may proceed to implementation planning when ready.
+Design documents are generated. It is recommended to review design.md and behavior.md first to confirm constraints and boundaries are OK before proceeding to implementation planning.
 
-Suggested user action:
+Please choose the next step:
 
-\`\`\`
-/openflow-writing-plan ${escapeMarkdown(feature)}
-\`\`\`
+1. **Review design documents** — Call Momus to review constraint sufficiency, identify missing or ambiguous items and attempt to fix them
+2. **Proceed to implementation plan** — Run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` to generate the implementation plan
+3. **Ignore** — Take no action for now, continue the current session
 
-To generate an implementation plan, manually run the command above. OpenFlow will read the design context and produce a structured plan.
-
-This is advisory only: it does not block implementation, and the assistant must not invoke "/openflow-writing-plan" automatically unless the user explicitly requests it.`
-}
+> If the design documents need adjustment, choose option 1; if already confirmed OK, choose option 2 to proceed directly to implementation planning.
+`}
 
 function formatGenerationFailure(feature: string, message: string): string {
   return `## Feature Design Pending

@@ -69,6 +69,10 @@ export class SchedulerLoop {
     this.executorRegistry.registerExecutor(type, executor)
   }
 
+  hasExecutor(type: string): boolean {
+    return this.executorRegistry.hasExecutor(type)
+  }
+
   submitTask(input: SubmitTaskInput): string {
     const now = Date.now()
     const taskId = this.createTaskId()

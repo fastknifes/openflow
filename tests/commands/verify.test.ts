@@ -252,6 +252,7 @@ Then:
 
     await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
     await writeFile(join(testDir, '.sisyphus', 'plans', 'demo-feature.md'), '# demo', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'changes', 'demo-feature'), { recursive: true })
     await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
     await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
     await saveAcceptanceState(testDir, createAcceptanceState('demo-feature'))
@@ -260,8 +261,36 @@ Then:
 
     expect(result).toContain('classified_evidence_gaps')
     expect(result).toContain('context_alignment_missing: workflow_stage_missing')
-    expect(result).toContain('changes_workspace_missing: workflow_stage_missing')
     expect(result).toContain('do not create a minimal design artifact just to satisfy verify')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('limited-context code fix reports missing design as limited context without blocking readiness', async () => {
+    const testDir = join(process.cwd(), '.test-verify-limited-context-code-fix')
+    await rm(testDir, { recursive: true, force: true })
+
+    await mkdir(join(testDir, 'src'), { recursive: true })
+    await writeFile(join(testDir, 'src', 'fix.ts'), 'export const fixed = true\n', 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+    await saveAcceptanceState(testDir, {
+      ...createAcceptanceState('demo-feature'),
+      implementationState: {
+        state: 'dirty',
+        updatedAt: new Date().toISOString(),
+        changedFiles: ['src/fix.ts'],
+      },
+    })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-feature')
+    const acceptanceState = await loadAcceptanceState(testDir)
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('context_alignment_missing: limited_context_gap')
+    expect(result).toContain('changes_workspace_missing: limited_context_gap')
+    expect(result).not.toContain('workflow_stage_missing')
+    expect(acceptanceState?.verifyResult?.reasonCodes).toEqual(['all_checks_passed'])
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -374,7 +403,6 @@ Then:
     expect(result).not.toContain('### 失败后的可选操作')
     expect(acceptanceState?.acceptedFailures).toBe(true)
     expect(acceptanceState?.verifyResult?.readiness).toBe(VerifyReadinessStatus.Ready)
-    expect(acceptanceState?.verifyResult?.reasonCodes).toContain('changes_workspace_missing')
     expect(acceptanceState?.verifyResult?.reasonCodes).toContain('context_alignment_missing')
 
     await rm(testDir, { recursive: true, force: true })
@@ -504,7 +532,7 @@ Then:
     await rm(testDir, { recursive: true, force: true })
   })
 
-  test('returns not_ready when issue clarification is missing in issue mode', async () => {
+  test('does not hard-block generic issue-mode state when issue clarification is absent', async () => {
     const testDir = join(process.cwd(), '.test-verify-issue-missing-clarification')
     await rm(testDir, { recursive: true, force: true })
 
@@ -515,8 +543,8 @@ Then:
 
     const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'demo-issue')
 
-    expect(result).toContain('- status: not_ready')
-    expect(result).toContain('issue_clarification_missing')
+    expect(result).toContain('- status: ready')
+    expect(result).not.toContain('issue_clarification_missing')
 
     await rm(testDir, { recursive: true, force: true })
   })

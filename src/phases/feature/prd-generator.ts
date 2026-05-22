@@ -6,6 +6,7 @@ import type { OpenFlowContext } from '../../types.js'
 import { defaultConfig } from '../../types.js'
 import { getChangeWorkspacePath } from '../../config.js'
 import { RequirementModelSchema, type RequirementModel } from './requirement-model.js'
+import { t } from '../../i18n/index.js'
 
 export interface PrdGenerationOptions {
   feature: string
@@ -250,19 +251,19 @@ function fillPrdTemplate(template: string, data: TemplateData): string {
   // Fill in sections from design info
   const backgroundAndGoals = buildBackgroundAndGoalsSection(data.designInfo)
   if (backgroundAndGoals) {
-    result = fillSection(result, '1.1 背景与目标', backgroundAndGoals)
+    result = fillSection(result, t('templates.prd.sectionBackgroundGoals'), backgroundAndGoals)
   }
   
   const overviewAndConstraints = buildOverviewAndConstraintsSection(data.designInfo)
   if (overviewAndConstraints) {
-    result = fillSection(result, '1.2 功能概述', overviewAndConstraints)
+    result = fillSection(result, t('templates.prd.sectionOverview'), overviewAndConstraints)
   }
   
   if (data.designInfo.successCriteria.length > 0) {
     const criteriaList = data.designInfo.successCriteria
       .map(c => `- [ ] ${c}`)
       .join('\n')
-    result = fillSection(result, '3.1 功能验收', criteriaList)
+    result = fillSection(result, t('templates.prd.sectionAcceptance'), criteriaList)
   }
   
   if (data.designInfo.components.length > 0) {
@@ -351,11 +352,11 @@ function getDefaultPrdTemplate(): string {
 
 ## 1. 功能描述
 
-### 1.1 背景与目标
+### ${t('templates.prd.sectionBackgroundGoals')}
 
 *此功能要解决什么问题？为什么需要这个功能？*
 
-### 1.2 功能概述
+### ${t('templates.prd.sectionOverview')}
 
 *简要描述功能的核心内容*
 
@@ -372,7 +373,7 @@ function getDefaultPrdTemplate(): string {
 
 ## 3. 验收标准
 
-### 3.1 功能验收
+### ${t('templates.prd.sectionAcceptance')}
 
 - [ ] 验收标准 1
 - [ ] 验收标准 2
@@ -401,14 +402,14 @@ function getDefaultPrdTemplate(): string {
 
 ---
 
-## 5. 优先级
+## ${t('templates.prd.sectionPriority')}
 
 | 功能 | 优先级 | 说明 |
 |------|--------|------|
-| 核心功能 | P0 | 必须实现 |
-| 重要功能 | P1 | 应该实现 |
-| 增强功能 | P2 | 可以实现 |
-| 未来功能 | P3 | 暂不实现 |
+| 核心功能 | P0 | ${t('templates.prd.priorityP0')} |
+| 重要功能 | P1 | ${t('templates.prd.priorityP1')} |
+| 增强功能 | P2 | ${t('templates.prd.priorityP2')} |
+| 未来功能 | P3 | ${t('templates.prd.priorityP3')} |
 
 ---
 

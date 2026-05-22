@@ -333,8 +333,8 @@ describe('chat-message hook', () => {
     }
   })
 
-  test('dispatches /openflow-issue command and returns early', async () => {
-    const root = join(process.cwd(), '.test-chat-issue-dispatch')
+  test('does not dispatch removed /openflow-issue command', async () => {
+    const root = join(process.cwd(), '.test-chat-issue-removed')
     await rm(root, { recursive: true, force: true })
     await mkdir(root, { recursive: true })
     try {
@@ -344,14 +344,8 @@ describe('chat-message hook', () => {
 
       await hook(createInput('session-issue'), output)
 
-      // Should dispatch to handleIssue and return compact issue report
-      expect((output.parts[0] as { text?: string }).text).toContain('## OpenFlow Issue')
-      expect((output.parts[0] as { text?: string }).text).toContain('some-problem')
-      expect((output.parts[0] as { text?: string }).text).toContain('### Issue')
-      // Should not contain feature suggestion
-      expect((output.parts[0] as { text?: string }).text).not.toContain('Feature Design Suggested')
-      // Should not contain the old placeholder
-      expect((output.parts[0] as { text?: string }).text).not.toContain('not yet implemented')
+      // Should NOT contain issue report; instead falls through or shows feature suggestion
+      expect((output.parts[0] as { text?: string }).text).not.toContain('## OpenFlow Issue')
     } finally {
       await rm(root, { recursive: true, force: true })
     }

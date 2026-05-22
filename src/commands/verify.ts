@@ -1,5 +1,10 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'
+import { t } from '../i18n/index.js'
+
+const execAsync = promisify(exec)
 import type {
   AcceptanceState,
   AdapterConfig,
@@ -37,6 +42,12 @@ import {
   readGuardianRepairs,
   readSessionPending,
 } from '../drift/state-store.js'
+import {
+  askGuardedQuestion,
+  hasAskQuestion,
+  type QuestionToolContext,
+} from '../utils/question-guard.js'
+import { logger } from '../utils/logger.js'
 
 export interface VerifyReadinessResult {
   status: VerifyReadinessStatus
@@ -45,23 +56,6 @@ export interface VerifyReadinessResult {
   nextStep: string
   decisionType?: VerifyDecisionType
   classifiedEvidenceGaps?: ClassifiedEvidenceGap[]
-}
-
-interface VerifyQuestionInput {
-  question: string
-  header: string
-  options: Array<{
-    label: string
-    description: string
-  }>
-  multiple?: boolean
-  custom?: boolean
-}
-
-type VerifyQuestionAnswer = string[]
-
-export interface VerifyInteractiveToolContext {
-  askQuestion(input: { questions: VerifyQuestionInput[] }): Promise<VerifyQuestionAnswer[]>
 }
 
 export type VerifyFailureOption = 'fix' | 'accept'
@@ -236,6 +230,7 @@ async function collectEvidence(
   const currentExists = await fileExists(currentPath)
   const decisionsExists = await fileExists(decisionsPath)
   const issueClarificationExists = await fileExists(issueClarificationPath)
+  const hasLegacyIssueWorkspace = mode !== 'feature' && issueClarificationExists
   const issueSignals = evaluateIssueSignals(acceptanceState, issueClarificationExists)
 
   const changeBehaviorPath = path.join(changesPath, 'behavior.md')
@@ -244,6 +239,9 @@ async function collectEvidence(
   // Context alignment: feature mode uses design.md, issue/mixed mode uses issue-clarification.md
   const designPath = path.join(changesPath, 'design.md')
   const designExists = changesExists && await fileExists(designPath)
+  const isLimitedContext = mode === 'feature'
+    ? !designExists && await hasImplementationLikeWorkspaceChange(ctx.directory, acceptanceState)
+    : !issueClarificationExists
   const contextAlignmentPresent = mode === 'feature'
     ? designExists
     : issueClarificationExists
@@ -261,7 +259,7 @@ async function collectEvidence(
     `stable_constraints_decisions ${decisionsExists ? '✅' : '⚠️'} (${decisionsExists ? 'found' : 'missing'} docs/decisions)`,
   ]
 
-  if (mode !== 'feature') {
+  if (hasLegacyIssueWorkspace) {
     checksRun.push(
       `issue_clarification_exists ${issueClarificationExists ? '✅' : '⚠️'} (${issueClarificationExists ? 'found' : 'missing'} docs/changes/${changeDir}/${ISSUE_CLARIFICATION_FILENAME})`,
       `root_cause_closure ${issueSignals.rootCauseClosed ? '✅' : '⚠️'} (${issueSignals.rootCauseDetail})`,
@@ -304,10 +302,10 @@ async function collectEvidence(
   const missingEvidence: string[] = []
   if (!contextAlignmentPresent) missingEvidence.push('context alignment artifact')
   if (!changesExists) missingEvidence.push('change workspace')
-  if (mode !== 'feature' && !issueClarificationExists) missingEvidence.push('issue clarification')
+  if (hasLegacyIssueWorkspace && !issueClarificationExists) missingEvidence.push('issue clarification')
 
   const issueFailures: string[] = []
-  if (mode !== 'feature') {
+  if (hasLegacyIssueWorkspace) {
     if (!issueSignals.rootCauseClosed) issueFailures.push('root cause closure')
     if (!issueSignals.semanticContractIntact) issueFailures.push('semantic contract integrity')
     if (!issueSignals.recommendedActionExecuted) issueFailures.push('recommended action execution')
@@ -334,9 +332,11 @@ async function collectEvidence(
 
   const classifiedEvidenceGaps = classifyEvidenceGaps({
     mode,
+    isLimitedContext,
     contextAlignmentPresent,
     changesExists,
     issueClarificationExists,
+    hasLegacyIssueWorkspace,
     issueFailures,
     failedChecks,
     behaviorScenarios,
@@ -389,9 +389,11 @@ async function collectEvidence(
 
 function classifyEvidenceGaps(input: {
   mode: IssueMode
+  isLimitedContext?: boolean
   contextAlignmentPresent: boolean
   changesExists: boolean
   issueClarificationExists: boolean
+  hasLegacyIssueWorkspace?: boolean
   issueFailures: string[]
   failedChecks: VerifyEvidenceCheckResult[]
   behaviorScenarios: BehaviorScenarioCheckResult[] | undefined
@@ -401,11 +403,15 @@ function classifyEvidenceGaps(input: {
   if (!input.contextAlignmentPresent) {
     gaps.push({
       code: 'context_alignment_missing',
-      kind: input.mode === 'feature' ? 'workflow_stage_missing' : 'blocking_evidence_gap',
-      message: input.mode === 'feature'
+      kind: input.isLimitedContext ? 'limited_context_gap' : input.mode === 'feature' ? 'workflow_stage_missing' : 'blocking_evidence_gap',
+      message: input.isLimitedContext
+        ? 'Limited-context verification is missing design/context alignment; semantic readiness cannot be claimed from this technical result.'
+        : input.mode === 'feature'
         ? 'Feature verification is missing design/context alignment from the workflow stage.'
         : 'Issue verification is missing issue clarification context alignment.',
-      nextStep: input.mode === 'feature'
+      nextStep: input.isLimitedContext
+        ? 'Do not create workflow artifacts merely to satisfy verify; use the explicit workflow only if semantic readiness is required.'
+        : input.mode === 'feature'
         ? 'Enter the explicit feature workflow or planning workflow; do not create a minimal design artifact just to satisfy verify.'
         : 'Provide issue clarification before resolving or archiving the issue.',
     })
@@ -414,13 +420,13 @@ function classifyEvidenceGaps(input: {
   if (!input.changesExists) {
     gaps.push({
       code: 'changes_workspace_missing',
-      kind: input.mode === 'feature' ? 'workflow_stage_missing' : 'limited_context_gap',
+      kind: input.isLimitedContext || input.mode !== 'feature' ? 'limited_context_gap' : 'workflow_stage_missing',
       message: 'Change workspace is missing, so document alignment evidence is incomplete.',
       nextStep: 'Use the explicit OpenFlow workflow stage if semantic readiness is required; otherwise treat this as limited context.',
     })
   }
 
-  if (input.mode !== 'feature' && !input.issueClarificationExists) {
+  if (input.hasLegacyIssueWorkspace && !input.issueClarificationExists) {
     gaps.push({
       code: 'issue_clarification_missing',
       kind: 'blocking_evidence_gap',
@@ -717,8 +723,9 @@ export async function classifyReadiness(
 
   const governanceStatus = matchingAcceptanceState?.governancePromotionStatus ?? 'none'
   const hasPendingDecisionPromotion = hasUnapprovedDecisionPromotion(matchingAcceptanceState)
+  const hasLegacyIssueWorkspace = mode !== 'feature' && hasIssueClarificationEvidence(evidence)
 
-  if (mode !== 'feature' && governanceStatus === 'needs_decision') {
+  if (hasLegacyIssueWorkspace && governanceStatus === 'needs_decision') {
     return {
       status: VerifyReadinessStatus.NeedsDecision,
       reasonCodes: ['governance_needs_decision'],
@@ -728,13 +735,19 @@ export async function classifyReadiness(
   }
 
   const reasonCodes: string[] = []
-  if (!didNamedCheckPass(evidence, 'context_alignment')) {
+  const limitedContextGapCodes = new Set(
+    evidence.classifiedEvidenceGaps
+      ?.filter(gap => gap.kind === 'limited_context_gap')
+      .map(gap => gap.code) ?? [],
+  )
+
+  if (!didNamedCheckPass(evidence, 'context_alignment') && !limitedContextGapCodes.has('context_alignment_missing')) {
     reasonCodes.push('context_alignment_missing')
   }
-  if (!didNamedCheckPass(evidence, 'changes_workspace')) {
+  if (!didNamedCheckPass(evidence, 'changes_workspace') && !limitedContextGapCodes.has('changes_workspace_missing')) {
     reasonCodes.push('changes_workspace_missing')
   }
-  if (mode !== 'feature') {
+  if (hasLegacyIssueWorkspace) {
     if (!didNamedCheckPass(evidence, 'issue_clarification_exists')) {
       reasonCodes.push('issue_clarification_missing')
     }
@@ -818,7 +831,7 @@ export async function classifyReadiness(
       reasonCodes,
       reason: `Verification is blocked for ${feature}: ${reasonCodes.join(', ')}.`,
       nextStep: acceptedFailures && !hasHardBlocker
-        ? '已接受当前失败项；如需恢复严格验证，请修复失败检查后重新运行 /openflow-verify。'
+        ? t('commands.verify.acceptedFailuresMessage')
         : hasHardBlocker
           ? 'Provide the missing issue intent artifact or secure the required governance approval, then rerun /openflow-verify.'
           : 'Fix the failing checks or missing evidence, then rerun /openflow-verify.',
@@ -1018,23 +1031,25 @@ ${readiness.nextStep}${nextCommandBlock}
 `
 }
 
-async function askVerifyFailureQuestion(toolContext: VerifyInteractiveToolContext): Promise<VerifyFailureOption | undefined> {
-  const answers = await toolContext.askQuestion({
-    questions: [
-      {
-        question: '验证发现未通过的检查。请选择下一步操作：',
-        header: '验证失败',
-        options: [
-          { label: '修复问题', description: '修复失败的检查，然后重新运行验证' },
-          { label: '标记成功', description: '接受当前失败，标记验证通过' },
-        ],
-        multiple: false,
-        custom: false,
-      },
-    ],
-  })
+async function askVerifyFailureQuestion(toolContext: QuestionToolContext): Promise<VerifyFailureOption | undefined> {
+  logger.info('quality_gate', 'invoking verify failure question picker')
+  const result = await askGuardedQuestion(
+    toolContext,
+    {
+      id: 'verify-failure-next-step',
+      header: t('commands.verify.failureHeader'),
+      question: t('commands.verify.failureQuestion'),
+      options: [
+        { label: t('commands.verify.failureOptionFix'), description: t('commands.verify.failureOptionFixDesc') },
+        { label: t('commands.verify.failureOptionAccept'), description: t('commands.verify.failureOptionAcceptDesc') },
+      ],
+      multiple: false,
+      custom: false,
+    },
+  )
+  logger.info('quality_gate', 'verify failure question result', { hasAnswer: !!result.answer, wasAlreadyPrompted: result.wasAlreadyPrompted, wasDuplicateMessage: result.wasDuplicateMessage })
 
-  return normalizeVerifyFailureOption(answers[0])
+  return normalizeVerifyFailureOption(result.answer ? [result.answer] : undefined)
 }
 
 function normalizeVerifyFailureOption(answer: VerifyQuestionAnswer | undefined): VerifyFailureOption | undefined {
@@ -1054,13 +1069,7 @@ function normalizeVerifyFailureOption(answer: VerifyQuestionAnswer | undefined):
   return undefined
 }
 
-function hasAskQuestion(value: unknown): value is VerifyInteractiveToolContext {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  return 'askQuestion' in value && typeof value.askQuestion === 'function'
-}
+// hasAskQuestion moved to ../utils/question-guard.js
 
 function formatFailedCheckSummary(result: VerifyEvidenceCheckResult): string {
   return `${result.category}:${result.name}`
@@ -1121,6 +1130,43 @@ function collectConstraintNames(evidence: VerifyEvidencePacket): string[] {
 
 function buildEvidenceSummary(evidence: VerifyEvidencePacket, readiness: VerifyReadinessResult): string {
   return `${readiness.reason} ${evidence.knownRisksOrMissingEvidence}`.trim()
+}
+
+function hasIssueClarificationEvidence(evidence: VerifyEvidencePacket): boolean {
+  return evidence.checksRun.some(check => check.startsWith('issue_clarification_exists ✅'))
+}
+
+async function hasImplementationLikeWorkspaceChange(
+  projectDir: string,
+  acceptanceState?: AcceptanceState | null,
+): Promise<boolean> {
+  const acceptanceFiles = acceptanceState?.implementationState?.changedFiles ?? []
+  if (acceptanceFiles.some(isImplementationLikeFile)) return true
+
+  try {
+    const { stdout: diffOut } = await execAsync('git diff --name-only HEAD --relative', {
+      cwd: projectDir,
+      encoding: 'utf-8',
+    })
+    const { stdout: untrackedOut } = await execAsync('git ls-files --others --exclude-standard --relative', {
+      cwd: projectDir,
+      encoding: 'utf-8',
+    })
+
+    const diffFiles = diffOut.trim().split('\n').filter(Boolean)
+    const untrackedFiles = untrackedOut.trim().split('\n').filter(Boolean)
+
+    return [...diffFiles, ...untrackedFiles].some(isImplementationLikeFile)
+  } catch {
+    return false
+  }
+}
+
+function isImplementationLikeFile(file: string): boolean {
+  const normalized = file.replace(/\\/g, '/')
+  return /(^|\/)(tests?|__tests__)\//u.test(normalized)
+    || /\.(test|spec)\.(ts|tsx|js|jsx)$/u.test(normalized)
+    || (normalized.startsWith('src/') && /\.(ts|tsx|js|jsx|mjs|cjs)$/u.test(normalized))
 }
 
 function resolveVerifyMode(detectedMode: IssueMode, acceptanceState: AcceptanceState | null): IssueMode {

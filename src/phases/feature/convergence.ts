@@ -1,5 +1,6 @@
 import type { FeatureQuestion, FeatureQuestionId, FeatureSession } from './state-machine.js'
 import { QUESTIONS } from './state-machine.js'
+import { tArray } from '../../i18n/index.js'
 
 export type ConvergenceDecisionKind = 'ask_next' | 'ready_to_generate' | 'draft_with_assumptions'
 
@@ -71,11 +72,13 @@ export function detectFlowSignal(input?: string): 'none' | 'proceed' | 'product-
   const normalized = input?.trim().toLowerCase() ?? ''
   if (!normalized) return 'none'
 
-  if (/(跳过|不用问|先按你的判断|按你的判断|先生成|生成草稿|继续生成|proceed|generate anyway|draft|skip)/i.test(normalized)) {
+  const skipSignals = tArray('signals.convergence.skip')
+  if (new RegExp(`(${skipSignals.join('|')})`, 'i').test(normalized)) {
     return 'proceed'
   }
 
-  if (/(不讨论代码|代码层面|看不懂|产品|体验|workflow|experience)/i.test(normalized)) {
+  const productLevelSignals = tArray('signals.convergence.productLevel')
+  if (new RegExp(`(${productLevelSignals.join('|')})`, 'i').test(normalized)) {
     return 'product-level'
   }
 

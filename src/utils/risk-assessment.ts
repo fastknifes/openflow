@@ -188,7 +188,7 @@ export function decideQualityGateRisk(input: QualityGateRiskInput): QualityGateR
     reasons.push(RISK_REASON_CODES.LOW_TRIVIAL_CHANGE)
   }
 
-  const shouldHarden = risk === 'high'
+  const shouldHarden = risk === 'high' || reasons.includes(RISK_REASON_CODES.COMPLEXITY_COMPLEX)
 
   return { risk, shouldHarden, reasons }
 }

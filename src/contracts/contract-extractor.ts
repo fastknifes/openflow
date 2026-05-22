@@ -13,6 +13,7 @@ import type {
 import { RequirementModelSchema, type RequirementModel } from '../phases/feature/requirement-model.js'
 
 import { resolveChangeUnitDir } from '../utils/change-units.js'
+import { tArray } from '../i18n/index.js'
 
 export class ContractExtractor {
   async extract(feature: string, projectDir: string): Promise<OpenFlowContract | null> {
@@ -399,22 +400,21 @@ export class ContractExtractor {
 
   private detectConstraintLine(line: string): 'blocking' | 'warning' | false {
     const lower = line.toLowerCase()
+    const blockingKeywords = tArray('contract.blockingKeywords')
 
     if (
       lower.includes('locked') ||
       lower.includes('must not change') ||
-      lower.includes('禁止修改') ||
-      lower.includes('不可变') ||
-      lower.includes('不得修改') ||
+      blockingKeywords.some(keyword => lower.includes(keyword)) ||
       /@stable/.test(lower) ||
       /@public/.test(lower)
     ) {
       return 'blocking'
     }
+    const warningKeywords = tArray('contract.warningKeywords')
     if (
       lower.includes('forbidden dependency') ||
-      lower.includes('禁止依赖') ||
-      lower.includes('不得引入')
+      warningKeywords.some(keyword => lower.includes(keyword))
     ) {
       return 'warning'
     }
@@ -482,12 +482,12 @@ export class ContractExtractor {
       const trimmed = line.trim()
 
       const lower = trimmed.toLowerCase()
+      const decisionKeywords = tArray('contract.decisionKeywords')
       const hasKeyword =
         lower.includes('must') ||
         lower.includes('shall') ||
         lower.includes('required') ||
-        lower.includes('禁止') ||
-        lower.includes('不得')
+        decisionKeywords.some(keyword => lower.includes(keyword))
       if (!hasKeyword) continue
 
       const isItem = /^\d+\.\s/.test(trimmed) || /^-\s/.test(trimmed)

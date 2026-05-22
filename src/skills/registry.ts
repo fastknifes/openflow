@@ -3,7 +3,6 @@ import { getWritingPlanSkill } from './writing-plan-skill.js'
 import { getBrainstormSkill } from './brainstorm-skill.js'
 import { getQualityGateSkill } from './quality-gate-skill.js'
 import { getAiReflectionSkill } from './ai-reflection-skill.js'
-import { getIssueSkill } from './issue-skill.js'
 import { getTddSkill } from './tdd-skill.js'
 import { OPENFLOW_REGISTERED_SKILL_NAMES } from '../commands/manifest.js'
 import type { OpenFlowConfig } from '../types.js'
@@ -13,7 +12,6 @@ const SKILL_FACTORIES = {
   'openflow-brainstorm': getBrainstormSkill,
   'openflow-quality-gate': getQualityGateSkill,
   'openflow-ai-reflection': getAiReflectionSkill,
-  'openflow-issue': getIssueSkill,
   'openflow-tdd': getTddSkill,
 } as const satisfies Record<typeof OPENFLOW_REGISTERED_SKILL_NAMES[number], () => SkillInfo>
 

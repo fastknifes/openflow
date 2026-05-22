@@ -239,19 +239,10 @@ describe('openflow-ai-reflection skill registration contract', () => {
   })
 })
 
-describe('openflow-issue skill registration contract', () => {
-  test('findSkillByName discovers openflow-issue in the skill registry', () => {
+describe('openflow-issue skill is not registered', () => {
+  test('findSkillByName returns undefined for openflow-issue', () => {
     const skill = findSkillByName('openflow-issue')
-    expect(skill).toBeDefined()
-    expect(skill!.name).toBe('openflow-issue')
-    expect(skill!.description).toContain('Issue investigation')
-  })
-
-  test('openflow-issue skill describes packet-first investigation and no auto-archive', () => {
-    const skill = findSkillByName('openflow-issue')
-    expect(skill).toBeDefined()
-    expect(skill!.content).toContain('issue packet')
-    expect(skill!.content).toContain('Do not auto-archive')
+    expect(skill).toBeUndefined()
   })
 })
 

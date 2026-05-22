@@ -1,4 +1,5 @@
 import type { RequirementModel } from './requirement-model.js'
+import { t, tArray } from '../../i18n/index.js'
 
 const NOT_SPECIFIED = 'Not specified.'
 
@@ -29,7 +30,7 @@ function renderDraftNotice(model: RequirementModel): string {
     return ''
   }
 
-  return ['> **Draft with Assumptions / 带假设的草稿**', '', 'This document contains assumptions that must not be treated as confirmed implementation constraints.'].join('\n')
+  return [`> **${t('templates.draftWarning.title')}**`, '', 'This document contains assumptions that must not be treated as confirmed implementation constraints.'].join('\n')
 }
 
 function renderConsensusSummary(model: RequirementModel): string {
@@ -250,14 +251,23 @@ function isFrontendRequirement(model: RequirementModel): boolean {
     return false
   }
 
+  const frontendKeywords = tArray('design.frontendKeywords')
+
   return /\b(frontend|front-end|ui|ux|page|screen|react|vue|svelte|css|html|form|modal|button|sidebar|navbar|dashboard)\b/.test(haystack)
-    || /前端|页面|界面|交互|组件|表单|按钮|弹窗|侧边栏|导航|看板|仪表盘/.test(haystack)
+    || new RegExp(frontendKeywords.join('|')).test(haystack)
 }
 
 function hasFrontendNegation(value: string): boolean {
+  const frontendKeywords = tArray('design.frontendKeywords')
+  const negationKeywords = tArray('design.frontendNegationKeywords')
+  const negativeVerbKeywords = negationKeywords.filter(keyword => /^不(?:涉及|修改|变更|影响|包含)$/u.test(keyword))
+  const noNeedKeywords = negationKeywords.filter(keyword => keyword === '无需')
+  const trailingNegationKeywords = negationKeywords.filter(keyword => /^(?:不受影响|不变|排除|不在范围)$/u.test(keyword))
+  const frontendPattern = frontendKeywords.join('|')
+
   return /\b(no|without|not|exclude|avoid|skip)\s+(frontend|front-end|ui|ux|page|screen|react|vue|svelte|css|html|form|modal|button|sidebar|navbar|dashboard)\b/.test(value)
     || /\b(frontend|front-end|ui|ux|page|screen|react|vue|svelte|css|html|form|modal|button|sidebar|navbar|dashboard)\b.{0,24}\b(not affected|unchanged|out of scope|not impacted)\b/.test(value)
-    || /不(涉及|修改|变更|影响|包含).{0,12}(前端|页面|界面|交互|组件)|无需.{0,12}(前端|页面|界面|交互|组件)|(前端|页面|界面|交互|组件).{0,12}(不受影响|不变|排除|不在范围)/.test(value)
+    || new RegExp(`${negativeVerbKeywords.join('|')}.{0,12}(${frontendPattern})|${noNeedKeywords.join('|')}.{0,12}(${frontendPattern})|(${frontendPattern}).{0,12}(${trailingNegationKeywords.join('|')})`).test(value)
 }
 
 function firstMeaningful(items: string[]): string | undefined {

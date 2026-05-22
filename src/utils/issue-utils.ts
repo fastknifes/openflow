@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { resolveChangeUnitDir } from './change-units.js'
-import type { IssueClassification, IssuePacket, IssueWorkflowStatus } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type IssueClassification, type IssuePacket, type IssueWorkflowStatus } from '../types.js'
 
 export const ISSUE_CLARIFICATION_FILENAME = 'issue-clarification.md'
 export const ISSUE_PACKET_FILENAME = 'issue-packet.json'
@@ -185,6 +185,32 @@ export async function detectMode(
   if (designExists && clarificationExists) return 'mixed'
   if (clarificationExists) return 'issue'
   return 'feature'
+}
+
+export async function detectPostHocIssueMode(
+  ctx: { directory: string },
+  feature: string,
+  acceptanceState: AcceptanceState | null,
+): Promise<boolean> {
+  if (!acceptanceState) return false
+
+  const hasPostHocMarker = acceptanceState.postHocIssue === true
+    || acceptanceState.qualityGateApplicability?.status === 'limited_context'
+  if (!hasPostHocMarker) return false
+
+  const isReady = acceptanceState.readiness === VerifyReadinessStatus.Ready
+    || acceptanceState.readiness === VerifyReadinessStatus.ReadyWithDocUpdates
+  if (!isReady) return false
+
+  const changeDir = await resolveChangeUnitDir(ctx.directory, feature)
+  const basePath = `${ctx.directory}${ctx.directory.endsWith('/') || ctx.directory.endsWith('\\') ? '' : '/'}`
+  const workspacePath = `${basePath}docs/changes/${changeDir}`
+
+  const designExists = await pathExists(path.join(workspacePath, 'design.md'))
+  if (designExists) return false
+
+  const clarificationExists = await pathExists(path.join(workspacePath, ISSUE_CLARIFICATION_FILENAME))
+  return !clarificationExists
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

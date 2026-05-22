@@ -58,6 +58,7 @@ export interface ArchiveConfig {
   enabled: boolean
   drift_check?: boolean
   auto_promote_current?: boolean
+  sync_promotion_fallback?: boolean
 }
 
 export interface AcceptanceConfig {
@@ -70,6 +71,20 @@ export interface AcceptanceConfig {
 
 export interface WritingPlanConfig {
   enabled: boolean
+}
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type LogOutput = 'console' | 'file' | 'both'
+export type LogFormat = 'text' | 'json'
+export type LogCategory = 'harden' | 'session' | 'quality_gate' | 'config' | 'drift' | 'orchestrator' | 'feature' | 'archive' | 'default'
+
+export interface LoggingConfig {
+  level: LogLevel
+  output: LogOutput
+  path: string
+  maxFiles: number
+  categories: LogCategory[] | 'all'
+  format: LogFormat
 }
 
 export interface GuardianConfig {
@@ -254,6 +269,8 @@ export interface PathsConfig {
   worktree_dir: string
 }
 
+export type OpenFlowLocale = 'zh-CN' | 'en'
+
 export interface OpenFlowConfig {
   paths: PathsConfig
   feature: FeatureConfig
@@ -264,10 +281,13 @@ export interface OpenFlowConfig {
   writingPlan: WritingPlanConfig
   harden: HardenConfig
   guardian: DriftGuardianConfig
+  logging?: LoggingConfig
   executionQualityPolicy?: ExecutionQualityPolicyConfig
+  locale?: OpenFlowLocale
 }
 
 export const defaultConfig: OpenFlowConfig = {
+  locale: 'zh-CN',
   paths: {
     changes: 'docs/changes',
     archive: 'docs/archive',
@@ -334,6 +354,14 @@ export const defaultConfig: OpenFlowConfig = {
     auto_fix: true,
     max_retries: 3,
     contract_cache: true,
+  },
+  logging: {
+    level: 'info',
+    output: 'console',
+    path: '.sisyphus/openflow/logs',
+    maxFiles: 7,
+    categories: 'all',
+    format: 'text',
   },
   executionQualityPolicy: {
     enabled: true,
@@ -702,6 +730,8 @@ export interface AcceptanceState {
   hardenSummary?: string
   /** Quality-gate orchestration applicability metadata; not verify readiness. */
   qualityGateApplicability?: QualityGateApplicabilityResult
+  /** Marks limited-context technical readiness for later post-hoc issue archive handling. */
+  postHocIssue?: boolean
   /** Implementation state for stateful quality guardrails */
   implementationState?: ImplementationStateMetadata
 }

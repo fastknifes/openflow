@@ -18,6 +18,7 @@ import { computeChangedFilesSet, computeDiffHash, hasMaterialChange } from '../u
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { appendOmittedDiffManifest, extractDiffBlockPaths, scopeDiffToFeature } from '../utils/diff-scope.js'
+import { logger } from '../utils/logger.js'
 
 interface HardenArgs {
   full?: boolean
@@ -98,6 +99,7 @@ export async function handleHarden(
   sessionID?: string,
 ): Promise<string> {
   if (!ctx.config.harden.enabled) {
+    logger.info('harden', 'harden disabled by config')
     return `## Harden Result
 
 Status: rejected
@@ -108,8 +110,10 @@ Summary: harden is disabled in OpenFlow configuration.`
 
   const featureFromArgs = extractFeatureArg(args)
   const resolvedFeature = feature?.trim() || featureFromArgs || await findActiveFeature(ctx)
+  logger.info('harden', 'feature resolved', { feature: resolvedFeature })
 
   if (!resolvedFeature) {
+    logger.warn('harden', 'no feature resolved, skipping harden')
     return `## Harden Result
 
 Status: rejected
@@ -121,8 +125,10 @@ Summary: no feature was provided and no active plan was found under .sisyphus/pl
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
   const planPath = getPlanPath(ctx.directory, sanitizedFeature)
   const planExists = await fileExists(planPath)
+  logger.info('harden', 'plan file check', { planPath, exists: planExists })
 
   if (!planExists) {
+    logger.warn('harden', 'plan file missing', { planPath })
     return `## Harden Result
 
 Status: rejected
@@ -144,6 +150,7 @@ Summary: missing plan file \
     ? appendOmittedDiffManifest(diffStr, diffScope.omittedPaths)
     : diffStr
   const complexity = gradeComplexity(planContent, reviewerDiffStr)
+  logger.info('harden', 'complexity graded', { complexity, feature: sanitizedFeature })
   const planSummary = compressInput(buildPlanSummary(planContent, designLookup.content), 12000)
 
   const currentSessionID = sessionID
@@ -155,6 +162,7 @@ Summary: missing plan file \
   activeModels = nextModels
 
   if (complexity === 'trivial' && !args?.full) {
+    logger.info('harden', 'harden skipped due to trivial complexity', { complexity, feature: sanitizedFeature })
     return `## Harden Result
 
 Status: rejected
@@ -164,6 +172,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
   }
 
   if (complexity === 'simple' && !args?.full) {
+    logger.info('harden', 'entering simple mode', { feature: sanitizedFeature })
     const coordinatorSessionID = await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`, currentSessionID)
     const reviewerSessionID = await createHardenSession(ctx, sanitizedFeature, 'Harden Round 1/1 - Reviewer', coordinatorSessionID)
     const reviewerPrompt = buildReviewerPrompt(planSummary, reviewerDiffStr)
@@ -191,33 +200,55 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
     const dispositions = parseExecutorDisposition(execution.text, findings)
     applyExecutorDispositions(findings, dispositions)
     trace.push(buildTraceEntry(1, 'deep', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'disposition_reported'))
+
+    // Simple mode: one-time rebuttal for rejected findings (no multi-round repair loop)
+    const rebuttalResult = await runRejectedFindingRebuttals(
+      ctx,
+      sanitizedFeature,
+      coordinatorSessionID,
+      1,
+      1,
+      ctx.config.harden.maxArgumentRoundsPerFinding,
+      findings,
+      dispositions,
+      planSummary,
+      trace,
+    )
+    const combinedFixReport = [execution.text, rebuttalResult.report].filter(part => part.trim()).join('\n\n')
+    const hasUnresolvedRebuttal = rebuttalResult.needsHuman
+
     const status = grouped.ambiguous.length > 0
       ? 'needs_human'
-      : grouped.actionable.length > 0
+      : hasUnresolvedRebuttal
         ? 'needs_human'
-        : findings.length > 0
-          ? 'pass_with_risks'
-          : 'pass'
+        : grouped.actionable.length > 0
+          ? 'needs_human'
+          : findings.length > 0
+            ? 'pass_with_risks'
+            : 'pass'
 
     return formatHardenResult({
       status,
-      rounds: [{ round: 1, findings, fixReport: execution.text }],
-      budgetConsumed: review.tokens + execution.tokens,
-      totalTokensConsumed: review.tokens + execution.tokens,
+      rounds: [{ round: 1, findings, fixReport: combinedFixReport || execution.text }],
+      budgetConsumed: review.tokens + execution.tokens + rebuttalResult.tokens,
+      totalTokensConsumed: review.tokens + execution.tokens + rebuttalResult.tokens,
       summary: summarizeReviewOutcome(findings, grouped.actionable.length, grouped.ambiguous.length, grouped.nonBlocking.length),
       stopReason: grouped.ambiguous.length > 0
         ? 'review_inconclusive'
-        : grouped.actionable.length > 0
-          ? 'actionable_findings'
-          : findings.length > 0
-            ? 'non_blocking_only'
-            : 'no_findings',
+        : hasUnresolvedRebuttal
+          ? 'rebuttal_unresolved'
+          : grouped.actionable.length > 0
+            ? 'actionable_findings'
+            : findings.length > 0
+              ? 'non_blocking_only'
+              : 'no_findings',
       sessionID: coordinatorSessionID,
       coordinatorSessionId: coordinatorSessionID,
       trace,
     })
   }
 
+  logger.info('harden', 'entering standard adversarial mode', { feature: sanitizedFeature, maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds })
   const coordinatorSessionID = await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`, currentSessionID)
   const diffScopeContext: DiffScopeContext = {
     directory: ctx.directory,
@@ -264,6 +295,7 @@ async function runAdversarialLoop(
   const reviewContext = compressInput(planSummary, 16000)
 
   for (let round = 1; round <= args.maxRounds; round++) {
+    logger.info('harden', 'starting harden round', { round, maxRounds: args.maxRounds })
     const freshScopedDiff = readScopedReviewerDiff(diffScopeContext)
     const rollingDiff = compressInput(freshScopedDiff.reviewerDiff, 24000)
     const reviewerPrompt = buildReviewerPrompt(reviewContext, rollingDiff, priorFindings, fixReport)
@@ -284,11 +316,18 @@ async function runAdversarialLoop(
     totalTokensConsumed += review.tokens
 
     const grouped = classifyFindings(review.text, [])
+    logger.info('harden', 'reviewer completed', {
+      round,
+      actionableCount: grouped.actionable.length,
+      ambiguousCount: grouped.ambiguous.length,
+      nonBlockingCount: grouped.nonBlocking.length,
+    })
     const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
     trace.push(buildTraceEntry(round, 'oracle', review, inferReviewerStopReasonCandidate(grouped)))
 
     if (grouped.ambiguous.length > 0 && grouped.actionable.length === 0 && !containsExecutorReviewableLevel(review.text)) {
       rounds.push({ round, findings })
+      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'review_inconclusive', totalTokensConsumed })
       return {
         status: 'needs_human',
         rounds,
@@ -306,6 +345,12 @@ async function runAdversarialLoop(
       rounds.push({ round, findings: [] })
       const finalStateGroups = groupFinalFindingStates(rounds)
       const hasUnresolvedFindings = finalStateGroups.unresolved_must_fix.length > 0 || finalStateGroups.unresolved_needs_decision.length > 0
+      logger.info('harden', 'harden loop terminated', {
+        round,
+        status: hasUnresolvedFindings ? 'needs_human' : 'pass',
+        stopReason: hasUnresolvedFindings ? 'review_inconclusive' : 'no_findings',
+        totalTokensConsumed,
+      })
       return {
         status: hasUnresolvedFindings ? 'needs_human' : 'pass',
         rounds,
@@ -326,6 +371,7 @@ async function runAdversarialLoop(
       rounds.push({ round, findings })
 
       if (nonBlockingRounds >= 2) {
+        logger.info('harden', 'harden loop terminated', { round, status: 'pass_with_risks', stopReason: 'non_blocking_only', totalTokensConsumed })
         return {
           status: 'pass_with_risks',
           rounds,
@@ -406,6 +452,7 @@ async function runAdversarialLoop(
     if (containsExecutorFailureSignal(execution.text)) {
       rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
       if (!materialChange) {
+        logger.info('harden', 'harden loop terminated', { round, status: 'executor_blocked', stopReason: 'executor_blocked', totalTokensConsumed })
         return {
           status: 'executor_blocked',
           rounds,
@@ -419,6 +466,7 @@ async function runAdversarialLoop(
         }
       }
 
+      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'executor_failure_signal', totalTokensConsumed })
       return {
         status: 'needs_human',
         rounds,
@@ -434,6 +482,7 @@ async function runAdversarialLoop(
 
     if (repeatedKeys.length > 0 && !materialChange) {
       rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
+      logger.info('harden', 'harden loop terminated', { round, status: 'review_inconclusive', stopReason: 'repeated_finding_no_material_fix', totalTokensConsumed })
       return {
         status: 'review_inconclusive',
         rounds,
@@ -450,6 +499,7 @@ async function runAdversarialLoop(
     rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
 
     if (rebuttalResult.needsHuman) {
+      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'review_inconclusive', totalTokensConsumed })
       return {
         status: 'needs_human',
         rounds,
@@ -466,6 +516,7 @@ async function runAdversarialLoop(
     fixReport = combinedFixReport || execution.text
   }
 
+  logger.info('harden', 'harden loop terminated', { round: args.maxRounds, status: 'max_rounds_reached', stopReason: 'max_rounds_reached', totalTokensConsumed })
   return {
     status: 'max_rounds_reached',
     rounds,
@@ -708,6 +759,7 @@ async function runRejectedFindingRebuttals(
   let needsHuman = false
   const reportParts: string[] = []
   const rejectedFindings = findings.filter(finding => dispositions.get(findingKey(finding))?.verdict === 'reject')
+  logger.debug('harden', 'starting rejected finding rebuttals', { round, rejectedCount: rejectedFindings.length })
 
   for (const finding of rejectedFindings) {
     const disposition = dispositions.get(findingKey(finding))
@@ -1045,11 +1097,19 @@ async function createHardenSession(
   if (parentSessionID) {
     createBody.parentID = parentSessionID
   }
-  const created = await client.session.create({
-    query: { directory: ctx.directory },
-    body: createBody,
-  })
-  return extractSessionID(created)
+  logger.debug('session', 'creating harden sub-session', { title, parentSessionID })
+  try {
+    const created = await client.session.create({
+      query: { directory: ctx.directory },
+      body: createBody,
+    })
+    const extractedID = extractSessionID(created)
+    logger.debug('session', 'harden sub-session created', { sessionID: extractedID, title, parentSessionID })
+    return extractedID
+  } catch (error) {
+    logger.error('session', 'failed to create harden sub-session', error instanceof Error ? error : new Error(String(error)), { title, parentSessionID })
+    throw error
+  }
 }
 
 async function runAgentTask(
@@ -1062,11 +1122,21 @@ async function runAgentTask(
 ): Promise<AgentRunResult> {
   const client = getSessionClient(ctx)
   const promptPayload = buildPromptPayload(sessionID, systemPrompt, userPrompt, agent, model, ctx.directory)
-  const response = await client.session.prompt(promptPayload)
-
-  return {
-    text: extractText(response),
-    tokens: extractTokens(response),
+  logger.debug('harden', 'running agent task', { sessionID, agent, model })
+  try {
+    const response = await client.session.prompt(promptPayload)
+    const result = {
+      text: extractText(response),
+      tokens: extractTokens(response),
+    }
+    logger.debug('harden', 'agent task completed', { sessionID, agent, textLength: result.text.length, tokens: result.tokens })
+    if (!result.text) {
+      logger.warn('harden', 'agent task returned empty text', { sessionID, agent })
+    }
+    return result
+  } catch (error) {
+    logger.error('harden', 'agent task failed', error instanceof Error ? error : new Error(String(error)), { sessionID, agent })
+    throw error
   }
 }
 

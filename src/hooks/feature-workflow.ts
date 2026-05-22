@@ -485,8 +485,8 @@ function extractFeature(value?: string): string | undefined {
 }
 
 function resolveCommonFeatureAlias(value: string): string | undefined {
-  if (/登录/u.test(value)) return 'user-login'
-  if (/代理平台/u.test(value)) return 'agent-platform'
+  if (/登录|login/iu.test(value)) return 'user-login'
+  if (/代理平台|agent.platform/iu.test(value)) return 'agent-platform'
   return undefined
 }
 

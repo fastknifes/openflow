@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { OpenFlowConfig, SecurityCheckType, QualityCheckType } from './types.js'
 import { defaultConfig } from './types.js'
 import { validateConfigPath } from './utils/security.js'
+import { setLocale } from './i18n/index.js'
 import {
   ensureArchiveUnitDir,
   ensureChangeUnitDir,
@@ -25,7 +26,6 @@ const CHANGE_ARTIFACT_FILENAMES: Readonly<Record<ChangeArtifactKind, string>> = 
 
 const VALID_SECURITY_CHECKS = ['secret', 'vuln', 'dependency'] as const satisfies readonly SecurityCheckType[]
 const VALID_QUALITY_CHECKS = ['lint', 'typecheck', 'test', 'format'] as const satisfies readonly QualityCheckType[]
-
 const configPathSchema = z.string().refine((value) => {
   try {
     validateConfigPath(value)
@@ -43,6 +43,27 @@ const adapterConfigSchema = z.object({
   timeout: z.number().min(1).optional(),
   onMissing: z.enum(['skip', 'fail']).optional(),
 }).partial()
+
+const logCategorySchema = z.enum([
+  'harden',
+  'session',
+  'quality_gate',
+  'config',
+  'drift',
+  'orchestrator',
+  'feature',
+  'archive',
+  'default',
+])
+
+const loggingConfigSchema = z.object({
+  level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+  output: z.enum(['console', 'file', 'both']).optional(),
+  path: configPathSchema.optional(),
+  maxFiles: z.number().min(1).optional(),
+  categories: z.union([z.array(logCategorySchema), z.literal('all')]).optional(),
+  format: z.enum(['text', 'json']).optional(),
+}).strict().optional()
 
 const pathsConfigSchema = z.object({
   changes: configPathSchema.optional(),
@@ -131,10 +152,12 @@ const openFlowConfigOverrideSchema: z.ZodType<Record<string, unknown>> = z.objec
     max_retries: z.number().min(1).max(10).optional(),
     contract_cache: z.boolean().optional(),
   }).strict().optional(),
+  logging: loggingConfigSchema.optional(),
   executionQualityPolicy: z.object({
     enabled: z.boolean().optional(),
     defaultMode: z.enum(['fast', 'balanced', 'strict']).optional(),
   }).strict().optional(),
+  locale: z.enum(['zh-CN', 'en']).optional(),
 }).strict()
 
 function deepMerge<T extends Record<string, unknown>>(
@@ -199,7 +222,11 @@ export function loadConfig(opencodeConfig?: Record<string, unknown>): OpenFlowCo
     defaultConfig as unknown as Record<string, unknown>,
     sanitized as unknown as Record<string, unknown>
   )
-  return merged as unknown as OpenFlowConfig
+  const config = merged as unknown as OpenFlowConfig
+  if (config.locale) {
+    setLocale(config.locale)
+  }
+  return config
 }
 
 export function getBuildsPath(projectDir: string, config?: OpenFlowConfig): string {

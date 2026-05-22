@@ -47,13 +47,13 @@ describe('OpenFlowPlugin', () => {
            'openflow-feature',
            'openflow-implement',
             'openflow-init',
-           'openflow-issue',
           'openflow-migrate-docs',
            'openflow-quality-gate',
            'openflow-writing-plan',
         ].sort())
-    // Negative-scope: openflow-reflect must NOT be registered as a plugin tool
+    // Negative-scope: openflow-reflect and openflow-issue must NOT be registered as plugin tools
     expect(Object.keys(plugin.tool)).not.toContain('openflow-reflect')
+    expect(Object.keys(plugin.tool)).not.toContain('openflow-issue')
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()
@@ -188,13 +188,13 @@ describe('OpenFlowPlugin', () => {
            'openflow-feature',
            'openflow-implement',
             'openflow-init',
-           'openflow-issue',
           'openflow-migrate-docs',
            'openflow-quality-gate',
            'openflow-writing-plan',
         ].sort())
-    // Negative-scope: openflow-reflect must NOT be registered as a plugin tool
+    // Negative-scope: openflow-reflect and openflow-issue must NOT be registered as plugin tools
     expect(Object.keys(plugin.tool)).not.toContain('openflow-reflect')
+    expect(Object.keys(plugin.tool)).not.toContain('openflow-issue')
     expect(plugin['chat.message']).toBeFunction()
     expect(plugin['tool.execute.before']).toBeFunction()
     expect(plugin['tool.execute.after']).toBeFunction()

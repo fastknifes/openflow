@@ -110,6 +110,53 @@ async function setupReadinessArchiveFixture(
   }
 }
 
+async function setupPostHocIssueArchiveFixture(
+  testDir: string,
+  feature: string,
+  options: {
+    readiness: VerifyReadinessStatus
+    pendingDocUpdates?: Array<{ file: string; timestamp: string; reason?: string }>
+  }
+): Promise<OpenFlowContext> {
+  await rm(testDir, { recursive: true, force: true })
+
+  // Intentionally create the workspace without design.md or issue-clarification.md.
+  await mkdir(join(testDir, 'docs', 'changes', feature), { recursive: true })
+
+  await mkdir(join(testDir, '.sisyphus', 'builds', 'build-20260522-000001'), { recursive: true })
+  await writeFile(
+    join(testDir, '.sisyphus', 'builds', 'build-20260522-000001', 'changes.json'),
+    JSON.stringify([{ filePath: `src/${feature}.ts`, tool: 'edit', timestamp: Date.now() }]),
+    'utf-8'
+  )
+
+  await saveFutureAcceptanceState(testDir, {
+    feature,
+    phase: 'acceptance',
+    phaseStartedAt: '2026-05-22T00:00:00.000Z',
+    readiness: options.readiness,
+    pendingDocUpdates: options.pendingDocUpdates ?? [],
+    postHocIssue: true,
+    verifyResult: {
+      readiness: VerifyReadinessStatus.Ready,
+      reasonCodes: ['all_checks_passed'],
+      evidenceSummary: 'Mock verify passed',
+      constraintsChecked: ['test'],
+      verifiedAt: new Date().toISOString(),
+    },
+  })
+
+  return {
+    ...createContext(),
+    directory: testDir,
+    worktree: testDir,
+    config: {
+      ...defaultConfig,
+      archive: { ...defaultConfig.archive, drift_check: false },
+    },
+  }
+}
+
 async function createImplementationRun(ctx: OpenFlowContext, feature: string, status: 'running' | 'ready_for_archive' | 'archived') {
   return implementationRunStore.createRun(ctx, {
     feature,
@@ -1079,10 +1126,10 @@ describe('archive command', () => {
 
     const result = await handleArchive(ctx, 'promo-feature')
     expect(result).toContain('Current Promotion')
-    expect(result).toContain('applied: 2')
+    expect(result).toContain('applied: 12')
     expect(result).toContain('no reliable historical design match')
 
-    const promotedDesign = await readFile(join(testDir, 'docs', 'current', 'design', 'promo-feature', 'design.md'), 'utf-8')
+    const promotedDesign = await readFile(join(testDir, 'docs', 'current', 'feature-lifecycle', 'design.md'), 'utf-8')
     expect(promotedDesign).toContain('New Design')
 
     await rm(testDir, { recursive: true, force: true })
@@ -1092,9 +1139,9 @@ describe('archive command', () => {
     const testDir = join(process.cwd(), '.test-archive-current-synthesis')
     await rm(testDir, { recursive: true, force: true })
 
-    await mkdir(join(testDir, 'docs', 'current', 'design', 'archive-history'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'current', 'archive-authority'), { recursive: true })
     await writeFile(
-      join(testDir, 'docs', 'current', 'design', 'archive-history', '20260401-design.md'),
+      join(testDir, 'docs', 'current', 'archive-authority', 'design.md'),
       '# Historical Archive Flow\n\n## Problem Statement\nOlder wording for archive evidence.\n\n## Legacy Notes\nKeep this note.\n',
       'utf-8'
     )
@@ -1127,17 +1174,17 @@ describe('archive command', () => {
 
     const result = await handleArchive(ctx, 'synth-feature')
     expect(result).toContain('Current Promotion')
-    expect(result).toContain('applied: 1')
+    expect(result).toContain('applied: 6')
     expect(result).toContain('reliable historical design match')
 
-    const promotedDesign = await readFile(join(testDir, 'docs', 'current', 'design', 'archive-history', '20260401-design.md'), 'utf-8')
+    const promotedDesign = await readFile(join(testDir, 'docs', 'current', 'archive-authority', 'design.md'), 'utf-8')
     expect(promotedDesign).toContain('Refresh current docs from archive evidence.')
     expect(promotedDesign).toContain('## Verification')
     expect(promotedDesign).toContain('Run archive QA checks.')
     expect(promotedDesign).toContain('## Legacy Notes')
     expect(promotedDesign).toContain('Keep this note.')
 
-    await expect(access(join(testDir, 'docs', 'current', 'design', 'synth-feature', 'design.md'))).rejects.toBeDefined()
+    await expect(access(join(testDir, 'docs', 'current', 'feature-lifecycle', 'design.md'))).resolves.toBeNull()
 
     await rm(testDir, { recursive: true, force: true })
   })
@@ -1392,6 +1439,77 @@ Enforce synchronous cache invalidation barrier after write commit.
     expect(archivedResolution).toBe(preexistingResolutionContent)
     expect(archivedResolution).toContain('Race condition between write completion and cache invalidation signal.')
     expect(archivedResolution).toContain('Added synchronous invalidation barrier after write commit.')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('archives post-hoc issue readiness without design or issue clarification', async () => {
+    const feature = 'post-hoc-issue-ready'
+    const testDir = join(process.cwd(), '.test-archive-post-hoc-issue-ready')
+    const ctx = await setupPostHocIssueArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.Ready,
+    })
+
+    await expect(access(join(testDir, 'docs', 'changes', feature, 'design.md'))).rejects.toBeDefined()
+    await expect(access(join(testDir, 'docs', 'changes', feature, 'issue-clarification.md'))).rejects.toBeDefined()
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+    expect(result).toContain('Archive mode: post_hoc_issue')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'issue-resolution.md'))).resolves.toBeNull()
+    await expect(access(join(archiveDir, 'issue-clarification.md'))).resolves.toBeNull()
+
+    const resolution = await readFile(join(archiveDir, 'issue-resolution.md'), 'utf-8')
+    expect(resolution).toContain('Symptom')
+    expect(resolution).toContain('Root Cause')
+    expect(resolution).toContain('Implementation Summary')
+    expect(resolution).toContain('Changed Files')
+    expect(resolution).toContain('Verification Evidence')
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks post-hoc issue archive when readiness is not_ready', async () => {
+    const feature = 'post-hoc-issue-not-ready'
+    const testDir = join(process.cwd(), '.test-archive-post-hoc-issue-not-ready')
+    const ctx = await setupPostHocIssueArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.NotReady,
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Blocked')
+    expect(result).toContain('not ready')
+    await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('generates post-hoc issue promotion candidate when pending doc updates exist', async () => {
+    const feature = 'post-hoc-issue-pending-doc-updates'
+    const testDir = join(process.cwd(), '.test-archive-post-hoc-issue-pending-doc-updates')
+    const pendingDocUpdate = {
+      file: 'docs/current/spec/post-hoc-issue.md',
+      timestamp: '2026-05-22T00:00:00.000Z',
+      reason: 'post-hoc semantic rule needs governance review',
+    }
+    const ctx = await setupPostHocIssueArchiveFixture(testDir, feature, {
+      readiness: VerifyReadinessStatus.Ready,
+      pendingDocUpdates: [pendingDocUpdate],
+    })
+
+    const result = await handleArchive(ctx, feature)
+    expect(result).toContain('Archive Complete')
+    expect(result).toContain('Archive mode: post_hoc_issue')
+
+    const archiveDir = await resolveArchiveDir(testDir, feature)
+    await expect(access(join(archiveDir, 'promotion-candidate.md'))).resolves.toBeNull()
+
+    const promotionCandidate = await readFile(join(archiveDir, 'promotion-candidate.md'), 'utf-8')
+    expect(promotionCandidate).toContain('Pending Document Updates')
+    expect(promotionCandidate).toContain(pendingDocUpdate.file)
+    expect(promotionCandidate).toContain(pendingDocUpdate.reason)
 
     await rm(testDir, { recursive: true, force: true })
   })

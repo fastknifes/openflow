@@ -20,6 +20,7 @@ const STALE_COMMAND_FILES = [
   'openflow-harden.md',
   'openflow-verify.md',
   'openflow-brainstorm.md',
+  'openflow-issue.md',
 ]
 
 function getGlobalConfigDir(): string {
