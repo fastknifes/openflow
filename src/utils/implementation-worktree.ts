@@ -8,6 +8,7 @@ export interface WorktreeResult {
   success: boolean
   path: string
   branch?: string
+  baseRef?: string
   error?: string
 }
 
@@ -15,16 +16,59 @@ export function resolveWorktreePath(ctx: OpenFlowContext, feature: string): stri
   return join(ctx.directory, ctx.config.paths.worktree_dir, feature)
 }
 
+export function getCurrentBaseRef(ctx: OpenFlowContext): string | undefined {
+  try {
+    return execSync('git rev-parse HEAD', {
+      cwd: ctx.directory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
+  } catch {
+    return undefined
+  }
+}
+
+export function isMainWorktreeDirty(ctx: OpenFlowContext): boolean {
+  try {
+    const status = execSync('git status --porcelain', {
+      cwd: ctx.directory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
+    return status.length > 0
+  } catch {
+    return false
+  }
+}
+
 export async function createWorktree(ctx: OpenFlowContext, feature: string): Promise<WorktreeResult> {
   const path = resolveWorktreePath(ctx, feature)
   const branch = `openflow/implement-${feature}`
-  logger.debug('orchestrator', 'createWorktree started', { feature, path, branch })
+  const baseRef = getCurrentBaseRef(ctx)
+  logger.debug('orchestrator', 'createWorktree started', { feature, path, branch, baseRef })
+
+  // Check for existing valid worktree — reuse if resumable
+  const existing = await verifyWorktree(ctx, feature)
+  if (existing.exists) {
+    logger.info('orchestrator', 'reusing existing worktree', { feature, path, branch })
+    return baseRef ? { success: true, path, branch, baseRef } : { success: true, path, branch }
+  }
+
+  // Conflicting path: directory exists but is not a valid git worktree
+  if (existsSync(path)) {
+    logger.warn('orchestrator', 'conflicting worktree path exists but is not a valid git worktree', { feature, path })
+    return {
+      success: false,
+      path,
+      error: `Worktree path exists but is not a valid git worktree: ${path}. Remove it or use a different feature name.`,
+    }
+  }
 
   try {
     logger.debug('orchestrator', 'git worktree add with new branch', { path, branch })
     runGitCommand(ctx, ['worktree', 'add', '-b', branch, path])
     logger.info('orchestrator', 'worktree created with new branch', { path, branch })
-    return { success: true, path, branch }
+    return baseRef ? { success: true, path, branch, baseRef } : { success: true, path, branch }
   } catch (firstErr: unknown) {
     if (!isBranchAlreadyExistsError(firstErr)) {
       logger.warn('orchestrator', 'git worktree add failed', { feature, error: errorMessage(firstErr) })
@@ -35,7 +79,7 @@ export async function createWorktree(ctx: OpenFlowContext, feature: string): Pro
     try {
       runGitCommand(ctx, ['worktree', 'add', path, branch])
       logger.info('orchestrator', 'worktree created with existing branch', { path, branch })
-      return { success: true, path, branch }
+      return baseRef ? { success: true, path, branch, baseRef } : { success: true, path, branch }
     } catch (secondErr: unknown) {
       logger.warn('orchestrator', 'git worktree add with existing branch failed', { feature, error: errorMessage(secondErr) })
       return { success: false, path, branch, error: errorMessage(secondErr) }

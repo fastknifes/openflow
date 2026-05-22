@@ -1052,7 +1052,7 @@ async function askVerifyFailureQuestion(toolContext: QuestionToolContext): Promi
   return normalizeVerifyFailureOption(result.answer ? [result.answer] : undefined)
 }
 
-function normalizeVerifyFailureOption(answer: VerifyQuestionAnswer | undefined): VerifyFailureOption | undefined {
+function normalizeVerifyFailureOption(answer: string[] | undefined): VerifyFailureOption | undefined {
   const firstAnswer = answer?.[0]?.trim().toLowerCase()
   if (!firstAnswer) {
     return undefined

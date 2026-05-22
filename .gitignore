@@ -39,6 +39,10 @@ coverage/
 # OpenCode (IDE managed)
 .opencode/
 
+# VitePress site build output & cache
+website/.vitepress/dist
+website/.vitepress/cache
+
 # Packaged tgz
 *.tgz
 .gitnexus

@@ -14,6 +14,22 @@ export interface RunStore {
 
 export type ImplementationRunUpdates = Partial<Omit<ImplementationRun, 'runID' | 'startedAt' | 'updatedAt'>>
 
+export async function recordObservation(
+  ctx: OpenFlowContext,
+  observationsPath: string,
+  message: string,
+): Promise<void> {
+  try {
+    const fullPath = join(ctx.directory, observationsPath)
+    const timestamp = new Date().toISOString()
+    const line = `[${timestamp}] ${message}\n`
+    await fs.mkdir(join(fullPath, '..'), { recursive: true })
+    await fs.appendFile(fullPath, line, 'utf8')
+  } catch {
+    // Observations are best-effort; do not fail the caller.
+  }
+}
+
 const TERMINAL_STATUSES = new Set<ImplementationRunStatus>(['archived', 'blocked', 'cancelled'])
 
 let lastTimestamp = 0

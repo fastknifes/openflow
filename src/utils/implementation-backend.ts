@@ -2,7 +2,7 @@ import { appendFile, mkdir } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import type { ToolContext } from '@opencode-ai/plugin/tool'
 import type { ImplementationBackend, ImplementationRun, OpenFlowContext } from '../types.js'
-import { implementationRunStore } from './implementation-run.js'
+import { implementationRunStore, recordObservation } from './implementation-run.js'
 import { detectOmoEnvironment } from './omo-detection.js'
 import { logger } from './logger.js'
 
@@ -50,6 +50,7 @@ export async function handoffToBackend(
     logger.info('orchestrator', 'non-omo environment, using opencode backend', { runID: run.runID, command })
     await updateRunBackend(ctx, run, 'opencode', command, 'running')
     await recordBackendEvent(ctx, run, { type: 'backend_started', backend: 'opencode', command })
+    await recordObservation(ctx, run.observationsPath, `Backend started: opencode (${command})`)
     return { success: true, backend: 'opencode', command }
   }
 
@@ -73,12 +74,14 @@ export async function handoffToBackend(
     logger.info('orchestrator', 'omo handoff prompt sent successfully', { runID: run.runID, command })
     await updateRunBackend(ctx, run, 'omo', command, 'running')
     await recordBackendEvent(ctx, run, { type: 'backend_started', backend: 'omo', command })
+    await recordObservation(ctx, run.observationsPath, `Backend started: omo (${command})`)
     return { success: true, backend: 'omo', command }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     logger.error('orchestrator', 'omo handoff prompt failed', error instanceof Error ? error : new Error(message), { runID: run.runID, command })
     await updateRunBackend(ctx, run, 'omo', command, 'blocked')
     await recordBackendEvent(ctx, run, { type: 'backend_failed', backend: 'omo', command, error: message })
+    await recordObservation(ctx, run.observationsPath, `Backend failed: omo (${command}) — ${message}`)
     return { success: false, backend: 'omo', error: message }
   } finally {
     activeHandoffs.delete(toolContext.sessionID)

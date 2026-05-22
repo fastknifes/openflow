@@ -662,12 +662,6 @@ function getRecommendedOptions(session: FeatureSession, question: PersistedFeatu
   }))
 }
 
-function normalizeInteractiveAnswer(answer: FeatureQuestionAnswer | undefined): string | undefined {
-  const firstAnswer = answer?.[0]?.trim()
-  if (!firstAnswer) return undefined
-  return firstAnswer.replace(/\s*\(Recommended\)$/u, '').trim()
-}
-
 function validatePendingAnswer(session: FeatureSession, answer: string): string | undefined {
   const pendingQuestion = getPendingQuestion(session)
   if (!pendingQuestion || !isAwaitingFormalAnswer(session)) {
@@ -839,14 +833,6 @@ Constraints from the requirement model:
 ${constraints}
 
 Assistant/runtime instruction: review whether these constraints are sufficient for implementation planning, including boundary coverage, compatibility expectations, and unresolved confirmations. Do not assume constraint sufficiency without checking the generated documents.`
-}
-
-function formatNextStepOptions(): string {
-  return `## Next Step Options
-
-- ${t('commands.feature.nextStepOptionPlan')}: manually run \`/openflow-writing-plan <feature>\` when ready.
-- ${t('commands.feature.nextStepOptionReview')}: review \`design.md\` and \`behavior.md\` for constraint sufficiency before planning.
-- ${t('commands.feature.nextStepOptionInspect')}: inspect the generated design documents first.`
 }
 
 function formatQuestionPrompt(feature: string, session: FeatureSession, question: FeatureQuestion, rationale?: string): string {

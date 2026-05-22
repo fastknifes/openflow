@@ -1,3 +1,7 @@
+---
+layout: doc
+---
+
 # OpenFlow Installation Guide for LLM Agents
 
 > Copy this entire document into your LLM agent (Claude Code, AmpCode, Cursor, Trae, Qoder, etc.) — the agent will handle everything automatically.

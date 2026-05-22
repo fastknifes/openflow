@@ -294,23 +294,6 @@ function isAdrCandidateQuestion(question: PendingQuestion): boolean {
   )
 }
 
-function hasAskQuestion(value: unknown): value is ClarifyInteractiveToolContext {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  return 'askQuestion' in value && typeof value.askQuestion === 'function'
-}
-
-function normalizeInteractiveAnswer(answer: ClarifyQuestionAnswer | undefined): string | undefined {
-  const first = answer?.[0]?.trim()
-  if (!first) {
-    return undefined
-  }
-
-  return first.replace(/\s*\(Recommended\)$/u, '').trim()
-}
-
 function formatQuestionPrompt(state: MigrationState, question: PendingQuestion): string {
   const options = getQuestionOptions(question)
     .map((option) => `- ${option.label}: ${option.description}`)

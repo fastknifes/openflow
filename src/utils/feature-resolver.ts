@@ -3,6 +3,7 @@ import * as path from 'node:path'
 import type { OpenFlowContext } from '../types.js'
 import { createSafePath, sanitizeFeatureName } from './security.js'
 import { tArray, tPatterns } from '../i18n/index.js'
+import { loadAcceptanceState } from './acceptance-state.js'
 
 export interface DerivedFeatureIdentity {
   slug: string
@@ -19,6 +20,19 @@ export interface FeatureSessionCandidate {
 }
 
 export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | null> {
+  // Strategy 1: Check acceptance state for active feature with matching plan
+  const acceptanceState = await loadAcceptanceState(ctx.directory)
+  if (acceptanceState?.feature) {
+    const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${acceptanceState.feature}.md`)
+    try {
+      await fs.access(planPath)
+      return acceptanceState.feature
+    } catch {
+      // Acceptance state feature doesn't have a matching plan file, continue to strategy 2
+    }
+  }
+
+  // Strategy 2: Find the most recently modified plan file
   const plansDir = createSafePath(ctx.directory, ctx.config.paths.plans)
   try {
     const files = await fs.readdir(plansDir)

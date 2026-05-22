@@ -1,9 +1,9 @@
 import { join } from 'node:path'
 import type { ToolContext } from '@opencode-ai/plugin/tool'
 import type { ImplementationBackend, ImplementationContainerMode, OpenFlowContext } from '../types.js'
-import { implementationRunStore } from '../utils/implementation-run.js'
+import { implementationRunStore, recordObservation } from '../utils/implementation-run.js'
 import { handoffToBackend } from '../utils/implementation-backend.js'
-import { createWorktree } from '../utils/implementation-worktree.js'
+import { createWorktree, isMainWorktreeDirty } from '../utils/implementation-worktree.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { sanitizeFeatureName } from '../utils/security.js'
 import type { ImplementationRun } from '../types.js'
@@ -25,7 +25,9 @@ export async function handleImplement(
   toolContext?: ToolContext,
   observer?: ImplementObserver,
 ): Promise<string> {
-  logger.info('orchestrator', 'handleImplement started', { feature, useWorktree, sessionID: toolContext?.sessionID })
+  // Default to worktree mode per design policy
+  const effectiveUseWorktree = useWorktree ?? true
+  logger.info('orchestrator', 'handleImplement started', { feature, useWorktree: effectiveUseWorktree, sessionID: toolContext?.sessionID })
 
   // ── 1. Resolve feature name ─────────────────────────────────────────────
   const providedFeature = stripCommandTokens(feature)
@@ -45,9 +47,12 @@ export async function handleImplement(
   const agent = toolContext?.agent ?? ''
   let directory = ctx.directory
   let worktree: string | undefined
-  const containerMode: ImplementationContainerMode = useWorktree ? 'worktree' : 'session'
+  let branch: string | undefined
+  let baseRef: string | undefined
+  const containerMode: ImplementationContainerMode = effectiveUseWorktree ? 'worktree' : 'session'
   const backend: ImplementationBackend = 'opencode'
   const backendCommand = ''
+  const mainWorktreeDirty = isMainWorktreeDirty(ctx)
 
   // ── 3. Check for duplicate active run ───────────────────────────────────
   logger.debug('orchestrator', 'checking for duplicate active run', { sanitizedFeature, sessionID: sessionID || undefined })
@@ -68,14 +73,21 @@ export async function handleImplement(
     ].join('\n')
   }
 
-  // ── 4. Optionally create worktree ───────────────────────────────────────
-  if (useWorktree) {
+  // ── 4. Prepare scoped paths ─────────────────────────────────────────────
+  const eventsPath = join('.sisyphus', 'openflow', 'events', `${sanitizedFeature}.jsonl`)
+  const observationsPath = join('.sisyphus', 'openflow', 'observations', `${sanitizedFeature}.jsonl`)
+
+  // ── 5. Optionally create worktree ───────────────────────────────────────
+  if (effectiveUseWorktree) {
     logger.debug('orchestrator', 'creating worktree', { feature: sanitizedFeature })
     const result = await createWorktree(ctx, sanitizedFeature)
     if (result.success) {
       directory = result.path
       worktree = result.path
-      logger.info('orchestrator', 'worktree created', { path: result.path, branch: result.branch })
+      branch = result.branch
+      baseRef = result.baseRef
+      logger.info('orchestrator', 'worktree created', { path: result.path, branch: result.branch, baseRef })
+      await recordObservation(ctx, observationsPath, `Worktree ${worktree ? 'reused' : 'created'} for feature ${sanitizedFeature} at ${result.path} (branch: ${result.branch ?? 'unknown'})`)
     } else {
       logger.warn('orchestrator', 'worktree creation failed', { feature: sanitizedFeature, error: result.error })
       return [
@@ -89,10 +101,8 @@ export async function handleImplement(
     }
   }
 
-  // ── 5. Create ImplementationRun ─────────────────────────────────────────
+  // ── 6. Create ImplementationRun ─────────────────────────────────────────
   // Use feature-scoped paths; the runID will be assigned by the store.
-  const eventsPath = join('.sisyphus', 'openflow', 'events', `${sanitizedFeature}.jsonl`)
-  const observationsPath = join('.sisyphus', 'openflow', 'observations', `${sanitizedFeature}.jsonl`)
 
   logger.debug('orchestrator', 'creating implementation run', { sanitizedFeature, directory, worktree, containerMode })
   let run: ImplementationRun
@@ -104,10 +114,15 @@ export async function handleImplement(
       agent,
       directory,
       ...(worktree ? { worktree } : {}),
+      ...(branch ? { branch } : {}),
+      ...(baseRef ? { baseRef } : {}),
       backend,
       backendCommand,
       status: 'created',
       containerMode,
+      worktreeKind: worktree ? 'derived' : 'main',
+      ...(worktree ? { commitPolicy: 'archive' as const, cleanupPolicy: 'archive_remove' as const } : {}),
+      mainWorktreeDirty,
       eventsPath,
       observationsPath,
     })
@@ -117,6 +132,7 @@ export async function handleImplement(
   }
 
   logger.info('orchestrator', 'implementation run created', { runID: run.runID, feature: sanitizedFeature, directory, worktree })
+  await recordObservation(ctx, observationsPath, `Implementation run ${run.runID} created for ${sanitizedFeature} (backend: ${backend}, containerMode: ${containerMode})`)
 
   // ── 6. Set active run in observer ───────────────────────────────────────
   if (observer) {
@@ -131,6 +147,7 @@ export async function handleImplement(
     try {
       handoffResult = await handoffToBackend(ctx, run, toolContext)
       logger.info('orchestrator', 'backend handoff completed', { runID: run.runID, success: handoffResult.success, backend: handoffResult.backend, command: handoffResult.command })
+      await recordObservation(ctx, observationsPath, `Backend handoff ${handoffResult.success ? 'succeeded' : 'failed'} for run ${run.runID} (${handoffResult.backend}${handoffResult.command ? ` / ${handoffResult.command}` : ''})`)
       // Refresh observer with the persisted run (backendCommand updated by handoffToBackend)
       const updatedRun = await implementationRunStore.getRun(ctx, run.runID)
       if (updatedRun && observer) {
@@ -164,7 +181,7 @@ export async function handleImplement(
     `- **Backend**: ${handoffResult.backend}`,
     `- **Status**: created`,
     `- **Container Mode**: ${containerMode}`,
-    useWorktree && worktree ? `- **Worktree**: \`${worktree}\`` : '',
+    effectiveUseWorktree && worktree ? `- **Worktree**: \`${worktree}\`` : '',
     `- **Directory**: \`${directory}\``,
     handoffResult.command ? `- **Backend Command**: \`${handoffResult.command}\`` : '',
     '',

@@ -671,6 +671,10 @@ export interface ImplementationRun {
   directory: string
   /** Git worktree path if using worktree isolation */
   worktree?: string
+  /** Git branch used for the worktree */
+  branch?: string
+  /** Base ref (git HEAD) when the worktree was created */
+  baseRef?: string
   /** Backend executing the run */
   backend: ImplementationBackend
   /** Command used to invoke the backend */
@@ -679,6 +683,14 @@ export interface ImplementationRun {
   status: ImplementationRunStatus
   /** Isolation mode for the run */
   containerMode: ImplementationContainerMode
+  /** Worktree kind: main worktree or derived worktree */
+  worktreeKind?: 'main' | 'derived'
+  /** Commit policy for this run */
+  commitPolicy?: 'archive'
+  /** Cleanup policy for the worktree */
+  cleanupPolicy?: string
+  /** Whether the main worktree was dirty before isolated execution began */
+  mainWorktreeDirty?: boolean
   /** ISO-8601 timestamp when run was created */
   startedAt: string
   /** ISO-8601 timestamp when run was last updated */

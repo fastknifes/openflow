@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { type AcceptanceState, type CurrentPromotionSuggestion, type ImplementationRun, type OpenFlowContext, type PhasedChanges, VerifyReadinessStatus } from '../types.js'
@@ -98,7 +99,21 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const hasAcceptedKnownIssues = (hardenTerminalSummary?.acceptedKnownIssueCount ?? 0) > 0 || acceptedKnownIssues.length > 0
   const gateApplicability = matchingAcceptanceState?.qualityGateApplicability
   const isPostHocIssue = await detectPostHocIssueMode(ctx, sanitizedFeature, matchingAcceptanceState)
-  const postHocIssueReady = isPostHocIssue && (readiness === VerifyReadinessStatus.Ready || readiness === VerifyReadinessStatus.ReadyWithDocUpdates)
+  let postHocIssueReady = isPostHocIssue && (readiness === VerifyReadinessStatus.Ready || readiness === VerifyReadinessStatus.ReadyWithDocUpdates)
+
+  // Plan-only fallback: when no matching acceptance state exists but a plan file
+  // is present and there's no design.md (limited context), allow post-hoc archive
+  // so that Sisyphus-plan-driven work can be archived without requiring a full
+  // feature workflow acceptance state.
+  if (acceptanceStateRaw !== null && matchingAcceptanceState === null) {
+    const planExistsForFeature = await fileExists(planPath)
+    const hasCodeChanges = (await collectFileChanges(ctx.directory)).length > 0
+    if (planExistsForFeature && !designExists && hasCodeChanges) {
+      postHocIssueReady = true
+    } else {
+      return formatMissingReadinessBlock(sanitizedFeature, acceptanceStateRaw.feature)
+    }
+  }
 
   if (gateApplicability && !gateApplicability.archiveReadinessEligible && !postHocIssueReady) {
     return formatQualityGateApplicabilityBlock(sanitizedFeature, gateApplicability.status, gateApplicability.nextStep)
@@ -106,13 +121,6 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
   if (readiness === VerifyReadinessStatus.NotReady || readiness === VerifyReadinessStatus.NeedsDecision) {
     return formatReadinessBlock(sanitizedFeature, readiness)
-  }
-
-  // Guard: if an acceptance state exists but belongs to a different feature,
-  // refuse to proceed. Stale readiness must neither block nor allow the
-  // requested feature — only matching readiness counts.
-  if (acceptanceStateRaw !== null && matchingAcceptanceState === null) {
-    return formatMissingReadinessBlock(sanitizedFeature, acceptanceStateRaw.feature)
   }
 
   if ((hardenTerminalSummary?.unresolvedMustFixCount ?? 0) > 0) {
@@ -307,14 +315,30 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     await fs.mkdir(archiveRoot, { recursive: true })
     await fs.rename(stagingDir, finalArchiveDir)
 
-    // Post-rename: commit state and cleanup source workspace
+    // Post-rename: commit derived worktree, state, and cleanup
+    let archiveCommitHash: string | undefined
+    if (implementationRun?.worktreeKind === 'derived' && implementationRun.worktree) {
+      try {
+        execSync('git add -A', { cwd: implementationRun.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        execSync(`git commit -m "Archive: ${sanitizedFeature}" --no-verify`, { cwd: implementationRun.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        archiveCommitHash = execSync('git rev-parse HEAD', { cwd: implementationRun.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+        logger.info('orchestrator', 'archive commit created from derived worktree', { feature: sanitizedFeature, commit: archiveCommitHash, worktree: implementationRun.worktree })
+      } catch (commitErr) {
+        logger.warn('orchestrator', 'failed to create archive commit from derived worktree', { feature: sanitizedFeature, error: commitErr instanceof Error ? commitErr.message : String(commitErr) })
+      }
+    }
+
     await markArchivedIfNeeded(ctx, sanitizedFeature, promotionSuggestions, autoPromoteCurrent)
     await cleanupBuildData(ctx.directory)
     await cleanupArchivedChangeWorkspaceSources(sourceChangeWorkspacePath, archivedChangeWorkspaceSources)
 
     if (implementationRun) {
       if (implementationRun.status === 'ready_for_archive') {
-        await implementationRunStore.updateRun(ctx, implementationRun.runID, { status: 'archived' })
+        const archiveUpdates: Partial<ImplementationRun> = { status: 'archived' }
+        if (archiveCommitHash) {
+          archiveUpdates.baseRef = archiveCommitHash
+        }
+        await implementationRunStore.updateRun(ctx, implementationRun.runID, archiveUpdates)
       }
       await recordArchiveRunEvent(ctx, implementationRun)
     }

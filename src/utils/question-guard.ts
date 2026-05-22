@@ -26,8 +26,8 @@ export interface GuardedQuestion {
 }
 
 export interface QuestionToolContext {
-  sessionID?: string
-  messageID?: string
+  sessionID: string | undefined
+  messageID: string | undefined
   askQuestion(input: { questions: GuardedQuestion[] }): Promise<string[][]>
 }
 
@@ -35,7 +35,7 @@ export interface QuestionGuardOptions {
   /** Already-prompted question ids (e.g. FeatureSession.questionPickerPromptedIds) */
   promptedIds?: string[]
   /** Last consumed message id (e.g. FeatureSession.lastConsumedMessageId) */
-  lastMessageId?: string
+  lastMessageId: string | undefined
 }
 
 export interface QuestionGuardResult {
