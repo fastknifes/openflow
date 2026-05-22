@@ -949,7 +949,6 @@ ${safePath}
 ### Archived Files
 ${hasImplementationMapper ? `- \`${safePath}/implementation-mapper.md\` - Copied from changes workspace` : ''}
 - \`${safePath}/design.md\` - Design document (if exists)
-- \`${safePath}/design.md\` - Design document (if exists)
 - \`${safePath}/prd.md\` - Requirements / PRD document (if exists)
 - \`${safePath}/plan.md\` - Execution plan snapshot (if exists)
 ${issueArtifactsBlock}

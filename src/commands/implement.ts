@@ -119,6 +119,11 @@ export async function handleImplement(
   if (toolContext) {
     try {
       handoffResult = await handoffToBackend(ctx, run, toolContext)
+      // Refresh observer with the persisted run (backendCommand updated by handoffToBackend)
+      const updatedRun = await implementationRunStore.getRun(ctx, run.runID)
+      if (updatedRun && observer) {
+        observer.setActiveRun(updatedRun)
+      }
     } catch (error) {
       return [
         '## Implementation Run — Backend Handoff Failed',
