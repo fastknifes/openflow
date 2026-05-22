@@ -26,8 +26,6 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
-        with:
-          static_site_generator: vitepress
 
       - name: Setup Node
         uses: actions/setup-node@v4
