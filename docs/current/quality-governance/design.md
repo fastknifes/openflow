@@ -202,6 +202,91 @@ Harden returns a markdown report to the quality gate with three layers:
 
 The report format is markdown (backward-compatible with existing `parseFindingsSummary` and `extractHardenStatus` parsers).
 
+### Harden Taxonomy
+
+Findings are classified using a taxonomy that distinguishes actionable defects from ambiguous gaps requiring human judgment. Each finding receives a runtime metadata record with the inferred taxonomy, a decision path, and a readiness effect.
+
+| Taxonomy Level | Category | Disposition | Readiness Effect |
+|---|---|---|---|
+| `behavior_violation` | Actionable | `must_fix` | Blocks until resolved |
+| `intent_gap` | Ambiguous | `needs_decision` / `accepted_known_issue` / `must_fix` (depends on confidence and alignment) | Needs human decision, or ready with doc updates, or blocks until resolved |
+| `contract_divergence` | Ambiguous | `needs_decision` | Needs human decision |
+| `regression_risk` | Actionable / Non-blocking | `must_fix` with evidence; `design_divergence` without | Blocks until resolved or downgraded |
+| `missing_evidence` | Ambiguous | `needs_decision` | Needs human decision |
+
+Legacy levels (`blocking_bug`, `spec_violation`, `test_gap`, `design_ambiguity`, `style_or_preference`) are still accepted as input from Reviewer output. They are mapped to the new taxonomy at classification time:
+
+| Legacy Level | Mapped Taxonomy |
+|---|---|
+| `blocking_bug` | `behavior_violation` |
+| `spec_violation` | `behavior_violation` (if design-supported) or `contract_divergence` / `missing_evidence` |
+| `test_gap` | `missing_evidence` (if beyond design scope, non-blocking) |
+| `design_ambiguity` | `intent_gap` (if intent-inference signals apply) |
+| `style_or_preference` | Discarded |
+
+#### Intent Inference
+
+For findings where the design docs are silent or ambiguous, the classifier performs intent inference:
+
+1. Extracts the inferred intent from the finding description (what the Reviewer believes the code should do).
+2. Classifies confidence (`high`, `medium`, `low`) based on whether the finding references explicit constraints or uses weaker language.
+3. Classifies implementation alignment (`aligned`, `misaligned`, `unknown`, `conflicting`) by comparing the finding description against the actual implementation behavior.
+4. Routes the finding:
+   - High/medium confidence + misaligned: `must_fix` (actionable).
+   - High/medium confidence + aligned: `accepted_known_issue` (non-blocking, doc update allowed).
+   - Low confidence or conflicting: `needs_decision` (ambiguous, escalated).
+
+Findings without evidence are downgraded to `missing_evidence` regardless of the original level.
+
+### Archive Readiness
+
+When the quality gate produces a `ready_for_archive` implementation run status, archive does not auto-proceed. The acceptance state tracks `archiveRunConfirmationStatus`:
+
+| Status | Meaning |
+|---|---|
+| `awaiting` | Quality gate has declared readiness, but explicit user confirmation has not been received |
+| `confirmed` | User has explicitly confirmed the archive run |
+
+The transition flow:
+
+```text
+Quality gate outputs ready_for_archive
+  → setArchiveRunAwaitingConfirmation()
+    → archiveRunConfirmationStatus: awaiting
+  → User issues separate archive command with confirmation
+    → confirmArchiveRun()
+      → archiveRunConfirmationStatus: confirmed
+      → archiveRunConfirmedAt: <timestamp>
+```
+
+Archive requires a separate archive command. The quality gate outputs readiness but does not trigger the archive operation itself. This separation ensures the user retains explicit control over the archival boundary.
+
+### Behavior Evidence Freshness
+
+Verify validates behavior evidence freshness for each scenario. Each scenario has a `ScenarioEvidenceFreshness` record:
+
+| Field | Required | Purpose |
+|---|---|---|
+| `timestamp` | Yes (one of timestamp or gitHead) | When the evidence was recorded |
+| `gitHead` | Yes (one of timestamp or gitHead) | Git commit the evidence is tied to |
+| `scenarioId` | No | Links evidence to a specific behavior scenario |
+| `evidenceType` | No | Classification of evidence kind |
+| `testFileOrMethod` | No | Which test or method produced the evidence |
+| `commandOrSteps` | No | Commands or steps used to produce evidence |
+| `result` | No | Pass/fail result |
+| `coverageRationale` | No | Why this evidence covers the scenario |
+| `coreCodeMapping` | No | Which code paths the evidence exercises |
+
+Evidence is classified as:
+
+| Freshness | Condition |
+|---|---|
+| `fresh` | `gitHead` matches current HEAD AND no workspace change is newer than the recorded timestamp |
+| `stale` | `gitHead` differs from current HEAD, or workspace was modified after the evidence timestamp, or diff hash mismatch |
+| `unknown` | Evidence is missing both `timestamp` and `gitHead`, or current git HEAD is unavailable |
+
+Critical scenarios with `stale` or `unknown` evidence do not pass freshness validation and block readiness.
+
 ### Cost Control
 
 - Token hard limits (`tokenBudgetTotal`, `tokenBudgetPerRound`) are removed. Termination is by `maxRounds` only.

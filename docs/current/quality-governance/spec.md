@@ -46,6 +46,12 @@
 
 7. **Archive consumes quality gate readiness.** Archive relies on quality gate evidence/readiness rather than requiring a manual verify command.
 
+8. **Harden findings are classified into the new taxonomy.** `behavior_violation` is the highest severity actionable finding and drives auto-fix via Executor. Findings without evidence are downgraded to `missing_evidence` regardless of the original level. Legacy levels (`blocking_bug`, `spec_violation`, `test_gap`, `design_ambiguity`, `style_or_preference`) are accepted as Reviewer input and mapped to the new taxonomy at classification time.
+
+9. **Archive requires explicit user confirmation.** When the implementation run status is `ready_for_archive`, the acceptance state records `archiveRunConfirmationStatus` as `awaiting`. Archive does not auto-proceed from quality gate output. A separate archive command with explicit user confirmation transitions the status to `confirmed`. The quality gate outputs readiness but does not trigger archive.
+
+10. **Verify validates behavior evidence freshness.** Each behavior scenario's evidence record is checked against the current workspace state. Evidence is fresh if `gitHead` matches current HEAD and no workspace change post-dates the recorded timestamp. Evidence is stale if `gitHead` differs, workspace was modified after the evidence timestamp, or the diff hash does not match. Evidence without `timestamp` or `gitHead` is `unknown`. Critical scenarios with stale or unknown evidence block readiness.
+
 ---
 
 ## Behavior Scenarios
