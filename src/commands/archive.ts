@@ -464,12 +464,6 @@ async function resolveArchiveImplementationRun(ctx: OpenFlowContext, feature: st
   return runs[0] ?? null
 }
 
-function isArchiveAllowedRunStatus(status: ImplementationRun['status']): boolean {
-  // Only already-archived runs pass through without explicit confirmation.
-  // ready_for_archive requires explicit user confirmation before proceeding.
-  return status === 'archived'
-}
-
 async function recordArchiveRunEvent(ctx: OpenFlowContext, run: ImplementationRun): Promise<void> {
   const eventsPath = path.isAbsolute(run.eventsPath) ? run.eventsPath : path.join(ctx.directory, run.eventsPath)
   const event = {
@@ -492,18 +486,6 @@ Feature: ${escapeMarkdown(feature)}
 Archive stopped because the implementation run status is **${escapeMarkdown(status)}**.
 
 Archive requires a completed and verified implementation run. Please run \`openflow-quality-gate\` for **${escapeMarkdown(feature)}** and archive again after it reports ready.`
-}
-
-function formatArchiveRunConfirmationRequired(feature: string): string {
-  return `## Archive Confirmation Required
-
-Feature: ${escapeMarkdown(feature)}
-
-Archive is paused because the implementation run status is **ready_for_archive**.
-
-Awaiting Archive Confirmation: explicit user confirmation is required before archive can proceed.
-
-To confirm archive, set the archive run confirmation status to \`confirmed\` and rerun archive.`
 }
 
 function trackArchivedChangeWorkspaceSource(archivedSources: Set<string>, changeWorkspacePath: string, sourcePath: string): void {
