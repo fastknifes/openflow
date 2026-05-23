@@ -1,8 +1,20 @@
 import { readFileSync } from 'node:fs'
 import { normalizeFinding } from './harden-ledger.js'
-import type { ComplexityGrade, Disposition, HardenFinding, HardenFindingLevel } from '../types.js'
+import type {
+  ComplexityGrade,
+  Disposition,
+  HardenFinding,
+  HardenFindingConfidence,
+  HardenFindingLevel,
+  HardenImplementationAlignment,
+  HardenIntentInference,
+} from '../types.js'
 
 const VALID_LEVELS: HardenFindingLevel[] = [
+  'behavior_violation',
+  'intent_gap',
+  'contract_divergence',
+  'missing_evidence',
   'blocking_bug',
   'spec_violation',
   'regression_risk',
@@ -19,6 +31,12 @@ const DIRECTORY_STRUCTURE_PREFERENCE_PATTERN = /\b(?:directory|folder|file)\s+st
 const FUNCTIONAL_IMPACT_PATTERN = /\b(?:crash|broken|breaks?|failing?|failure|incorrect|bug|exception|timeout|regression|wrong|mismatch|unhandled|missing\s+error\s+handling)\b/iu
 const NON_BLOCKING_CANDIDATE_PATTERN = /\b(?:non[-\s]?blocking|does\s+not\s+block|doesn't\s+block|not\s+blocking|known\s+issue|acceptable|works\s+as\s+implemented|matches\s+the\s+actual\s+implementation|does\s+not\s+affect\s+functionality|no\s+functional\s+impact)\b/iu
 const DESIGN_SCOPE_MISMATCH_PATTERN = /\b(?:not\s+in\s+design|not\s+specified\s+in\s+design|outside\s+design\s+scope|beyond\s+design(?:\s+scope)?|plan\s+(?:does\s+not|doesn't)\s+mention|reviewer\s+(?:wants|suggests?|requested?)|extra\s+step|additional\s+step|edge\s+case\s+not\s+in\s+design|scope\s+extends\s+beyond\s+design)\b/iu
+const INTENT_GAP_PATTERN = /\b(?:docs?|approved\s+docs?|design|plan|behavior)\s+(?:do\s+not|don't|does\s+not|doesn't|omit|omits|missing|silent|unclear|do\s+not\s+explicitly|not\s+explicitly|do\s+not\s+cover|does\s+not\s+cover)\b|\b(?:intent\s+gap|inferred\s+intent|surrounding\s+context\s+implies|context\s+implies|two\s+reasonable\s+interpretations)\b/iu
+const CONTRACT_DIVERGENCE_PATTERN = /\b(?:contract\s+divergence|changes?\s+the\s+approved\s+.*contract|approved\s+.*contract|contract\s+by|diverges?\s+from\s+(?:the\s+)?contract|updates?\s+docs?\s+instead\s+of\s+implementation|silently\s+modif(?:y|ies)\s+docs?)\b/iu
+const MISSING_EVIDENCE_PATTERN = /\b(?:missing\s+evidence|no\s+evidence|without\s+evidence|insufficient\s+evidence|cannot\s+verify)\b/iu
+const MISALIGNED_PATTERN = /\b(?:misaligned|implementation\s+(?:retries|does|returns|uses|allows|skips|changes)|but\s+(?:current\s+)?implementation|implementation\s+.*\b(?:forever|wrong|different|contradicts?|violates?))\b/iu
+const ALIGNED_PATTERN = /\b(?:aligned|supports?\s+the\s+current\s+implementation|current\s+implementation\s+(?:is\s+)?(?:allowed|supported|matches)|should\s+be\s+allowed|works\s+as\s+implemented)\b/iu
+const CONFLICTING_PATTERN = /\b(?:conflicting|conflict|two\s+reasonable\s+interpretations|multiple\s+interpretations|unclear|silent|cannot\s+infer|uninferable)\b/iu
 const SYNONYM_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bdoes\s+not\b|\bdoesn't\b|\bnot\b|\bwithout\b|\blacks?\b|\bno\b/giu, 'missing'],
   [/\bneeds?\s+to\b|\brequires?\b|\bmust\b|\bshould\s+be\b/giu, 'should'],
@@ -55,6 +73,19 @@ interface FindingDispositionDecision {
   group: keyof FindingGroups
   level: HardenFindingLevel
   disposition?: Disposition
+  metadata?: HardenFindingRuntimeMetadata
+}
+
+interface HardenFindingRuntimeMetadata {
+  taxonomy: 'behavior_violation' | 'intent_gap' | 'contract_divergence' | 'regression_risk' | 'missing_evidence'
+  decision: 'fix_implementation' | 'doc_update_required' | 'needs_decision'
+  readinessEffect: 'blocks_until_resolved' | 'ready_with_doc_updates_allowed' | 'needs_human_decision'
+  executorAllowed: boolean
+  inferredIntent?: string
+  confidence?: HardenFindingConfidence
+  alignment?: HardenImplementationAlignment | 'conflicting'
+  decisionQuestion?: string
+  intentInference?: HardenIntentInference
 }
 
 function countDiffStats(diffStr: string): { filesChanged: number; totalLines: number } {
@@ -192,6 +223,7 @@ export function classifyFindings(
       ...finding,
       level: decision.level,
       ...(decision.disposition ? { disposition: decision.disposition } : {}),
+      ...(decision.metadata ? decision.metadata : {}),
     }
     result[decision.group].push(nextFinding)
   }
@@ -398,31 +430,113 @@ function resolveFindingDisposition(
 ): FindingDispositionDecision {
   const evidencePresent = hasEvidence(finding)
   const designSupported = hasDesignSupport(finding, designReference)
+  const taxonomy = inferFindingTaxonomy(finding)
+
+  if (taxonomy === 'intent_gap') {
+    return resolveIntentGapDisposition(finding)
+  }
+
+  if (taxonomy === 'contract_divergence') {
+    return {
+      group: 'ambiguous',
+      level: 'contract_divergence',
+      disposition: 'needs_decision',
+      metadata: buildRuntimeMetadata(finding, 'contract_divergence', 'needs_decision', 'needs_human_decision', false),
+    }
+  }
+
+  if (taxonomy === 'missing_evidence') {
+    return {
+      group: 'ambiguous',
+      level: 'missing_evidence',
+      disposition: 'needs_decision',
+      metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+    }
+  }
 
   switch (finding.level) {
+    case 'behavior_violation':
     case 'blocking_bug':
       if (evidencePresent) {
-        return { group: 'actionable', level: 'blocking_bug', disposition: 'must_fix' }
+        return {
+          group: 'actionable',
+          level: finding.level === 'blocking_bug' ? 'blocking_bug' : 'behavior_violation',
+          disposition: 'must_fix',
+          metadata: buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true),
+        }
       }
-      return { group: 'ambiguous', level: 'design_ambiguity', disposition: 'needs_decision' }
+      return {
+        group: 'ambiguous',
+        level: 'missing_evidence',
+        disposition: 'needs_decision',
+        metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+      }
     case 'spec_violation':
       if (designSupported && evidencePresent) {
-        return { group: 'actionable', level: 'spec_violation', disposition: 'must_fix' }
+        return {
+          group: 'actionable',
+          level: 'behavior_violation',
+          disposition: 'must_fix',
+          metadata: buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true),
+        }
       }
       if (!designSupported) {
-        return { group: 'ambiguous', level: 'design_ambiguity', disposition: 'design_divergence' }
+        return {
+          group: evidencePresent ? 'actionable' : 'ambiguous',
+          level: evidencePresent ? 'behavior_violation' : 'missing_evidence',
+          disposition: evidencePresent ? 'must_fix' : 'needs_decision',
+          metadata: evidencePresent
+            ? buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true)
+            : buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+        }
       }
-      return { group: 'ambiguous', level: 'design_ambiguity', disposition: 'needs_decision' }
+      return {
+        group: 'ambiguous',
+        level: 'missing_evidence',
+        disposition: 'needs_decision',
+        metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+      }
     case 'regression_risk':
       if (evidencePresent) {
-        return { group: 'actionable', level: 'regression_risk', disposition: 'must_fix' }
+        return {
+          group: 'actionable',
+          level: 'regression_risk',
+          disposition: 'must_fix',
+          metadata: buildRuntimeMetadata(finding, 'regression_risk', 'fix_implementation', 'blocks_until_resolved', true),
+        }
       }
-      return { group: 'nonBlocking', level: 'regression_risk', disposition: 'design_divergence' }
+      return {
+        group: 'ambiguous',
+        level: 'missing_evidence',
+        disposition: 'needs_decision',
+        metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+      }
+    case 'intent_gap':
+      return resolveIntentGapDisposition(finding)
+    case 'contract_divergence':
+      return {
+        group: 'ambiguous',
+        level: 'contract_divergence',
+        disposition: 'needs_decision',
+        metadata: buildRuntimeMetadata(finding, 'contract_divergence', 'needs_decision', 'needs_human_decision', false),
+      }
+    case 'missing_evidence':
+      return {
+        group: 'ambiguous',
+        level: 'missing_evidence',
+        disposition: 'needs_decision',
+        metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+      }
     case 'design_ambiguity':
       if (isAcceptedKnownIssueCandidate(finding)) {
-        return { group: 'nonBlocking', level: 'design_ambiguity', disposition: 'accepted_known_issue' }
+        return {
+          group: 'nonBlocking',
+          level: 'intent_gap',
+          disposition: 'accepted_known_issue',
+          metadata: buildIntentGapMetadata(finding, 'medium', 'aligned'),
+        }
       }
-      return { group: 'ambiguous', level: 'design_ambiguity', disposition: 'design_divergence' }
+      return resolveIntentGapDisposition(finding)
     case 'test_gap':
       if (isBeyondDesignScope(finding)) {
         return { group: 'nonBlocking', level: 'test_gap', disposition: 'false_positive' }
@@ -434,6 +548,163 @@ function resolveFindingDisposition(
     case 'style_or_preference':
       return { group: 'style', level: 'style_or_preference' }
   }
+}
+
+function inferFindingTaxonomy(finding: HardenFinding): HardenFindingRuntimeMetadata['taxonomy'] {
+  if (finding.level === 'behavior_violation' || finding.level === 'blocking_bug') return 'behavior_violation'
+  if (finding.level === 'intent_gap') return 'intent_gap'
+  if (finding.level === 'contract_divergence') return 'contract_divergence'
+  if (finding.level === 'missing_evidence') return 'missing_evidence'
+  if (finding.level === 'regression_risk') return 'regression_risk'
+
+  const text = `${finding.description}\n${finding.evidence}`
+  if (CONTRACT_DIVERGENCE_PATTERN.test(text)) return 'contract_divergence'
+  if (INTENT_GAP_PATTERN.test(text)) return 'intent_gap'
+  if (MISSING_EVIDENCE_PATTERN.test(text) && !hasEvidence(finding)) return 'missing_evidence'
+  if (finding.level === 'spec_violation') return 'behavior_violation'
+  return finding.level === 'test_gap' ? 'missing_evidence' : 'intent_gap'
+}
+
+function resolveIntentGapDisposition(finding: HardenFinding): FindingDispositionDecision {
+  const confidence = inferIntentConfidence(finding)
+  const alignment = inferImplementationAlignment(finding)
+
+  if ((confidence === 'high' || confidence === 'medium') && alignment === 'aligned') {
+    return {
+      group: 'nonBlocking',
+      level: 'intent_gap',
+      disposition: 'accepted_known_issue',
+      metadata: buildIntentGapMetadata(finding, confidence, alignment),
+    }
+  }
+
+  if ((confidence === 'high' || confidence === 'medium') && alignment === 'misaligned') {
+    return {
+      group: 'actionable',
+      level: 'intent_gap',
+      disposition: 'must_fix',
+      metadata: buildIntentGapMetadata(finding, confidence, alignment),
+    }
+  }
+
+  return {
+    group: 'ambiguous',
+    level: 'intent_gap',
+    disposition: 'needs_decision',
+    metadata: buildIntentGapMetadata(finding, confidence, alignment),
+  }
+}
+
+function inferIntentConfidence(finding: HardenFinding): HardenFindingConfidence {
+  const text = `${finding.description}\n${finding.evidence}`
+  if (CONFLICTING_PATTERN.test(text)) return 'low'
+  if (/\b(?:requires?|must|behavior\.md|docs\/current|decisions?)\b/iu.test(text)) return 'high'
+  if (/\b(?:implies?|surrounding\s+context|context|supports?)\b/iu.test(text)) return 'medium'
+  return hasEvidence(finding) ? 'medium' : 'low'
+}
+
+function inferImplementationAlignment(finding: HardenFinding): HardenImplementationAlignment | 'conflicting' {
+  const text = `${finding.description}\n${finding.evidence}`
+  if (CONFLICTING_PATTERN.test(text)) return 'conflicting'
+  if (MISALIGNED_PATTERN.test(text)) return 'misaligned'
+  if (ALIGNED_PATTERN.test(text)) return 'aligned'
+  return 'unknown'
+}
+
+function buildIntentGapMetadata(
+  finding: HardenFinding,
+  confidence: HardenFindingConfidence,
+  alignment: HardenImplementationAlignment | 'conflicting',
+): HardenFindingRuntimeMetadata {
+  const fixImplementation = (confidence === 'high' || confidence === 'medium') && alignment === 'misaligned'
+  const docUpdate = (confidence === 'high' || confidence === 'medium') && alignment === 'aligned'
+  const inferredIntent = extractInferredIntent(finding)
+
+  return {
+    taxonomy: 'intent_gap',
+    decision: fixImplementation ? 'fix_implementation' : docUpdate ? 'doc_update_required' : 'needs_decision',
+    readinessEffect: fixImplementation ? 'blocks_until_resolved' : docUpdate ? 'ready_with_doc_updates_allowed' : 'needs_human_decision',
+    executorAllowed: fixImplementation,
+    inferredIntent,
+    confidence,
+    alignment,
+    ...(docUpdate || fixImplementation ? {} : { decisionQuestion: buildDecisionQuestion(finding) }),
+    intentInference: {
+      missingCoverage: finding.description,
+      inferredIntent,
+      evidenceReferences: extractIntentEvidenceReferences(finding),
+      confidence,
+      implementationAlignment: alignment === 'conflicting' ? 'unknown' : alignment,
+      decision: fixImplementation ? 'fix_implementation' : docUpdate ? 'accept_with_doc_update' : 'needs_decision',
+      summary: finding.evidence || finding.description,
+    },
+  }
+}
+
+function buildRuntimeMetadata(
+  finding: HardenFinding,
+  taxonomy: HardenFindingRuntimeMetadata['taxonomy'],
+  decision: HardenFindingRuntimeMetadata['decision'],
+  readinessEffect: HardenFindingRuntimeMetadata['readinessEffect'],
+  executorAllowed: boolean,
+): HardenFindingRuntimeMetadata {
+  return {
+    taxonomy,
+    decision,
+    readinessEffect,
+    executorAllowed,
+    ...(decision === 'needs_decision' ? { decisionQuestion: buildDecisionQuestion(finding) } : {}),
+  }
+}
+
+function extractInferredIntent(finding: HardenFinding): string {
+  const text = finding.description.trim()
+  const coverageSubject = text.match(/\b(?:cover|covers|covering|omit|omits)\s+([^,.;]+?)(?:,|\s+but\b|[.;]|$)/iu)?.[1]?.trim()
+  const impliesMatch = text.match(/\b(?:implies?|implied)\s+(?:that\s+)?(.+?)(?:[.;]|$)/iu)
+  if (impliesMatch?.[1]) {
+    const intent = impliesMatch[1].trim()
+    if (coverageSubject && /^it\b/iu.test(intent)) {
+      return intent.replace(/^it\b/iu, coverageSubject)
+    }
+    return intent
+  }
+
+  const allowedMatch = text.match(/\b([a-z0-9\s_-]+\s+should\s+be\s+allowed)\b/iu)
+  if (allowedMatch?.[1]) return allowedMatch[1].trim()
+
+  const butMatch = text.match(/\bbut\s+(.+?)(?:[.;]|$)/iu)
+  if (butMatch?.[1]) return butMatch[1].trim()
+
+  return text
+}
+
+function extractIntentEvidenceReferences(finding: HardenFinding): HardenIntentInference['evidenceReferences'] {
+  const references: HardenIntentInference['evidenceReferences'] = []
+  const text = `${finding.description}\n${finding.evidence}`
+  const sourcePattern = /\b(decisions|current|behavior|design|plan|request|diff|implementation)(?:\.md|\b)([^.;\n]*)/giu
+  let match: RegExpExecArray | null
+  while ((match = sourcePattern.exec(text)) !== null) {
+    const excerpt = match[2]?.trim()
+    references.push({
+      source: match[1] as HardenIntentInference['evidenceReferences'][number]['source'],
+      reference: match[0].trim(),
+      ...(excerpt ? { excerpt } : {}),
+    })
+  }
+
+  if (references.length === 0 && finding.evidence.trim()) {
+    references.push({ source: 'other', reference: finding.evidence.trim() })
+  }
+
+  return references
+}
+
+function buildDecisionQuestion(finding: HardenFinding): string {
+  const topic = finding.description
+    .replace(/\b(?:docs?|approved\s+docs?|design|plan|behavior)\s+(?:do\s+not|don't|does\s+not|doesn't|omit|omits|cover|explicitly|silent|unclear)\b/giu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  return `Decide intended contract for ${topic || finding.description}.`
 }
 
 function isDirectoryStructurePreference(finding: HardenFinding): boolean {
@@ -521,6 +792,10 @@ function extractLevel(text: string): HardenFindingLevel {
     if (lower.includes(level)) return level
   }
   if (lower.includes('bug') || lower.includes('critical')) return 'blocking_bug'
+  if (lower.includes('behavior') && lower.includes('violation')) return 'behavior_violation'
+  if (lower.includes('intent') && lower.includes('gap')) return 'intent_gap'
+  if (lower.includes('contract') && lower.includes('diverg')) return 'contract_divergence'
+  if (lower.includes('missing') && lower.includes('evidence')) return 'missing_evidence'
   if (lower.includes('spec') || lower.includes('violation')) return 'spec_violation'
   if (lower.includes('regression') || lower.includes('risk')) return 'regression_risk'
   if (lower.includes('test') || lower.includes('gap')) return 'test_gap'

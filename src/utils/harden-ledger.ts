@@ -80,10 +80,30 @@ function flattenLatestFindings(result: HardenResult): HardenFinding[] {
 }
 
 export function normalizeFinding(finding: HardenFinding): string {
+  const levelSignature = normalizeFindingLevel(finding)
   const textSignature = normalizeText(`${finding.description} ${finding.evidence}`)
   const fileSignature = normalizeFiles(finding.files)
   const lineSignature = normalizeLines(finding.lines)
-  return `level=${finding.level}|files=${fileSignature}|lines=${lineSignature}|text=${textSignature}`
+  const intentSignature = normalizeIntentInference(finding)
+  return `level=${levelSignature}|files=${fileSignature}|lines=${lineSignature}|intent=${intentSignature}|text=${textSignature}`
+}
+
+function normalizeFindingLevel(finding: HardenFinding): string {
+  if (finding.level === 'blocking_bug') return 'behavior_violation'
+  return finding.level
+}
+
+function normalizeIntentInference(finding: HardenFinding): string {
+  const inference = finding.intentInference
+  if (!inference) return ''
+
+  return normalizeText([
+    inference.confidence,
+    inference.implementationAlignment,
+    inference.decision,
+    inference.missingCoverage,
+    inference.inferredIntent,
+  ].join(' '))
 }
 
 export function incrementRepeatCount(finding: HardenFinding): HardenFinding {
@@ -124,6 +144,9 @@ export function buildMinimalSummary(result: HardenResult): string {
     ),
   ).length
   const acceptedKnownIssueCount = latestFindings.filter(finding => finding.disposition === 'accepted_known_issue').length
+  const intentInferenceCount = latestFindings.filter(finding => finding.intentInference).length
+  const intentDocUpdateCount = latestFindings.filter(finding => finding.intentInference?.decision === 'accept_with_doc_update').length
+  const intentNeedsDecisionCount = latestFindings.filter(finding => finding.intentInference?.decision === 'needs_decision').length
 
   return JSON.stringify({
     status: result.status,
@@ -131,6 +154,9 @@ export function buildMinimalSummary(result: HardenResult): string {
     unresolvedMustFixCount,
     unresolvedNeedsDecisionCount,
     acceptedKnownIssueCount,
+    ...(intentInferenceCount > 0 ? { intentInferenceCount } : {}),
+    ...(intentDocUpdateCount > 0 ? { intentDocUpdateCount } : {}),
+    ...(intentNeedsDecisionCount > 0 ? { intentNeedsDecisionCount } : {}),
     acceptedFindingsSummary: result.acceptedFindingsSummary ?? '',
   })
 }

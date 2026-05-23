@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { execSync } from 'node:child_process'
 import { access, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { classifyReadiness, handleVerify, stripOpenFlowCommandTokens } from '../../src/commands/verify.js'
@@ -82,6 +83,10 @@ function createIssueAcceptanceState(
     issueClarificationPath: `docs/changes/${feature}/issue-clarification.md`,
     ...overrides,
   }
+}
+
+function currentGitHead(): string {
+  return execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim()
 }
 
 describe('verify command', () => {
@@ -1701,6 +1706,129 @@ Then:
     expect(result).toContain('SC-009: Integration evidence verifies critical behavior ✅')
     expect(result).toContain('.sisyphus/evidence/SC-009-integration.md')
     expect(result).toContain('equivalent: End-to-end quality gate run exercises the same user-visible behavior')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('reads complete behavior evidence from .sisyphus/evidence markdown files', async () => {
+    const testDir = join(process.cwd(), '.test-verify-behavior-evidence-file-complete')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'quality-gate-workflow-redesign.md'), '# plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'evidence'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'evidence', 'SC-010-exact.md'), `# SC-010 Evidence
+
+Scenario Reference: SC-010
+Evidence Type: integration test
+Test File/Method: tests/commands/verify.test.ts :: reads complete behavior evidence
+Command/Steps: bun test tests/commands/verify.test.ts
+Result: passed
+Timestamp: 2999-01-01T00:00:00.000Z
+Git HEAD: ${currentGitHead()}
+Coverage Level: exact
+Coverage Rationale: Directly exercises scenario behavior through handleVerify.
+Core Code Mapping: src/commands/verify.ts collectBehaviorEvidence
+`, 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', 'quality-gate-workflow-redesign')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior
+
+### SC-010: Evidence file verifies behavior
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'quality-gate-workflow-redesign')
+
+    expect(result).toContain('- status: ready')
+    expect(result).toContain('SC-010: Evidence file verifies behavior ✅')
+    expect(result).toContain('.sisyphus/evidence/SC-010-exact.md')
+    expect(result).toContain('1/1 behavior scenarios verified')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks critical behavior evidence files that miss required fields', async () => {
+    const testDir = join(process.cwd(), '.test-verify-behavior-evidence-file-missing-fields')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'quality-gate-workflow-redesign.md'), '# plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'evidence'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'evidence', 'SC-011-incomplete.md'), `# SC-011 Evidence
+
+Scenario Reference: SC-011
+Evidence Type: integration test
+Test File/Method: tests/commands/verify.test.ts :: incomplete evidence
+Command/Steps: bun test tests/commands/verify.test.ts
+Result: passed
+Timestamp: 2999-01-01T00:00:00.000Z
+Git HEAD: ${currentGitHead()}
+Coverage Level: exact
+Coverage Rationale: Direct coverage.
+`, 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', 'quality-gate-workflow-redesign')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior
+
+### SC-011: Missing core mapping blocks evidence
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'quality-gate-workflow-redesign')
+
+    expect(result).toContain('- status: not_ready')
+    expect(result).toContain('missing_integration_evidence')
+    expect(result).toContain('Missing required evidence field(s): core code mapping')
+
+    ContractRuntime.resetInstance()
+    await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks stale critical behavior evidence files when git HEAD differs', async () => {
+    const testDir = join(process.cwd(), '.test-verify-behavior-evidence-file-stale-head')
+    await rm(testDir, { recursive: true, force: true })
+    ContractRuntime.resetInstance()
+
+    await mkdir(join(testDir, '.sisyphus', 'plans'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'plans', 'quality-gate-workflow-redesign.md'), '# plan', 'utf-8')
+    await mkdir(join(testDir, '.sisyphus', 'evidence'), { recursive: true })
+    await writeFile(join(testDir, '.sisyphus', 'evidence', 'SC-012-stale.md'), `# SC-012 Evidence
+
+Scenario Reference: SC-012
+Evidence Type: integration test
+Test File/Method: tests/commands/verify.test.ts :: stale evidence
+Command/Steps: bun test tests/commands/verify.test.ts
+Result: passed
+Timestamp: 2999-01-01T00:00:00.000Z
+Git HEAD: 0000000000000000000000000000000000000000
+Coverage Level: exact
+Coverage Rationale: Direct coverage.
+Core Code Mapping: src/commands/verify.ts collectBehaviorEvidence
+`, 'utf-8')
+    const workspace = join(testDir, 'docs', 'changes', 'quality-gate-workflow-redesign')
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, 'design.md'), '# Design', 'utf-8')
+    await writeFile(join(workspace, 'behavior.md'), `# Behavior
+
+### SC-012: Stale evidence blocks readiness
+`, 'utf-8')
+    await mkdir(join(testDir, 'docs', 'current'), { recursive: true })
+    await mkdir(join(testDir, 'docs', 'decisions'), { recursive: true })
+
+    const result = await handleVerify(createContext(testDir, { quality: [], security: [] }), 'quality-gate-workflow-redesign')
+
+    expect(result).toContain('- status: not_ready')
+    expect(result).toContain('stale_integration_evidence')
+    expect(result).toContain('Freshness: stale')
 
     ContractRuntime.resetInstance()
     await rm(testDir, { recursive: true, force: true })

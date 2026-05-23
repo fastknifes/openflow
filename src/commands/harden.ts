@@ -81,16 +81,21 @@ let activeModels: { reviewerModel?: string; executorModel?: string } = {}
 
 const REVIEWER_SYSTEM_PROMPT = `## System Role
 You are the OpenFlow Harden Reviewer.
-Judge the implementation ONLY against the design document.
-DO NOT propose new features. ONLY evaluate whether implementation matches design.
-If design doc is silent, mark as design_ambiguity, not bug.`
+Judge implementation against the approved contract, not preference.
+Contract source priority is: decisions > current > behavior > design > plan > request > diff > implementation.
+DO NOT propose new features. ONLY evaluate whether implementation matches the highest-priority applicable contract source.
+If contract intent is inferable from higher-priority context, mark intent_gap and include confidence/alignment evidence.
+If contract intent is not inferable, mark missing_evidence or intent_gap with needs_decision.
+Never approve implementation-driven contract divergence or ask the Executor to silently update docs.`
 
 const EXECUTOR_SYSTEM_PROMPT = `## System Role
 You are the OpenFlow Harden Executor.
 For each finding, give verdict: accept | reject | partial.
 If accept/partial, provide minimal fix.
 If reject, explain why with design doc or code logic evidence.
-Do NOT refactor, do NOT add new features, do NOT modify files outside scope.`
+Fix only implementation findings explicitly allowed for executor repair.
+Do NOT refactor, do NOT add new features, do NOT modify files outside scope.
+Do NOT modify docs to resolve intent gaps, and do NOT approve or normalize contract divergence.`
 
 export async function handleHarden(
   ctx: OpenFlowContext,
@@ -173,7 +178,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
 
   if (complexity === 'simple' && !args?.full) {
     logger.info('harden', 'entering simple mode', { feature: sanitizedFeature })
-    const coordinatorSessionID = await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`, currentSessionID)
+    const coordinatorSessionID = currentSessionID ?? await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`)
     const reviewerSessionID = await createHardenSession(ctx, sanitizedFeature, 'Harden Round 1/1 - Reviewer', coordinatorSessionID)
     const reviewerPrompt = buildReviewerPrompt(planSummary, reviewerDiffStr)
     const trace: FormattedHardenTraceEntry[] = []
@@ -188,17 +193,18 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
     const grouped = classifyFindings(review.text, designLookup.paths)
     const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
     trace.push(buildTraceEntry(1, 'oracle', review, inferReviewerStopReasonCandidate(grouped)))
+    const executorFindings = filterExecutorFindings(findings)
     const executorSessionID = await createHardenSession(ctx, sanitizedFeature, 'Harden Round 1/1 - Executor', coordinatorSessionID)
     const execution = await runAgentTask(
       ctx,
       executorSessionID,
       'deep',
       EXECUTOR_SYSTEM_PROMPT,
-      buildExecutorPrompt(findings, planSummary, collectScopedFilePaths(findings, diffStr)),
+      buildExecutorPrompt(executorFindings, planSummary, collectScopedFilePaths(executorFindings, diffStr)),
       activeModels.executorModel,
     )
-    const dispositions = parseExecutorDisposition(execution.text, findings)
-    applyExecutorDispositions(findings, dispositions)
+    const dispositions = parseExecutorDisposition(execution.text, executorFindings)
+    applyExecutorDispositions(executorFindings, dispositions)
     trace.push(buildTraceEntry(1, 'deep', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'disposition_reported'))
 
     // Simple mode: one-time rebuttal for rejected findings (no multi-round repair loop)
@@ -209,7 +215,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
       1,
       1,
       ctx.config.harden.maxArgumentRoundsPerFinding,
-      findings,
+      executorFindings,
       dispositions,
       planSummary,
       trace,
@@ -249,7 +255,7 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
   }
 
   logger.info('harden', 'entering standard adversarial mode', { feature: sanitizedFeature, maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds })
-  const coordinatorSessionID = await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`, currentSessionID)
+  const coordinatorSessionID = currentSessionID ?? await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`)
   const diffScopeContext: DiffScopeContext = {
     directory: ctx.directory,
     sanitizedFeature,
@@ -391,7 +397,7 @@ async function runAdversarialLoop(
     }
 
     nonBlockingRounds = 0
-    const executorFindings = findings
+    const executorFindings = filterExecutorFindings(findings)
     const currentFindingKeys = [...new Set(grouped.actionable.map(finding => normalizeFinding(finding)))]
     for (const existingKey of [...findingCounts.keys()]) {
       if (!currentFindingKeys.includes(existingKey)) {
@@ -548,9 +554,13 @@ function buildReviewerPrompt(
   return [
     'You are the OpenFlow harden reviewer.',
     '',
-    'Judge the implementation ONLY against the design document summary below.',
-    'DO NOT propose new features or requirements. ONLY evaluate whether the implementation matches the design document.',
-    'If the design doc is silent on an issue, mark it as design_ambiguity, not as a bug.',
+    'Judge the implementation against the approved contract summary below.',
+    'Use contract source priority: decisions > current > behavior > design > plan > request > diff > implementation.',
+    'DO NOT propose new features or requirements. ONLY evaluate whether implementation matches the highest-priority applicable contract source.',
+    'If approved behavior is contradicted by implementation, mark behavior_violation.',
+    'If contract intent is missing but inferable, mark intent_gap and include confidence plus implementation alignment in Evidence.',
+    'If implementation changes the approved contract instead of implementing it, mark contract_divergence and do not route it as executor-fixable.',
+    'If evidence is insufficient, mark missing_evidence instead of guessing.',
     '',
     '## Design Document Summary',
     planSummary,
@@ -567,16 +577,20 @@ function buildReviewerPrompt(
     fixReportBlock,
     '',
     '## Finding Levels',
-    '- blocking_bug: implementation is clearly broken or unsafe relative to the design.',
-    '- spec_violation: implementation contradicts an explicit design statement.',
+    '- behavior_violation: implementation contradicts approved behavior or the highest-priority contract source; executor-fixable.',
+    '- intent_gap: contract coverage is missing but intent may be inferred; high/medium aligned means doc update, high/medium misaligned means implementation fix, low/unknown/conflicting needs decision.',
+    '- contract_divergence: implementation or proposed fix changes the approved contract; needs human decision, not executor docs edit.',
     '- regression_risk: likely to break documented behavior or compatibility.',
-    '- test_gap: missing validation for documented behavior but not proven broken.',
-    '- design_ambiguity: design doc is unclear or incomplete for the observed case.',
+    '- missing_evidence: reviewer cannot cite enough contract or implementation evidence; needs decision/evidence.',
+    '- blocking_bug: legacy synonym for implementation-blocking behavior_violation; keep accepted for backward compatibility.',
+    '- spec_violation: legacy synonym; classify as behavior_violation when implementation fix is clear, otherwise contract_divergence or missing_evidence.',
+    '- test_gap: legacy non-blocking missing validation for documented behavior but not proven broken.',
+    '- design_ambiguity: legacy ambiguity; prefer intent_gap or missing_evidence for new findings.',
     '- style_or_preference: purely stylistic or optional preference.',
     '',
     '## Required Output Format',
     'Repeat the following block once per finding:',
-    'Level: <one of the six levels>',
+    'Level: <one of the finding levels above>',
     'Description: <concise finding>',
     'Evidence: <must include file paths and exact supporting detail>',
     'Files: <comma-separated file paths>',
@@ -590,6 +604,15 @@ function buildExecutorPrompt(
   planSummary: string,
   filePaths: string[],
 ): string {
+  if (actionableFindings.length === 0) {
+    return [
+      'You are the OpenFlow harden executor.',
+      '',
+      'No executor-fixable implementation findings were provided.',
+      'Do not modify files. Report verdict: reject with rationale: no implementation fix is allowed for doc updates, missing evidence, or contract divergence.',
+    ].join('\n')
+  }
+
   const findingsBlock = actionableFindings.map((finding, index) => [
     `${index + 1}. Level: ${finding.level}`,
     `Description: ${finding.description}`,
@@ -602,7 +625,8 @@ function buildExecutorPrompt(
   return [
     'You are the OpenFlow harden executor.',
     '',
-    'Fix ONLY the issues listed above. Do NOT refactor, do NOT add new features, do NOT modify files outside the listed scope.',
+    'Fix ONLY the implementation issues listed above. Do NOT refactor, do NOT add new features, do NOT modify files outside the listed scope.',
+    'Do NOT edit documentation, approve contract divergence, or convert needs-decision findings into implementation changes.',
     '',
     '## Actionable Findings',
     findingsBlock,
@@ -618,6 +642,16 @@ function buildExecutorPrompt(
     '2. The fix diff',
     '3. How to verify the fix',
   ].join('\n')
+}
+
+function filterExecutorFindings(findings: HardenFinding[]): HardenFinding[] {
+  return findings.filter(finding => {
+    const metadata = finding as HardenFinding & { executorAllowed?: boolean; taxonomy?: string; decision?: string }
+    if (metadata.executorAllowed === false) return false
+    if (metadata.decision && metadata.decision !== 'fix_implementation') return false
+    if (metadata.taxonomy === 'contract_divergence' || metadata.taxonomy === 'missing_evidence') return false
+    return finding.disposition === 'must_fix'
+  })
 }
 
 function parseExecutorDisposition(
@@ -917,7 +951,7 @@ function markFindingNeedsDecision(
 }
 
 function containsExecutorReviewableLevel(reviewText: string): boolean {
-  return /(?:^|\n)\s*Level\s*:\s*(?:blocking_bug|spec_violation|regression_risk|test_gap)\b/iu.test(reviewText)
+  return /(?:^|\n)\s*Level\s*:\s*(?:behavior_violation|intent_gap|blocking_bug|spec_violation|regression_risk|test_gap)\b/iu.test(reviewText)
 }
 
 function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFinalStateGroup, HardenFindingFinalState[]> {

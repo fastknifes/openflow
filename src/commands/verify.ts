@@ -35,7 +35,7 @@ import { findActiveFeature } from '../utils/feature-resolver.js'
 import { getActiveFeatureSession } from '../hooks/feature-workflow.js'
 import { loadExecutionPolicy } from '../utils/execution-policy.js'
 import { runCompilationProbe } from '../utils/compilation-probe.js'
-import { captureCurrentWorkspaceState, createEvidenceFreshnessMetadata } from '../utils/evidence-freshness.js'
+import { captureCurrentWorkspaceState, classifyScenarioEvidenceFreshness, createEvidenceFreshnessMetadata } from '../utils/evidence-freshness.js'
 import { detectOmoExecutionFlow } from '../utils/omo-detection.js'
 import {
   readFeatureGuardianState,
@@ -294,8 +294,9 @@ async function collectEvidence(
   })
   const failedChecks = checkResults.filter(result => !result.passed)
 
+  const currentWorkspaceState = captureCurrentWorkspaceState(ctx.directory)
   const behaviorEvidence = behaviorExists
-    ? await parseBehaviorEvidenceMappings(changeBehaviorPath)
+    ? await collectBehaviorEvidence(ctx.directory, changeBehaviorPath, currentWorkspaceState)
     : []
   const behaviorScenarios = evaluateBehaviorScenarios(contract, behaviorEvidence)
 
@@ -1279,7 +1280,15 @@ function evaluateBehaviorScenarios(
       const derivedStatus = deriveStatusFromCoverage(evidence)
       const coverageLevel = evidence.coverageLevel ?? (derivedStatus === 'verified' ? 'exact' : 'missing')
       const freshness = evidence.freshness
-      const detail = buildEvaluationDetail(scenario.name, derivedStatus, coverageLevel, freshness, evidence.equivalenceRationale)
+      const detail = buildEvaluationDetail(
+        scenario.name,
+        derivedStatus,
+        coverageLevel,
+        freshness,
+        evidence.equivalenceRationale,
+        evidence.evidenceReference,
+        evidence.reason,
+      )
 
       return {
         scenarioId: scenario.id,
@@ -1341,6 +1350,8 @@ function buildEvaluationDetail(
   coverageLevel: string,
   freshness: string | undefined,
   equivalenceRationale?: string,
+  evidenceReference?: string,
+  reason?: string,
 ): string {
   const parts: string[] = []
   if (status === 'verified') {
@@ -1358,8 +1369,14 @@ function buildEvaluationDetail(
   if (freshness && freshness !== 'fresh' && status !== 'not_applicable') {
     parts.push(`Freshness: ${freshness}.`)
   }
+  if (evidenceReference) {
+    parts.push(`Evidence: ${evidenceReference}.`)
+  }
   if (equivalenceRationale) {
-    parts.push(`Equivalence: ${equivalenceRationale}.`)
+    parts.push(`${coverageLevel}: ${equivalenceRationale}.`)
+  }
+  if (reason && reason !== parts[0]) {
+    parts.push(reason)
   }
   return parts.join(' ')
 }
@@ -1379,6 +1396,252 @@ function findBehaviorEvidence(
   }
   // Fall back to name matching
   return evidenceMappings.find((evidence) => normalizeEvidenceKey(evidence.scenarioName) === normalizedScenario)
+}
+
+async function collectBehaviorEvidence(
+  projectDir: string,
+  behaviorPath: string,
+  currentState: import('../types.js').CurrentWorkspaceState,
+): Promise<import('../types.js').BehaviorScenarioEvidence[]> {
+  const tableEvidence = await validateReferencedBehaviorEvidenceFiles(
+    projectDir,
+    await parseBehaviorEvidenceMappings(behaviorPath),
+    currentState,
+  )
+  const fileEvidence = await parseBehaviorEvidenceFiles(projectDir, currentState)
+  return mergeBehaviorEvidence(tableEvidence, fileEvidence)
+}
+
+function mergeBehaviorEvidence(
+  tableEvidence: import('../types.js').BehaviorScenarioEvidence[],
+  fileEvidence: import('../types.js').BehaviorScenarioEvidence[],
+): import('../types.js').BehaviorScenarioEvidence[] {
+  const merged = new Map<string, import('../types.js').BehaviorScenarioEvidence>()
+  for (const evidence of fileEvidence) {
+    merged.set(getBehaviorEvidenceMergeKey(evidence), evidence)
+  }
+  for (const evidence of tableEvidence) {
+    merged.set(getBehaviorEvidenceMergeKey(evidence), evidence)
+  }
+  return [...merged.values()]
+}
+
+function getBehaviorEvidenceMergeKey(evidence: import('../types.js').BehaviorScenarioEvidence): string {
+  return evidence.scenarioId || normalizeEvidenceKey(evidence.scenarioName)
+}
+
+async function validateReferencedBehaviorEvidenceFiles(
+  projectDir: string,
+  tableEvidence: import('../types.js').BehaviorScenarioEvidence[],
+  currentState: import('../types.js').CurrentWorkspaceState,
+): Promise<import('../types.js').BehaviorScenarioEvidence[]> {
+  const validated: import('../types.js').BehaviorScenarioEvidence[] = []
+  for (const evidence of tableEvidence) {
+    validated.push(await validateReferencedBehaviorEvidenceFile(projectDir, evidence, currentState))
+  }
+  return validated
+}
+
+async function validateReferencedBehaviorEvidenceFile(
+  projectDir: string,
+  evidence: import('../types.js').BehaviorScenarioEvidence,
+  currentState: import('../types.js').CurrentWorkspaceState,
+): Promise<import('../types.js').BehaviorScenarioEvidence> {
+  const normalizedReference = evidence.evidenceReference.replace(/\\/g, '/')
+  if (!normalizedReference.startsWith('.sisyphus/evidence/')) return evidence
+
+  const evidencePath = createSafePath(projectDir, ...normalizedReference.split('/'))
+  let content = ''
+  try {
+    content = await fs.readFile(evidencePath, 'utf-8')
+  } catch {
+    return {
+      ...evidence,
+      status: evidence.status === 'not_applicable' ? 'not_applicable' : 'missing_evidence',
+      coverageLevel: evidence.coverageLevel === 'not_applicable' ? 'not_applicable' : 'missing',
+      freshness: 'stale',
+      reason: `${evidence.reason} Referenced scenario evidence file is missing: ${evidence.evidenceReference}.`,
+    }
+  }
+
+  const fields = parseMarkdownEvidenceFields(content)
+  const timestamp = getEvidenceField(fields, 'timestamp', 'recorded at', 'verified at')
+  const gitHead = getEvidenceField(fields, 'git head', 'git sha', 'commit')
+  const freshnessResult = classifyScenarioEvidenceFreshness({
+    scenarioId: getEvidenceField(fields, 'scenario reference', 'scenario id', 'scenario') ?? evidence.scenarioId,
+    evidenceType: getEvidenceField(fields, 'evidence type', 'type') ?? evidence.evidenceType,
+    testFileOrMethod: getEvidenceField(fields, 'test file/method', 'test file', 'test method') ?? evidence.evidenceReference,
+    commandOrSteps: getEvidenceField(fields, 'command/steps', 'command', 'steps'),
+    result: getEvidenceField(fields, 'result', 'status'),
+    timestamp,
+    gitHead,
+    coverageRationale: getEvidenceField(fields, 'coverage rationale', 'equivalence rationale', 'rationale') ?? evidence.equivalenceRationale,
+    coreCodeMapping: getEvidenceField(fields, 'core code mapping', 'code mapping', 'core mapping'),
+  }, currentState)
+
+  if (freshnessResult.freshness === 'stale') {
+    return {
+      ...evidence,
+      freshness: 'stale',
+      reason: `${evidence.reason} Referenced scenario evidence is stale: ${freshnessResult.reason}.`,
+    }
+  }
+
+  const missingFields = freshnessResult.missingFields ?? []
+  return {
+    ...evidence,
+    reason: missingFields.length > 0
+      ? `${evidence.reason} Evidence metadata missing: ${missingFields.join(', ')}.`
+      : evidence.reason,
+  }
+}
+
+async function parseBehaviorEvidenceFiles(
+  projectDir: string,
+  currentState: import('../types.js').CurrentWorkspaceState,
+): Promise<import('../types.js').BehaviorScenarioEvidence[]> {
+  const evidenceDir = path.join(projectDir, '.sisyphus', 'evidence')
+  try {
+    const entries = await fs.readdir(evidenceDir, { withFileTypes: true })
+    const evidenceFiles = entries
+      .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+      .map(entry => entry.name)
+      .sort()
+
+    const result: import('../types.js').BehaviorScenarioEvidence[] = []
+    for (const fileName of evidenceFiles) {
+      const filePath = path.join(evidenceDir, fileName)
+      const content = await fs.readFile(filePath, 'utf-8')
+      result.push(parseBehaviorEvidenceFile(fileName, content, currentState))
+    }
+    return result
+  } catch {
+    return []
+  }
+}
+
+function parseBehaviorEvidenceFile(
+  fileName: string,
+  content: string,
+  currentState: import('../types.js').CurrentWorkspaceState,
+): import('../types.js').BehaviorScenarioEvidence {
+  const fields = parseMarkdownEvidenceFields(content)
+  const scenarioId = getEvidenceField(fields, 'scenario reference', 'scenario id', 'scenario') || inferScenarioIdFromEvidenceFileName(fileName)
+  const evidenceType = getEvidenceField(fields, 'evidence type', 'type') || 'manual'
+  const testFileMethod = getEvidenceField(fields, 'test file/method', 'test file', 'test method')
+  const commandSteps = getEvidenceField(fields, 'command/steps', 'command', 'steps')
+  const resultField = getEvidenceField(fields, 'result', 'status')
+  const timestamp = getEvidenceField(fields, 'timestamp', 'recorded at', 'verified at')
+  const gitHead = getEvidenceField(fields, 'git head', 'git sha', 'commit')
+  const coverageRationale = getEvidenceField(fields, 'coverage rationale', 'equivalence rationale', 'rationale')
+  const coreCodeMapping = getEvidenceField(fields, 'core code mapping', 'code mapping', 'core mapping')
+  let coverageLevel = normalizeCoverageLevel(getEvidenceField(fields, 'coverage level', 'coverage') || '')
+  const freshnessResult = classifyScenarioEvidenceFreshness({ timestamp, gitHead }, currentState)
+  let status = normalizeBehaviorEvidenceStatus(resultField || '')
+
+  const missingFields = collectMissingEvidenceFields({
+    scenarioId,
+    evidenceType,
+    testFileMethod,
+    commandSteps,
+    resultField,
+    timestamp,
+    gitHead,
+    coverageRationale,
+    coreCodeMapping,
+  })
+
+  if (coverageLevel === 'equivalent' && !coverageRationale) {
+    coverageLevel = 'partial'
+    missingFields.push('coverage rationale for equivalent coverage')
+  }
+  if (status === 'verified' && missingFields.length > 0) {
+    status = 'missing_evidence'
+  }
+
+  const reasonParts = [
+    `Evidence file .sisyphus/evidence/${fileName} ${status === 'verified' ? 'validates' : 'does not fully validate'} scenario "${scenarioId}".`,
+    `Test: ${testFileMethod || 'missing'}.`,
+    `Command/steps: ${commandSteps || 'missing'}.`,
+    `Core code: ${coreCodeMapping || 'missing'}.`,
+    `Freshness: ${freshnessResult.freshness} (${freshnessResult.reason}).`,
+  ]
+  if (missingFields.length > 0) {
+    reasonParts.push(`Missing required evidence field(s): ${missingFields.join(', ')}.`)
+  }
+
+  return {
+    scenarioName: scenarioId,
+    scenarioId,
+    status,
+    evidenceType,
+    evidenceReference: `.sisyphus/evidence/${fileName}`,
+    reason: reasonParts.join(' '),
+    criticality: 'critical',
+    coverageLevel,
+    freshness: freshnessResult.freshness,
+    ...(coverageRationale ? { equivalenceRationale: coverageRationale } : {}),
+  }
+}
+
+function parseMarkdownEvidenceFields(content: string): Map<string, string> {
+  const fields = new Map<string, string>()
+  const lines = content.split('\n')
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] ?? ''
+    const cleaned = line
+      .trim()
+      .replace(/^[-*]\s+/, '')
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/\*\*/g, '')
+    const inline = cleaned.match(/^([^:|]+):\s*(.+)$/)
+    if (inline) {
+      fields.set(normalizeEvidenceFieldName(inline[1] ?? ''), (inline[2] ?? '').trim())
+      continue
+    }
+
+    const heading = cleaned.match(/^([^:|]+)$/)
+    if (heading && index + 1 < lines.length) {
+      const next = (lines[index + 1] ?? '').trim().replace(/^[-*]\s+/, '')
+      if (next && !next.startsWith('#') && !next.includes(':')) {
+        fields.set(normalizeEvidenceFieldName(heading[1] ?? ''), next)
+      }
+    }
+  }
+  return fields
+}
+
+function getEvidenceField(fields: Map<string, string>, ...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = fields.get(normalizeEvidenceFieldName(name))
+    if (value) return value
+  }
+  return undefined
+}
+
+function normalizeEvidenceFieldName(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, ' ')
+}
+
+function collectMissingEvidenceFields(fields: Record<string, string | undefined>): string[] {
+  const required: Array<[keyof typeof fields, string]> = [
+    ['scenarioId', 'scenario reference'],
+    ['evidenceType', 'evidence type'],
+    ['testFileMethod', 'test file/method'],
+    ['commandSteps', 'command/steps'],
+    ['resultField', 'result'],
+    ['timestamp', 'timestamp'],
+    ['gitHead', 'git HEAD'],
+    ['coverageRationale', 'coverage rationale'],
+    ['coreCodeMapping', 'core code mapping'],
+  ]
+  return required.filter(([key]) => !fields[key]).map(([, label]) => label)
+}
+
+function inferScenarioIdFromEvidenceFileName(fileName: string): string {
+  const baseName = fileName.replace(/\.md$/i, '')
+  const scenarioPrefix = baseName.match(/^([A-Za-z]+-\d+)/)
+  return scenarioPrefix?.[1] ?? baseName
 }
 
 async function parseBehaviorEvidenceMappings(behaviorPath: string): Promise<import('../types.js').BehaviorScenarioEvidence[]> {
@@ -1614,7 +1877,10 @@ function classifyBehaviorScenarioGap(scenario: BehaviorScenarioCheckResult): Cla
     kind,
     message,
     nextStep,
-  }
+    scenarioId: scenario.scenarioId,
+    scenarioName: scenario.name,
+    evidenceReference: scenario.evidenceReference,
+  } as ClassifiedEvidenceGap
 }
 
 async function parseBehaviorScenarios(behaviorPath: string): Promise<string[]> {

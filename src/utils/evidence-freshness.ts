@@ -4,10 +4,29 @@ import { join } from 'node:path'
 
 import type {
   AcceptanceState,
+  BehaviorFreshness,
   CurrentWorkspaceState,
   EvidenceFreshnessMetadata,
   EvidenceFreshnessResult,
 } from '../types.js'
+
+export interface ScenarioEvidenceFreshnessInput {
+  timestamp?: string
+  gitHead?: string
+  scenarioId?: string
+  evidenceType?: string
+  testFileOrMethod?: string
+  commandOrSteps?: string
+  result?: string
+  coverageRationale?: string
+  coreCodeMapping?: string
+}
+
+export interface ScenarioEvidenceFreshnessResult {
+  freshness: BehaviorFreshness
+  reason: string
+  missingFields?: string[]
+}
 
 /**
  * Classify stored evidence freshness by comparing stored git/workspace
@@ -148,6 +167,101 @@ export function createEvidenceFreshnessMetadata(
     evidenceChecks,
     evidenceSummary,
   }
+}
+
+/**
+ * Classify one behavior scenario evidence file against the current workspace.
+ * Evidence without both timestamp and git HEAD is intentionally unknown, not
+ * fresh, because behavior evidence must be tied to an executable snapshot.
+ */
+export function classifyScenarioEvidenceFreshness(
+  evidence: ScenarioEvidenceFreshnessInput,
+  currentState: CurrentWorkspaceState,
+): ScenarioEvidenceFreshnessResult {
+  const missingFields = collectMissingScenarioEvidenceFields(evidence)
+
+  if (!evidence.timestamp && !evidence.gitHead) {
+    return {
+      freshness: 'unknown',
+      reason: 'Evidence is missing timestamp and git HEAD.',
+      missingFields,
+    }
+  }
+
+  const staleDetails: string[] = []
+
+  if (evidence.gitHead && !currentState.gitHead) {
+    return {
+      freshness: 'unknown',
+      reason: 'Current git HEAD is unavailable.',
+      missingFields,
+    }
+  }
+
+  if (evidence.gitHead && currentState.gitHead && evidence.gitHead !== currentState.gitHead) {
+    staleDetails.push(`git HEAD changed: evidence ${evidence.gitHead.slice(0, 8)} vs current ${currentState.gitHead.slice(0, 8)}`)
+  }
+
+  if (evidence.timestamp) {
+    const evidenceMs = new Date(evidence.timestamp).getTime()
+    if (Number.isNaN(evidenceMs)) {
+      staleDetails.push('evidence timestamp is invalid')
+    } else if (currentState.latestChangeTimestamp != null && currentState.latestChangeTimestamp > evidenceMs) {
+      staleDetails.push(
+        `workspace modified after evidence timestamp (latest change: ${new Date(currentState.latestChangeTimestamp).toISOString()}, evidence: ${evidence.timestamp})`,
+      )
+    }
+  }
+
+  if (staleDetails.length > 0) {
+    return {
+      freshness: 'stale',
+      reason: staleDetails.join('; '),
+      missingFields,
+    }
+  }
+
+  return {
+    freshness: 'fresh',
+    reason: 'Evidence timestamp and git HEAD match the current workspace.',
+    missingFields,
+  }
+}
+
+export function parseScenarioEvidenceMetadata(content: string): ScenarioEvidenceFreshnessInput {
+  const metadata: ScenarioEvidenceFreshnessInput = {}
+  const fields: Array<[keyof ScenarioEvidenceFreshnessInput, RegExp]> = [
+    ['scenarioId', /(?:^|\n)\s*(?:[-*]\s*)?(?:scenario(?:\s+id)?|scenario)\s*:\s*(.+)/i],
+    ['evidenceType', /(?:^|\n)\s*(?:[-*]\s*)?evidence\s+type\s*:\s*(.+)/i],
+    ['testFileOrMethod', /(?:^|\n)\s*(?:[-*]\s*)?(?:test\s+(?:file|method)|test)\s*:\s*(.+)/i],
+    ['commandOrSteps', /(?:^|\n)\s*(?:[-*]\s*)?(?:command|steps?)\s*:\s*(.+)/i],
+    ['result', /(?:^|\n)\s*(?:[-*]\s*)?result\s*:\s*(.+)/i],
+    ['timestamp', /(?:^|\n)\s*(?:[-*]\s*)?(?:timestamp|recorded\s+at)\s*:\s*(.+)/i],
+    ['gitHead', /(?:^|\n)\s*(?:[-*]\s*)?(?:git\s+head|head|commit)\s*:\s*([0-9a-f]{7,40})/i],
+    ['coverageRationale', /(?:^|\n)\s*(?:[-*]\s*)?(?:coverage\s+rationale|rationale)\s*:\s*(.+)/i],
+    ['coreCodeMapping', /(?:^|\n)\s*(?:[-*]\s*)?(?:core\s+code\s+mapping|code\s+mapping|core\s+code)\s*:\s*(.+)/i],
+  ]
+
+  for (const [field, pattern] of fields) {
+    const value = content.match(pattern)?.[1]?.trim()
+    if (value) metadata[field] = value
+  }
+
+  return metadata
+}
+
+function collectMissingScenarioEvidenceFields(evidence: ScenarioEvidenceFreshnessInput): string[] {
+  const required: Array<[keyof ScenarioEvidenceFreshnessInput, string]> = [
+    ['scenarioId', 'scenario reference'],
+    ['evidenceType', 'evidence type'],
+    ['testFileOrMethod', 'test file or method'],
+    ['commandOrSteps', 'command or steps'],
+    ['result', 'result'],
+    ['coverageRationale', 'coverage rationale'],
+    ['coreCodeMapping', 'core code mapping'],
+  ]
+
+  return required.filter(([field]) => !evidence[field]).map(([, label]) => label)
 }
 
 /**
