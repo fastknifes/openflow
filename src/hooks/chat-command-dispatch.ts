@@ -47,8 +47,14 @@ export async function dispatchOpenFlowCommand(
     return true
   }
 
+  // Legacy issue-mode: compatibility-only fallback (not an active workflow entry)
+  if (trimmed.match(/^\/openflow-issue(?:\s+(.+))?$/)) {
+    appendGuardMessage(output, '`/openflow-issue` is compatibility-only. Issue-mode is not an active Quality Gate workflow entry point. Use `/openflow-feature` for design or `openflow-quality-gate` skill for verification.')
+    return true
+  }
+
   if (trimmed.match(/^\/openflow-verify(?:\s+(.+))?$/)) {
-    appendGuardMessage(output, '`/openflow-verify` is deprecated. Use the `openflow-quality-gate` skill instead, which automatically runs evidence-aware verify as part of its quality gate process.')
+    appendGuardMessage(output, '`/openflow-verify` is a compatibility-only path and is deprecated. It is not an active normal workflow entry point. Use the `openflow-quality-gate` skill instead, which automatically runs evidence-aware verify as part of its quality gate process.')
     return true
   }
 
@@ -128,7 +134,17 @@ export async function dispatchOpenFlowCommand(
   }
 
   if (trimmed.match(/^\/openflow-harden(?:\s+(.+))?$/)) {
-    appendGuardMessage(output, '`/openflow-harden` is deprecated. Use the `openflow-quality-gate` skill instead, which automatically assesses risk and runs harden only when required as part of its quality gate process.')
+    appendGuardMessage(output, '`/openflow-harden` is a compatibility-only path and is deprecated. It is not an active normal workflow entry point. Use the `openflow-quality-gate` skill instead, which automatically assesses risk and runs harden only when required as part of its quality gate process.')
+    return true
+  }
+
+  if (trimmed.match(/^\/openflow-issue(?:\s+(.+))?$/)) {
+    appendGuardMessage(output, '`/openflow-issue` is a compatibility-only path and is not an active Quality Gate workflow entry point. For uncertain problems, use natural conversation or the `openflow-quality-gate` skill after implementation.')
+    return true
+  }
+
+  if (trimmed.match(/^\/openflow-issue(?:\s+(.+))?$/)) {
+    appendGuardMessage(output, '`/openflow-issue` is a compatibility-only path and not an active Quality Gate workflow entry point. For issue-like work, use the standard feature workflow or describe the problem in natural language so the AI can route it appropriately.')
     return true
   }
 

@@ -791,6 +791,9 @@ export interface AcceptanceState {
   postHocIssue?: boolean
   /** Implementation state for stateful quality guardrails */
   implementationState?: ImplementationStateMetadata
+  /** Tracks whether the user has explicitly confirmed archive for a ready_for_archive implementation run */
+  archiveRunConfirmationStatus?: 'confirmed' | 'awaiting'
+  archiveRunConfirmedAt?: string
 }
 
 // 按阶段分段的文件变更记录

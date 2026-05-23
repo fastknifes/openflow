@@ -5,7 +5,7 @@ import { type AcceptanceState, type CurrentPromotionSuggestion, type Implementat
 import { sanitizeFeatureName, createSafePath, escapeMarkdown } from '../utils/security.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { fileExists } from '../hooks/file-utils.js'
-import { getImplementationState, loadAcceptanceState, saveAcceptanceState, setWaitingForDocUpdateConfirm } from '../utils/acceptance-state.js'
+import { getImplementationState, loadAcceptanceState, saveAcceptanceState, setWaitingForDocUpdateConfirm, getArchiveRunStatusLabel, isArchiveRunConfirmed, setArchiveRunAwaitingConfirmation } from '../utils/acceptance-state.js'
 import {
   applyPromotionSuggestions,
   buildPromotionSuggestions,
@@ -454,7 +454,9 @@ async function resolveArchiveImplementationRun(ctx: OpenFlowContext, feature: st
 }
 
 function isArchiveAllowedRunStatus(status: ImplementationRun['status']): boolean {
-  return status === 'ready_for_archive' || status === 'archived'
+  // Only already-archived runs pass through without explicit confirmation.
+  // ready_for_archive requires explicit user confirmation before proceeding.
+  return status === 'archived'
 }
 
 async function recordArchiveRunEvent(ctx: OpenFlowContext, run: ImplementationRun): Promise<void> {

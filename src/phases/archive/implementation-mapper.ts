@@ -264,7 +264,26 @@ async function generateBehaviorMappingSection(
     ? ['### Evidence Files', '', ...evidenceFiles.map(file => `- ${escapeMarkdown(file)}`)].join('\n') + '\n'
     : ''
 
-  return [header, sep, ...lines].join('\n') + '\n' + (evidenceFilesSection ? `\n${evidenceFilesSection}` : '')
+  // Build behavior evidence summary table
+  const evidenceRows = enrichedRows.filter(row =>
+    row.evidenceRef && row.evidenceRef !== 'N/A'
+  )
+  const coreCodeFiles = [...new Set(changes.map(c => c.filePath).filter(Boolean))].join(', ')
+  const behaviorEvidenceSection = evidenceRows.length > 0
+    ? [
+        '',
+        '### Behavior Evidence',
+        '',
+        '| Scenario ID | Behavior | Evidence Reference | Core Code Files |',
+        '|-------------|----------|--------------------|-----------------|',
+        ...evidenceRows.map(row =>
+          `| ${escapeMarkdown(row.scenarioId ?? row.name)} | ${escapeMarkdown(row.name)} | ${escapeMarkdown(row.evidenceRef)} | ${escapeMarkdown(coreCodeFiles)} |`
+        ),
+        '',
+      ].join('\n')
+    : ''
+
+  return [header, sep, ...lines].join('\n') + '\n' + behaviorEvidenceSection + (evidenceFilesSection ? `\n${evidenceFilesSection}` : '')
 }
 
 interface BehaviorMappingRow {
@@ -323,11 +342,13 @@ function parseBehaviorMappingRows(content: string): BehaviorMappingRow[] {
   for (const rawLine of lines) {
     const line = rawLine.trim()
     const heading = line.match(/^###\s+(Scenario|Boundary):\s*(.+)$/i)
+      ?? line.match(/^###\s+([A-Za-z]+-\d+)\s*[:：]\s*(.+)$/)
     if (heading) {
       pushCurrent()
+      const isFirstFormat = /^(Scenario|Boundary)$/i.test(heading[1]!)
       current = {
-        type: heading[1]!.toLowerCase() === 'boundary' ? 'boundary' : 'scenario',
-        name: heading[2]!.trim(),
+        type: /^boundary$/i.test(heading[1]!) ? 'boundary' : 'scenario',
+        name: isFirstFormat ? heading[2]!.trim() : `${heading[1]}: ${heading[2]!.trim()}`,
         given: [],
         when: [],
         then: [],

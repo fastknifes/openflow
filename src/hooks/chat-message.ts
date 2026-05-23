@@ -266,7 +266,8 @@ function shouldSuppressFeatureSuggestionForActiveDesignFlow(
 
   return /(?:prometheus|plan builder|openflow-brainstorm|brainstorm|openflow-writing-plan|writing[-\s]?plan)/iu.test(signalText)
     || /(?:\.sisyphus[\\/](?:drafts|plans)|规划草稿|执行计划|实现计划|开发计划|planning draft|development plan)/iu.test(signalText)
-    || /OpenFlow command:\s*\/openflow-(?:issue|feature|writing-plan)\b/iu.test(signalText)
+    // Legacy issue-mode suppression removed; issue-mode is no longer an active workflow
+    || /OpenFlow command:\s*\/openflow-(?:feature|writing-plan)\b/iu.test(signalText)
 }
 
 function readString(source: Record<string, unknown>, path: string[]): string | undefined {
