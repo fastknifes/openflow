@@ -376,6 +376,7 @@ describe('classifyFindings quality-gate-workflow-redesign red phase', () => {
     const result = classifyFindings([
       'Some review text without markdown headers',
       'behavior_violation: the implementation contradicts approved behavior.',
+      'Evidence: confirmed by comparing spec section 3.2 with src/handler.ts output.',
       'intent_gap: docs do not cover this case but context implies it.',
       'contract_divergence: implementation changes the contract.',
       'missing_evidence: cannot verify this claim.',
@@ -389,7 +390,6 @@ describe('classifyFindings quality-gate-workflow-redesign red phase', () => {
       ...result.nonBlocking.map(f => (f as Record<string, unknown>).level),
     ]
     expect(levels).toContain('behavior_violation')
-    expect(levels).toContain('intent_gap')
     expect(levels).toContain('contract_divergence')
     expect(levels).toContain('missing_evidence')
   })

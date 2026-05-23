@@ -1,4 +1,16 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test, mock, beforeEach } from 'bun:test'
+
+// Mock getSchedulerLoop to return undefined by default so archive promotion
+// tests use the synchronous path instead of the DRG scheduler (which would
+// leak state from other test files like index.test.ts).
+mock.module('../../src/index.js', () => {
+  const actual = require('../../src/index.js')
+  return {
+    ...actual,
+    getSchedulerLoop: () => undefined,
+  }
+})
+
 import { handleArchive } from '../../src/commands/archive.js'
 import { defaultConfig, type AcceptanceState, type OpenFlowContext, VerifyReadinessStatus } from '../../src/types.js'
 import { join } from 'node:path'
