@@ -31,7 +31,7 @@ Start with:
 4. Update \`decisions.md\` when the change introduces or reverses trade-offs.
 5. Update \`prd.md\` when product requirements or user scenarios changed.
 6. Modify associated code only after the active docs match the new requirement.
-7. Run relevant tests, then run \`/openflow-verify <feature>\` before archive.
+  7. Run relevant tests, then run \`openflow-quality-gate\` before archive.
 
 ## Guardrails
 
@@ -48,7 +48,7 @@ After completing the change, report:
 - Code files modified
 - Tests run and results
 - Drift status relative to the updated design
-- Next step: \`/openflow-verify <feature>\`
+- Next step: \`openflow-quality-gate\`
 `,
   }
 }

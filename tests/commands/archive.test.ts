@@ -733,6 +733,17 @@ describe('archive command', () => {
     const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
     const run = await createImplementationRun(ctx, feature, 'ready_for_archive')
 
+    // Confirm the archive run before attempting archive
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+      archiveRunConfirmationStatus: 'confirmed',
+      archiveRunConfirmedAt: '2026-04-21T00:01:00.000Z',
+    })
+
     const result = await handleArchive(ctx, feature)
 
     expect(result).toContain('Archive Complete')
@@ -1709,7 +1720,7 @@ Enforce synchronous cache invalidation barrier after write commit.
     // The message must reference the stale feature
     expect(result).toContain(`**${staleFeature}**`)
     // The stale-feature state should still exist (we don't overwrite it)
-    expect(result).toContain('/openflow-verify')
+    expect(result).toContain('openflow-quality-gate')
 
     const acceptanceStateAfter = await loadAcceptanceState(testDir)
     expect(acceptanceStateAfter?.feature).toBe(staleFeature)
@@ -1767,7 +1778,7 @@ Enforce synchronous cache invalidation barrier after write commit.
     // The message must reference the stale feature
     expect(result).toContain(`**${staleFeature}**`)
     // The stale acceptance state should remain unchanged (still belongs to stale-feature)
-    expect(result).toContain('/openflow-verify')
+    expect(result).toContain('openflow-quality-gate')
 
     const acceptanceStateAfter = await loadAcceptanceState(testDir)
     expect(acceptanceStateAfter?.feature).toBe(staleFeature)

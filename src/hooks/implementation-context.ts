@@ -41,7 +41,7 @@ ${sources.join('\n')}
 - Read every existing source above before writing code.
 - Use the active plan and current/change docs as the source of truth.
 - Follow TDD when tests are applicable: RED -> GREEN -> REFACTOR.
-- Before any completion claim, call \`skill(name="openflow-verify"${featureHint})\` and use fresh evidence.
+- Before any completion claim, call \`skill(name="openflow-quality-gate"${featureHint})\` and use fresh evidence.
 - If implementation drifts from design or requirements, update the docs or surface the drift before archive.
 
 ---

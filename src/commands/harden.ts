@@ -75,7 +75,7 @@ interface HardenFindingFinalState extends HardenFinding {
   rebuttalFinalResponse?: string
 }
 
-type FindingsFinalStateGroup = 'resolved_findings' | 'rejected_findings' | 'unresolved_must_fix' | 'unresolved_needs_decision'
+type FindingsFinalStateGroup = 'resolved_findings' | 'rejected_findings' | 'unresolved_must_fix' | 'unresolved_needs_decision' | 'accepted_known_issues'
 
 let activeModels: { reviewerModel?: string; executorModel?: string } = {}
 
@@ -644,7 +644,7 @@ function buildExecutorPrompt(
   ].join('\n')
 }
 
-function filterExecutorFindings(findings: HardenFinding[]): HardenFinding[] {
+export function filterExecutorFindings(findings: HardenFinding[]): HardenFinding[] {
   return findings.filter(finding => {
     const metadata = finding as HardenFinding & { executorAllowed?: boolean; taxonomy?: string; decision?: string }
     if (metadata.executorAllowed === false) return false
@@ -951,7 +951,7 @@ function markFindingNeedsDecision(
 }
 
 function containsExecutorReviewableLevel(reviewText: string): boolean {
-  return /(?:^|\n)\s*Level\s*:\s*(?:behavior_violation|intent_gap|blocking_bug|spec_violation|regression_risk|test_gap)\b/iu.test(reviewText)
+  return /(?:^|\n)\s*Level\s*:\s*(?:behavior_violation|blocking_bug|spec_violation|regression_risk)\b/iu.test(reviewText)
 }
 
 function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFinalStateGroup, HardenFindingFinalState[]> {
@@ -960,6 +960,7 @@ function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFi
     rejected_findings: [],
     unresolved_must_fix: [],
     unresolved_needs_decision: [],
+    accepted_known_issues: [],
   }
   const seen = new Set<string>()
 
@@ -967,7 +968,9 @@ function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFi
     for (const finding of round.findings) {
       const finalFinding = finding as HardenFindingFinalState
       if (!finalFinding.executorVerdict || !finalFinding.finalStateGroup) {
-        if (isDecisionRequiredFinding(finalFinding)) {
+        if (finalFinding.disposition === 'accepted_known_issue') {
+          finalFinding.finalStateGroup = 'accepted_known_issues'
+        } else if (isDecisionRequiredFinding(finalFinding)) {
           finalFinding.finalStateGroup = 'unresolved_needs_decision'
         } else {
           continue
@@ -1001,6 +1004,7 @@ function formatFindingsFinalState(rounds: HardenRoundResult[]): string {
   const orderedGroups: FindingsFinalStateGroup[] = [
     'resolved_findings',
     'rejected_findings',
+    'accepted_known_issues',
     'unresolved_must_fix',
     'unresolved_needs_decision',
   ]
@@ -1036,6 +1040,7 @@ function formatFinalFindingLine(
 
 function defaultDispositionForGroup(group: FindingsFinalStateGroup): string {
   if (group === 'rejected_findings') return 'false_positive'
+  if (group === 'accepted_known_issues') return 'accepted_known_issue'
   if (group === 'unresolved_needs_decision') return 'needs_decision'
   return 'must_fix'
 }
@@ -1043,6 +1048,7 @@ function defaultDispositionForGroup(group: FindingsFinalStateGroup): string {
 function defaultStatusForGroup(group: FindingsFinalStateGroup): HardenFindingStatus {
   if (group === 'resolved_findings') return 'fixed'
   if (group === 'rejected_findings') return 'dismissed'
+  if (group === 'accepted_known_issues') return 'confirmed'
   return 'needs_decision'
 }
 

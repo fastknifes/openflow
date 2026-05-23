@@ -24,7 +24,7 @@ export const zhCN: I18nResource = {
   'commands.verify.failureOptionAccept': '标记成功',
   'commands.verify.failureOptionAcceptDesc': '接受当前失败，标记验证通过',
   'commands.verify.acceptedFailuresMessage':
-    '已接受当前失败项；如需恢复严格验证，请修复失败检查后重新运行 /openflow-verify。',
+    '已接受当前失败项；如需恢复严格验证，请修复失败检查后重新运行质量门 (openflow-quality-gate)。',
 
   // ── Signals: closure ──
   'signals.closure.strong': [

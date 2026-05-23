@@ -31,7 +31,7 @@ export const en: I18nResource = {
   'commands.verify.failureOptionAcceptDesc':
     'Accept the current failures and mark verification as passed',
   'commands.verify.acceptedFailuresMessage':
-    'Current failures have been accepted; to restore strict verification, fix the failing checks and re-run /openflow-verify.',
+    'Current failures have been accepted; to restore strict verification, fix the failing checks and re-run the quality gate (openflow-quality-gate).',
 
   // ── Signals: closure ──
   'signals.closure.strong': [

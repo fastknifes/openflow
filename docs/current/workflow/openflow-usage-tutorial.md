@@ -122,23 +122,17 @@ openflow-quality-gate
 /openflow-archive demo-feature
 ```
 
-### 路径 2：调查一个不确定问题
+### 路径 2：调查一个不确定问题（兼容性保留）
 
-1. 先做 issue 澄清
+> `/openflow-issue` 是兼容性保留路径，不再是活跃的质量门工作流入口。对于不确定问题，建议直接用自然语言描述，由 AI 判断是否需要进入 `/openflow-feature` 或 `openflow-quality-gate`。
 
-```text
-/openflow-issue demo-issue --readonly
-```
+1. 先用自然语言描述问题
+2. 由 AI 判断路由：
+   - 需要设计澄清 → `/openflow-feature`
+   - 代码完成后验证 → `openflow-quality-gate`
+   - 归档 → `/openflow-archive`
 
-2. 根据 issue 结果判断：
-
-- 继续调查
-- 进入修复
-- 升级到 `/openflow-feature`
-
-3. 后续仍然回到 `openflow-quality-gate / archive` 主链路
-
-如果你只记住这一节，也已经足够开始使用 OpenFlow。
+3. 主链路始终是 `openflow-quality-gate → archive`
 
 ---
 

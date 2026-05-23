@@ -301,7 +301,7 @@ function extractFindingsByLevel(rawFindings: string): ParsedFinding[] {
 
   if (findings.length === 0) {
     // Try to find any level keywords inline
-    const inlinePattern = /\b(blocking_bug|spec_violation|regression_risk|test_gap|design_ambiguity|style_or_preference)\b/gi
+    const inlinePattern = /\b(blocking_bug|behavior_violation|intent_gap|contract_divergence|missing_evidence|spec_violation|regression_risk|test_gap|design_ambiguity|style_or_preference)\b/gi
     let match: RegExpExecArray | null
     const text = rawFindings
     while ((match = inlinePattern.exec(text)) !== null) {

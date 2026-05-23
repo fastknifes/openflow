@@ -144,7 +144,7 @@ function formatChangePacket(input: {
     ? `**Phase**: ${escapeMarkdown(state.phase)}${state.readiness ? ` | **Readiness**: ${escapeMarkdown(state.readiness)}` : ''}`
     : 'No active acceptance state'
   const reverifyWarning = state?.readiness === 'ready' || state?.readiness === 'ready_with_doc_updates'
-    ? `\n\n> This feature has already been verified. After applying changes, run \`/openflow-verify ${escapeMarkdown(input.feature)}\` again to re-validate readiness.`
+    ? `\n\n> This feature has already been verified. After applying changes, run \`openflow-quality-gate\` again to re-validate readiness.`
     : ''
 
   return `## OpenFlow Change Packet
@@ -190,7 +190,7 @@ bun test
 2. Re-validate readiness:
 
 \`\`\`
-/openflow-verify ${escapeMarkdown(input.feature)}
+openflow-quality-gate
 \`\`\`
 
 3. After verification passes, finalize:

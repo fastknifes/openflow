@@ -149,7 +149,7 @@ export async function handleVerify(
 ### Readiness
 - status: ${VerifyReadinessStatus.NotReady}
 - reason: active feature is required to build an evidence packet
-- next_step: run /openflow-verify <feature-name> or create an active plan under .sisyphus/plans/
+- next_step: run openflow-quality-gate or create an active plan under .sisyphus/plans/
 `
   }
 
@@ -721,7 +721,7 @@ export async function classifyReadiness(
       status: VerifyReadinessStatus.NeedsDecision,
       reasonCodes: [decisionType],
       reason: buildNeedsDecisionReason(decisionType, feature),
-      nextStep: 'Resolve the blocking decision, then rerun /openflow-verify.',
+      nextStep: 'Resolve the blocking decision, then rerun the quality gate.',
       decisionType,
     }
   }
@@ -735,7 +735,7 @@ export async function classifyReadiness(
       status: VerifyReadinessStatus.NeedsDecision,
       reasonCodes: ['governance_needs_decision'],
       reason: `Verification needs a governance decision for ${feature} before issue-mode readiness can be confirmed.`,
-      nextStep: 'Resolve the governance promotion decision, then rerun /openflow-verify.',
+      nextStep: 'Resolve the governance promotion decision, then rerun the quality gate.',
     }
   }
 
@@ -838,8 +838,8 @@ export async function classifyReadiness(
       nextStep: acceptedFailures && !hasHardBlocker
         ? t('commands.verify.acceptedFailuresMessage')
         : hasHardBlocker
-          ? 'Provide the missing issue intent artifact or secure the required governance approval, then rerun /openflow-verify.'
-          : 'Fix the failing checks or missing evidence, then rerun /openflow-verify.',
+          ? 'Provide the missing issue intent artifact or secure the required governance approval, then rerun the quality gate.'
+          : 'Fix the failing checks or missing evidence, then rerun the quality gate.',
     }
     const classifiedEvidenceGaps = evidence.classifiedEvidenceGaps
       ?? buildClassifiedGapsFromReasonCodesAndBehavior(reasonCodes, mode, evidence.behaviorScenarios)
@@ -939,8 +939,8 @@ async function formatVerifyResult(
   const failureOptions = readiness.status === VerifyReadinessStatus.NotReady
     ? `
 ### 失败后的可选操作
-- **Option 1**: 修复失败的检查，然后重新运行 /openflow-verify
-- **Option 2**: 如果你确定这些失败是可接受的，运行 /openflow-verify --accept-failures 来标记成功
+- **Option 1**: 修复失败的检查，然后重新运行质量门 (openflow-quality-gate)
+- **Option 2**: 如果你确定这些失败是可接受的，运行 openflow-quality-gate 并传递接受失败的选项来标记成功
 `
     : ''
 
@@ -1006,7 +1006,7 @@ Harden skipped: OMO execution flow not detected.
 
   const nextCommandBlock = readiness.status === VerifyReadinessStatus.Ready || readiness.status === VerifyReadinessStatus.ReadyWithDocUpdates
     ? `\n\`\`\`\n/openflow-archive ${escapeMarkdown(feature)}\n\`\`\``
-    : `\n\`\`\`\n/openflow-verify ${escapeMarkdown(feature)}\n\`\`\``
+    : `\n\`\`\`\nopenflow-quality-gate ${escapeMarkdown(feature)}\n\`\`\``
 
   return `## Verify
 

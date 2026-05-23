@@ -1496,14 +1496,14 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     nextStep = `Quality gate passed for \`${escapeMarkdown(feature)}\`. Archive requires explicit user confirmation before proceeding.`
     nextCommand = `/openflow-archive ${escapeMarkdown(feature)}`
   } else if (effectiveReadiness === VerifyReadinessStatus.NeedsDecision) {
-    nextStep = 'Resolve the blocking decision, then rerun the quality gate or verify.'
-    nextCommand = `/openflow-verify ${escapeMarkdown(feature)}`
+    nextStep = 'Resolve the blocking decision, then rerun the quality gate.'
+    nextCommand = `openflow-quality-gate`
   } else if (effectiveReadiness === 'needs_workflow_stage') {
     nextStep = 'Enter the explicit feature/planning workflow before archive readiness. Do not create a minimal plan or design merely to satisfy the gate.'
     nextCommand = `/openflow-feature ${escapeMarkdown(feature)}`
   } else {
     nextStep = 'Address the readiness issues identified above, then rerun the quality gate.'
-    nextCommand = `/openflow-verify ${escapeMarkdown(feature)}`
+    nextCommand = `openflow-quality-gate`
   }
 
   const nextStepSection = [

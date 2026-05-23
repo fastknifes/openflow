@@ -5,7 +5,7 @@ import { type AcceptanceState, type CurrentPromotionSuggestion, type Implementat
 import { sanitizeFeatureName, createSafePath, escapeMarkdown } from '../utils/security.js'
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { fileExists } from '../hooks/file-utils.js'
-import { getImplementationState, loadAcceptanceState, saveAcceptanceState, setWaitingForDocUpdateConfirm, getArchiveRunStatusLabel, isArchiveRunConfirmed, setArchiveRunAwaitingConfirmation } from '../utils/acceptance-state.js'
+import { getImplementationState, loadAcceptanceState, saveAcceptanceState, setWaitingForDocUpdateConfirm, isArchiveRunConfirmed, setArchiveRunAwaitingConfirmation } from '../utils/acceptance-state.js'
 import {
   applyPromotionSuggestions,
   buildPromotionSuggestions,
@@ -52,9 +52,27 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   }
 
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
+
+  // Load acceptance state early for implementation run confirmation check
+  const earlyAcceptanceStateRaw = await loadAcceptanceState(ctx.directory)
+  const earlyMatchingAcceptanceState = earlyAcceptanceStateRaw?.feature === sanitizedFeature ? earlyAcceptanceStateRaw : null
+
   const implementationRun = await resolveArchiveImplementationRun(ctx, sanitizedFeature)
   if (implementationRun && !isArchiveAllowedRunStatus(implementationRun.status)) {
-    return formatImplementationRunArchiveBlock(sanitizedFeature, implementationRun.status)
+    // ready_for_archive requires explicit user confirmation before archive proceeds
+    if (implementationRun.status === 'ready_for_archive') {
+      if (isArchiveRunConfirmed(earlyMatchingAcceptanceState)) {
+        // User has explicitly confirmed — allow archive to proceed
+      } else {
+        // First encounter: set awaiting state and return confirmation prompt
+        if (earlyMatchingAcceptanceState && earlyMatchingAcceptanceState.archiveRunConfirmationStatus !== 'awaiting') {
+          await setArchiveRunAwaitingConfirmation(ctx.directory)
+        }
+        return formatArchiveRunConfirmationRequired(sanitizedFeature)
+      }
+    } else {
+      return formatImplementationRunArchiveBlock(sanitizedFeature, implementationRun.status)
+    }
   }
 
   const archiveMode = await detectMode(ctx, sanitizedFeature)
@@ -483,6 +501,18 @@ Archive stopped because the implementation run status is **${escapeMarkdown(stat
 Archive requires a completed and verified implementation run. Please run \`openflow-quality-gate\` for **${escapeMarkdown(feature)}** and archive again after it reports ready.`
 }
 
+function formatArchiveRunConfirmationRequired(feature: string): string {
+  return `## Archive Confirmation Required
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive is paused because the implementation run status is **ready_for_archive**.
+
+Awaiting Archive Confirmation: explicit user confirmation is required before archive can proceed.
+
+To confirm archive, set the archive run confirmation status to \`confirmed\` and rerun archive.`
+}
+
 function trackArchivedChangeWorkspaceSource(archivedSources: Set<string>, changeWorkspacePath: string, sourcePath: string): void {
   const normalizedSourcePath = path.resolve(sourcePath)
   if (!isDescendantPath(path.resolve(changeWorkspacePath), normalizedSourcePath)) {
@@ -583,7 +613,7 @@ Archive stopped because no verification readiness was found for **${escapeMarkdo
 
 The current acceptance state (\`.sisyphus/acceptance.local.md\`) belongs to **${escapeMarkdown(staleFeature)}**, not **${escapeMarkdown(feature)}**.
 
-Run \`/openflow-verify ${feature}\` to generate fresh readiness for this feature before archiving.`
+  Run \`openflow-quality-gate\` to generate fresh readiness for this feature before archiving.`
 }
 
 function formatImplementationStateBlock(

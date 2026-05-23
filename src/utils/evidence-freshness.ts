@@ -11,15 +11,15 @@ import type {
 } from '../types.js'
 
 export interface ScenarioEvidenceFreshnessInput {
-  timestamp?: string
-  gitHead?: string
-  scenarioId?: string
-  evidenceType?: string
-  testFileOrMethod?: string
-  commandOrSteps?: string
-  result?: string
-  coverageRationale?: string
-  coreCodeMapping?: string
+  timestamp?: string | undefined
+  gitHead?: string | undefined
+  scenarioId?: string | undefined
+  evidenceType?: string | undefined
+  testFileOrMethod?: string | undefined
+  commandOrSteps?: string | undefined
+  result?: string | undefined
+  coverageRationale?: string | undefined
+  coreCodeMapping?: string | undefined
 }
 
 export interface ScenarioEvidenceFreshnessResult {
