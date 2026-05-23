@@ -62,6 +62,30 @@ describe('OpenFlowPlugin', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('SC-013 red phase: stale issue-mode and old harden/verify commands are not active workflow entries', async () => {
+    const root = join(process.cwd(), '.test-plugin-sc-013-stale-command-exposure')
+    await rm(root, { recursive: true, force: true })
+
+    const plugin = await OpenFlowPlugin(createPluginInput(root) as never)
+    const toolNames = Object.keys(plugin.tool ?? {})
+
+    expect(toolNames).not.toContain('openflow-issue')
+    expect(toolNames).not.toContain('openflow-harden')
+    expect(toolNames).not.toContain('openflow-verify')
+
+    const verifyOutput = createChatOutput('/openflow-verify')
+    await plugin['chat.message']?.({ sessionID: 'session-sc-013-verify' } as never, verifyOutput)
+    expect(firstOutputText(verifyOutput)).toContain('compatibility-only')
+    expect(firstOutputText(verifyOutput)).not.toContain('active normal workflow entry point')
+
+    const hardenOutput = createChatOutput('/openflow-harden')
+    await plugin['chat.message']?.({ sessionID: 'session-sc-013-harden' } as never, hardenOutput)
+    expect(firstOutputText(hardenOutput)).toContain('compatibility-only')
+    expect(firstOutputText(hardenOutput)).not.toContain('active normal workflow entry point')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('dispatches explicit slash commands through chat.message and applies config reload', async () => {
     const root = join(process.cwd(), '.test-plugin-tool')
     await rm(root, { recursive: true, force: true })

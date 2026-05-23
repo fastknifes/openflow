@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { gradeComplexityFromDiff } from '../../src/utils/harden-utils.js'
+import { classifyFindings, gradeComplexityFromDiff } from '../../src/utils/harden-utils.js'
 
 describe('gradeComplexityFromDiff', () => {
   test('empty diff returns trivial', () => {
@@ -174,5 +174,87 @@ describe('gradeComplexityFromDiff', () => {
       '+still going',
     ].join('\n')
     expect(gradeComplexityFromDiff(diff)).toBe('trivial')
+  })
+})
+
+describe('classifyFindings quality-gate-workflow-redesign red phase', () => {
+  test('SC-003 records explicit behavior violation as fixable and blocking', () => {
+    const result = classifyFindings([
+      '### Finding H-SC-003',
+      'Level: spec_violation',
+      'The behavior.md explicitly requires behavior X, but src/gate.ts implements behavior Y.',
+      'Evidence: docs/changes/feature/behavior.md says X; src/gate.ts does Y.',
+      'Files: src/gate.ts',
+    ].join('\n'), [])
+
+    const finding = result.actionable[0] as Record<string, unknown>
+    expect(finding?.taxonomy).toBe('behavior_violation')
+    expect(finding?.decision).toBe('fix_implementation')
+    expect(finding?.readinessEffect).toBe('blocks_until_resolved')
+  })
+
+  test('SC-004 records aligned inferable intent gap without blocking readiness', () => {
+    const result = classifyFindings([
+      '### Finding H-SC-004',
+      'Level: design_ambiguity',
+      'Approved docs do not explicitly cover fallback logging, but surrounding context implies it should be allowed.',
+      'Evidence: design context supports the current implementation.',
+      'Files: src/fallback.ts',
+    ].join('\n'), [])
+
+    const finding = [...result.ambiguous, ...result.nonBlocking][0] as Record<string, unknown>
+    expect(finding?.taxonomy).toBe('intent_gap')
+    expect(finding?.inferredIntent).toContain('fallback logging should be allowed')
+    expect(finding?.confidence).toBe('medium')
+    expect(finding?.alignment).toBe('aligned')
+    expect(finding?.decision).toBe('doc_update_required')
+    expect(finding?.readinessEffect).toBe('ready_with_doc_updates_allowed')
+  })
+
+  test('SC-005 records misaligned inferable intent gap as implementation fix', () => {
+    const result = classifyFindings([
+      '### Finding H-SC-005',
+      'Level: design_ambiguity',
+      'Docs omit retry semantics, but current/design context implies retry once; implementation retries forever.',
+      'Evidence: docs/current/workflow/retry.md implies bounded retry.',
+      'Files: src/retry.ts',
+    ].join('\n'), [])
+
+    const finding = result.actionable[0] as Record<string, unknown>
+    expect(finding?.taxonomy).toBe('intent_gap')
+    expect(finding?.alignment).toBe('misaligned')
+    expect(finding?.decision).toBe('fix_implementation')
+    expect(finding?.executorAllowed).toBe(true)
+  })
+
+  test('SC-006 records uninferable intent gap as needs decision', () => {
+    const result = classifyFindings([
+      '### Finding H-SC-006',
+      'Level: design_ambiguity',
+      'Docs do not cover archive retry order and two reasonable interpretations exist.',
+      'Evidence: behavior.md and design.md are silent.',
+      'Files: src/archive.ts',
+    ].join('\n'), [])
+
+    const finding = result.ambiguous[0] as Record<string, unknown>
+    expect(finding?.taxonomy).toBe('intent_gap')
+    expect(finding?.confidence).toBe('low')
+    expect(finding?.decision).toBe('needs_decision')
+    expect(finding?.decisionQuestion).toContain('archive retry order')
+  })
+
+  test('SC-007 records contract divergence as decision-required and not silently fixable', () => {
+    const result = classifyFindings([
+      '### Finding H-SC-007',
+      'Level: spec_violation',
+      'Implementation changes the approved archive readiness contract by auto-archiving after ready.',
+      'Evidence: behavior.md requires awaiting archive confirmation.',
+      'Files: src/commands/archive.ts',
+    ].join('\n'), [])
+
+    const finding = result.ambiguous[0] as Record<string, unknown>
+    expect(finding?.taxonomy).toBe('contract_divergence')
+    expect(finding?.decision).toBe('needs_decision')
+    expect(finding?.executorAllowed).toBe(false)
   })
 })

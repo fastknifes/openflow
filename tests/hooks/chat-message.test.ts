@@ -351,6 +351,26 @@ describe('chat-message hook', () => {
     }
   })
 
+  test('SC-013 red phase: removed issue-mode command is reported as inactive compatibility-only path', async () => {
+    const root = join(process.cwd(), '.test-chat-sc-013-issue-compatibility')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+    try {
+      const ctx = createContext(root)
+      const hook = createChatMessageHook(ctx)
+      const output = createHookOutput('/openflow-issue some-problem')
+
+      await hook(createInput('session-sc-013-issue'), output)
+
+      const text = (output.parts[0] as { text?: string }).text ?? ''
+      expect(text).toContain('compatibility-only')
+      expect(text).toContain('not an active Quality Gate workflow entry point')
+      expect(text).not.toContain('## OpenFlow Issue')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('runs acceptance detection even when feature phase is disabled', async () => {
     const root = join(process.cwd(), '.test-chat-acceptance-detection')
     await rm(root, { recursive: true, force: true })

@@ -6,6 +6,16 @@ import type {
   HardenTraceEntry,
 } from '../types.js'
 
+export type {
+  HardenContractSource,
+  HardenFindingConfidence,
+  HardenFindingLevel,
+  HardenImplementationAlignment,
+  HardenIntentEvidenceReference,
+  HardenIntentInference,
+  HardenIntentInferenceDecision,
+} from '../types.js'
+
 function normalizeText(value: string | undefined): string {
   return (value ?? '')
     .normalize('NFKC')

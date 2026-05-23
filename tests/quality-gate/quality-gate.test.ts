@@ -1093,6 +1093,145 @@ Summary: one design divergence was accepted as a known issue after verify eviden
     await rm(directory, { recursive: true, force: true }).catch(() => {})
   }, 120000)
 
+  test('SC-001 red phase: quality gate exposes visible run session and session reference', async () => {
+    const directory = await createGitFixture('sc-001-visible-session', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: 'main-session-sc-001' }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerifyWithReadiness(callLog, 'ready'),
+    })
+
+    expect(output).toContain(`Quality Gate: ${FEATURE_A}`)
+    expect(output).toContain('Quality Gate Session')
+    expect(output).toContain('session reference')
+    expect(output).toContain('Harden progress')
+    expect(output).toContain('Verify summary')
+    expect(output).toContain('Readiness')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('SC-002 red phase: harden reviewer and executor are linked below quality gate session', async () => {
+    const directory = await createGitFixture('sc-002-harden-child-sessions', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: 'quality-gate-session-sc-002' }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: pass
+Rounds: 1
+Budget consumed: 100
+Summary: mock harden passed
+
+### Findings Summary
+- H-SC-002 | disposition=resolved | status=confirmed`,
+      overrideVerify: createMockVerify(callLog),
+    })
+
+    expect(output).toContain('Reviewer Session')
+    expect(output).toContain('Executor Session')
+    expect(output).toContain('parent: quality-gate-session-sc-002')
+    expect(output).toContain('round summary')
+    expect(output).not.toContain('Harden Coordinator session')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('SC-011 red phase: ready quality gate labels run as awaiting archive confirmation', async () => {
+    const executionRoot = await createGitFixture('sc-011-awaiting-archive-confirmation', 'multi-file')
+    const ctx = createStandardContext(executionRoot, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+    const callLog: CallLog = { order: [] }
+    const run = await implementationRunStore.createRun(ctx, {
+      feature: FEATURE_A,
+      sessionID: 'session-sc-011',
+      messageID: 'message-sc-011',
+      agent: 'build',
+      directory: executionRoot,
+      backend: 'opencode',
+      backendCommand: 'Use OpenCode native build agent',
+      status: 'quality_gate_pending',
+      containerMode: 'session',
+      eventsPath: '.sisyphus/openflow/events/sc-011.jsonl',
+      observationsPath: '.sisyphus/openflow/observations/sc-011.jsonl',
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: 'session-sc-011' }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerifyWithReadiness(callLog, 'ready'),
+    })
+
+    const updatedRun = await implementationRunStore.getRun(ctx, run.runID)
+    expect(updatedRun?.status).toBe('ready_for_archive')
+    expect(output).toContain('Awaiting Archive Confirmation')
+    expect(output).toContain('Archive will not run until the user explicitly confirms archive')
+    expect(output).not.toContain('Archive Complete')
+
+    await rm(executionRoot, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('SC-012 red phase: limited context distinguishes technical checks from semantic archive readiness', async () => {
+    const directory = await createGitFixture('sc-012-limited-context-semantic-readiness', 'no-diff')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory)
+
+    await rm(join(directory, '.sisyphus', 'plans'), { recursive: true, force: true })
+    await writeFile(join(directory, 'src', 'app.ts'), 'export const appVersion = "2.0"\n', 'utf-8')
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A }, {
+      overrideVerify: createMockVerifyWithReadiness(callLog, 'ready'),
+    })
+    const state = await loadAcceptanceState(directory)
+
+    expect(output).toContain('Technical verification: ready')
+    expect(output).toContain('Semantic archive readiness: unavailable')
+    expect(output).toContain('Full behavior/design context unavailable')
+    expect(state?.qualityGateApplicability?.archiveReadinessEligible).toBe(false)
+    expect(state?.implementationState?.state).not.toBe('ready_for_archive')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
+  test('SC-014 red phase: main conversation summary is concise and complete', async () => {
+    const directory = await createGitFixture('sc-014-main-summary', 'multi-file')
+    const callLog: CallLog = { order: [] }
+    const ctx = createStandardContext(directory, {
+      harden: { ...defaultConfig.harden, enabled: true },
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: 'session-sc-014' }, {
+      overrideHarden: async () => `## Harden Result
+
+Status: pass_with_risks
+Rounds: 1
+Budget consumed: 100
+Summary: accepted one doc update.
+
+### Findings Summary
+- H-SC-014 | disposition=accepted_known_issue | status=confirmed | archive_effect=doc_update_required | evidence=EV-SC-014`,
+      overrideVerify: createMockVerifyWithReadiness(callLog, 'ready_with_doc_updates'),
+    })
+
+    expect(output).toContain('Quality Gate Result Summary')
+    expect(output).toContain('Session: session-sc-014')
+    expect(output).toContain('Readiness: ready_with_doc_updates')
+    expect(output).toContain('Harden: pass_with_risks')
+    expect(output).toContain('Verify: ready_with_doc_updates')
+    expect(output).toContain('Blockers: 0')
+    expect(output).toContain('Doc updates: 1')
+    expect(output).toContain('Archive confirmation required')
+
+    await rm(directory, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
   // ── Evidence freshness is reported ────────────────────────────────────────
 
   test('evidence freshness section is present in output', async () => {

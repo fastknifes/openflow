@@ -95,9 +95,50 @@ export interface GuardianConfig {
   contract_cache: boolean
 }
 
-export type HardenFindingLevel = 'blocking_bug' | 'spec_violation' | 'regression_risk' | 'test_gap' | 'design_ambiguity' | 'style_or_preference'
+export type HardenFindingLevel =
+  | 'behavior_violation'
+  | 'intent_gap'
+  | 'contract_divergence'
+  | 'missing_evidence'
+  | 'blocking_bug'
+  | 'spec_violation'
+  | 'regression_risk'
+  | 'test_gap'
+  | 'design_ambiguity'
+  | 'style_or_preference'
 
 export type HardenFindingConfidence = 'high' | 'medium' | 'low'
+
+export type HardenContractSource =
+  | 'decisions'
+  | 'current'
+  | 'behavior'
+  | 'design'
+  | 'plan'
+  | 'request'
+  | 'diff'
+  | 'implementation'
+  | 'other'
+
+export type HardenImplementationAlignment = 'aligned' | 'misaligned' | 'unknown'
+
+export type HardenIntentInferenceDecision = 'accept_with_doc_update' | 'fix_implementation' | 'needs_decision'
+
+export interface HardenIntentEvidenceReference {
+  source: HardenContractSource
+  reference: string
+  excerpt?: string
+}
+
+export interface HardenIntentInference {
+  missingCoverage: string
+  inferredIntent: string
+  evidenceReferences: HardenIntentEvidenceReference[]
+  confidence: HardenFindingConfidence
+  implementationAlignment: HardenImplementationAlignment
+  decision: HardenIntentInferenceDecision
+  summary?: string
+}
 
 export type HardenFindingStatus = 'suspected' | 'confirmed' | 'fixed' | 'verified' | 'dismissed' | 'needs_decision'
 
@@ -123,6 +164,7 @@ export interface HardenFinding {
   status?: HardenFindingStatus
   disposition?: Disposition
   repeatCount?: number
+  intentInference?: HardenIntentInference
 }
 
 export interface HardenRoundResult {
@@ -541,6 +583,7 @@ export interface VerifyResult {
   evidenceSummary: string
   constraintsChecked: string[]
   verifiedAt: string
+  intentInferences?: HardenIntentInference[]
 }
 
 export interface HardenTerminalSummary {
@@ -740,6 +783,8 @@ export interface AcceptanceState {
   acceptedKnownIssues?: AcceptedKnownIssueSummary[]
   /** Minimal harden terminal summary persisted as JSON */
   hardenSummary?: string
+  /** Structured intent inference outcomes preserved separately from readiness. */
+  intentInferences?: HardenIntentInference[]
   /** Quality-gate orchestration applicability metadata; not verify readiness. */
   qualityGateApplicability?: QualityGateApplicabilityResult
   /** Marks limited-context technical readiness for later post-hoc issue archive handling. */

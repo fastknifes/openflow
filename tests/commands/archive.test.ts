@@ -747,6 +747,23 @@ describe('archive command', () => {
     await rm(testDir, { recursive: true, force: true })
   })
 
+  test('SC-011 red phase: archive waits for explicit confirmation after ready_for_archive', async () => {
+    const feature = 'sc-011-awaiting-confirmation'
+    const testDir = join(process.cwd(), '.test-archive-sc-011-awaiting-confirmation')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+    const run = await createImplementationRun(ctx, feature, 'ready_for_archive')
+
+    const result = await handleArchive(ctx, feature)
+
+    expect(result).toContain('Archive Confirmation Required')
+    expect(result).toContain('Awaiting Archive Confirmation')
+    expect(result).not.toContain('Archive Complete')
+    expect((await implementationRunStore.getRun(ctx, run.runID))?.status).toBe('ready_for_archive')
+    await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+  })
+
   test('archives normally when no implementation run exists', async () => {
     const feature = 'implementation-run-absent'
     const testDir = join(process.cwd(), '.test-archive-implementation-run-absent')

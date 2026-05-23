@@ -186,4 +186,38 @@ Then:
     expect(content).toContain('| Missing optional context | boundary | Given optional context is absent / When user runs the command / Then system continues with fallback | N/A | not_applicable | unknown | not_applicable | src/lib.ts | Boundary scenario; should-pass evidence; advisory. |')
     expect(content).toContain('## 4. 验证与结论')
   })
+
+  test('SC-010 red phase: records scenario id, evidence reference, and core code files', async () => {
+    await setupTestDir()
+    const behaviorPath = join(testDir, 'docs', 'changes', 'test-feat', 'behavior.md')
+    await writeFile(behaviorPath, `# Behavior
+
+### SC-010: Implementation Mapper records behavior to code traceability
+
+Given:
+- Quality Gate reaches Ready.
+When:
+- Implementation Mapper is generated.
+Then:
+- scenario, evidence, and core code files are preserved.
+
+## Evidence Mapping
+
+| Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |
+|-------------|-------------|--------------|---------------|----------------|-----------------------|-----------|--------|
+| SC-010 | critical | .sisyphus/evidence/SC-010-mapper.md | integration test | exact | N/A | fresh | verified |
+`, 'utf-8')
+
+    const content = await generateImplementationMapper({
+      ...baseOptions,
+      behaviorPath,
+      changes: [
+        { filePath: 'src/lib.ts', tool: 'write', timestamp: Date.now() },
+        { filePath: 'src/quality-gate.ts', tool: 'edit', timestamp: Date.now() },
+      ],
+    })
+
+    expect(content).toContain('| Scenario ID | Behavior | Evidence Reference | Core Code Files |')
+    expect(content).toContain('| SC-010 | Implementation Mapper records behavior to code traceability | .sisyphus/evidence/SC-010-mapper.md | src/lib.ts, src/quality-gate.ts |')
+  })
 })
