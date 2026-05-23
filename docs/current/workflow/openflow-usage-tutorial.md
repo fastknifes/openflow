@@ -157,28 +157,16 @@ openflow-quality-gate
 
 ### 场景 B：你看到一个问题，但还不能确定它是不是 bug
 
-用：
+> `/openflow-issue` 是兼容性保留路径，不再是活跃工作流入口。对于不确定问题，建议直接用自然语言描述，由 AI 判断是否需要进入 `/openflow-feature` 或 `openflow-quality-gate`。
 
-```text
-/openflow-issue <issue-name-or-description>
-```
-
-适用场景：
+用自然语言描述问题即可，AI 会根据上下文自动路由：
 
 - 接口结果不对
 - 某个页面展示异常
 - 数据状态不一致
 - 不知道该修代码、修配置、补数据，还是先问业务
 
-这个命令的重点不是直接修，而是先把问题分类清楚。
-
-常见参数：
-
-```text
-/openflow-issue order-status-wrong --readonly
-/openflow-issue coupon-chain-missing --write-doc
-/openflow-issue coupon-chain-missing --continue
-```
+主链路始终是代码完成后调用 `openflow-quality-gate`，然后 `/openflow-archive`。
 
 ---
 
