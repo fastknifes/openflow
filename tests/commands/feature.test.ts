@@ -390,7 +390,10 @@ describe('feature command', () => {
     expect(result).toContain('Assumptions:')
     expect(result).toContain('Pending confirmations:')
     expect(result).toContain('Constraints:')
-    expect(result).toContain('Suggested user action:')
+    expect(result).toContain('## Next Step Options')
+    expect(result).toContain('进入开发计划')
+    expect(result).toContain('检查约束充分性')
+    expect(result).toContain('查看文档')
 
     const changeDirs = await readdir(join(root, 'docs', 'changes'))
     const generatedFile = join(root, 'docs', 'changes', changeDirs[0]!, 'design.md')
@@ -456,6 +459,8 @@ describe('feature command', () => {
     expect(result).toContain('Feature Design Complete')
     expect(result).toContain('Post-Design Confirmation')
     expect(result).toContain('/openflow-writing-plan user-login')
+    expect(result).not.toContain('### Next Step (Advisory)')
+    expect(result).not.toContain('## Next Step Options')
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
       postDesignDecision?: string
@@ -484,6 +489,8 @@ describe('feature command', () => {
     expect(result).toContain('Design Document Review')
     expect(result).toContain('design.md')
     expect(result).toContain('behavior.md')
+    expect(result).not.toContain('### Next Step (Advisory)')
+    expect(result).not.toContain('## Next Step Options')
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
       postDesignDecision?: string
@@ -510,6 +517,8 @@ describe('feature command', () => {
 
     expect(asked.some((item) => item.header === '下一步行动')).toBe(true)
     expect(result).toContain('Documents Ready')
+    expect(result).not.toContain('### Next Step (Advisory)')
+    expect(result).not.toContain('## Next Step Options')
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
       postDesignDecision?: string

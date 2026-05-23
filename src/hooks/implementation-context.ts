@@ -38,6 +38,7 @@ export async function buildImplementationContextPrompt(
 ${sources.join('\n')}
 
 ### Hard Constraints
+- **MUST call \`/openflow-implement${featureHint}\` BEFORE starting any code changes.** This creates an isolated git worktree and an ImplementationRun. Do not edit files in the main worktree directly.
 - Read every existing source above before writing code.
 - Use the active plan and current/change docs as the source of truth.
 - Follow TDD when tests are applicable: RED -> GREEN -> REFACTOR.

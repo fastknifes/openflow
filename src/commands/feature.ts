@@ -268,6 +268,10 @@ async function finalizeFeature(
       }
     }
 
+    if (!hasAskQuestion(toolContext)) {
+      return `${baseResult}\n\n${formatNextStepOptions(session.feature)}`
+    }
+
     return baseResult
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -796,6 +800,16 @@ async function askPostDesignConfirmation(toolContext: unknown, _model?: Requirem
   return undefined
 }
 
+function formatNextStepOptions(feature: string): string {
+  return `## Next Step Options
+
+- ${t('commands.feature.nextStepOptionPlan')}: ${t('commands.feature.nextStepOptionPlanDesc')}
+- ${t('commands.feature.nextStepOptionReview')}: ${t('commands.feature.nextStepOptionReviewDesc')}
+- ${t('commands.feature.nextStepOptionInspect')}: ${t('commands.feature.nextStepOptionInspectDesc')}
+
+> To proceed, manually run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` when ready.`
+}
+
 function formatPostDesignDecisionResult(decision: PostDesignDecision, feature: string, model?: RequirementModel): string {
   if (decision === 'proceed_to_plan') {
     return `## Post-Design Confirmation
@@ -924,20 +938,7 @@ Pending confirmations:
 ${pending}
 
 Constraints:
-${constraints}
-
-## Next Step Options
-
-Design documents are generated. It is recommended to review design.md and behavior.md first to confirm constraints and boundaries are OK before proceeding to implementation planning.
-
-Please choose the next step:
-
-1. **Review design documents** — Call Momus to review constraint sufficiency, identify missing or ambiguous items and attempt to fix them
-2. **Proceed to implementation plan** — Run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` to generate the implementation plan
-3. **Ignore** — Take no action for now, continue the current session
-
-> If the design documents need adjustment, choose option 1; if already confirmed OK, choose option 2 to proceed directly to implementation planning.
-`}
+${constraints}`}
 
 function formatGenerationFailure(feature: string, message: string): string {
   return `## Feature Design Pending

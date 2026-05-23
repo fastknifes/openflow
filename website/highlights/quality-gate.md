@@ -2,8 +2,9 @@
 layout: doc
 ---
 
-# 质量门与硬化
+# 页面已迁移
 
+<<<<<<< Updated upstream
 本文档介绍 OpenFlow 的质量治理机制，包括质量门（Quality Gate）和对抗性硬化（Harden）。
 
 ## 概述

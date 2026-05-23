@@ -10,66 +10,52 @@ export default defineConfig({
     logo: '/logo.svg',
 
     nav: [
-      { text: '介绍', link: '/introduction/' },
-      { text: '快速开始', link: '/getting-started/installation' },
-      { text: '使用指南', link: '/guide/feature-workflow' },
-      { text: '参考', link: '/reference/commands' },
-      { text: '亮点', link: '/highlights/quality-gate' },
+      { text: '指南', link: '/guide/' },
+      { text: '教程', link: '/tutorial/' },
     ],
 
     sidebar: {
-      '/introduction/': [
-        {
-          text: '介绍',
-          items: [
-            { text: '概览', link: '/introduction/' },
-            { text: '核心概念', link: '/introduction/concepts' },
-            { text: '工程哲学', link: '/introduction/philosophy' },
-            { text: '与竞品对比', link: '/introduction/comparison' },
-          ],
-        },
-      ],
-      '/getting-started/': [
-        {
-          text: '快速开始',
-          items: [
-            { text: '安装', link: '/getting-started/installation' },
-            { text: '10 分钟上手', link: '/getting-started/quickstart' },
-            { text: '最小配置', link: '/getting-started/configuration' },
-          ],
-        },
-      ],
       '/guide/': [
         {
-          text: '使用指南',
+          text: '认识 OpenFlow',
           items: [
-            { text: 'Feature 工作流', link: '/guide/feature-workflow' },
-            { text: '行为文档指南', link: '/guide/behavior-document-guide' },
-            { text: '实现工作流', link: '/guide/implement-workflow' },
-            { text: '开发中变更', link: '/guide/mid-development-change' },
-            { text: '迁移已有文档', link: '/guide/migrate-existing-docs' },
-            { text: '归档与追溯', link: '/guide/archive-and-traceability' },
+            { text: '概览', link: '/guide/' },
+            { text: '核心概念', link: '/guide/core-concepts' },
+            { text: '架构图解', link: '/guide/diagrams' },
+            { text: '功能亮点', link: '/guide/highlights' },
+            { text: '适用场景与对比', link: '/guide/comparison' },
+            { text: '目录约定', link: '/guide/directory-conventions' },
           ],
         },
       ],
-      '/reference/': [
+      '/tutorial/': [
+        {
+          text: '安装与上手',
+          items: [
+            { text: '教程概览', link: '/tutorial/' },
+            { text: '手动安装', link: '/tutorial/installation' },
+            { text: 'LLM 自动安装', link: '/tutorial/installation-for-agents' },
+            { text: '10 分钟上手', link: '/tutorial/quickstart' },
+            { text: '最小配置', link: '/tutorial/configuration' },
+          ],
+        },
+        {
+          text: '工作流教程',
+          items: [
+            { text: 'Feature 工作流', link: '/tutorial/feature-workflow' },
+            { text: '实施与执行后端', link: '/tutorial/implementation' },
+            { text: '质量门与归档', link: '/tutorial/quality-gate-and-archive' },
+            { text: 'Issue 上下文处理', link: '/tutorial/issue-context' },
+            { text: '开发中需求变更', link: '/tutorial/mid-development-change' },
+            { text: '迁移已有文档', link: '/tutorial/migrate-docs' },
+          ],
+        },
         {
           text: '参考',
           items: [
-            { text: '命令速查', link: '/reference/commands' },
-            { text: '配置项', link: '/reference/config-options' },
-            { text: '目录约定', link: '/reference/directory-conventions' },
-          ],
-        },
-      ],
-      '/highlights/': [
-        {
-          text: '亮点',
-          items: [
-            { text: '质量门', link: '/highlights/quality-gate' },
-            { text: '漂移守护', link: '/highlights/drift-guardian' },
-            { text: '智能归档', link: '/highlights/smart-archive' },
-            { text: 'TDD/BDD/SDD', link: '/highlights/tdd-bdd-sdd' },
+            { text: '命令速查', link: '/tutorial/commands' },
+            { text: 'FAQ', link: '/tutorial/faq' },
+            { text: '问题排查', link: '/tutorial/troubleshooting' },
           ],
         },
       ],

@@ -10,13 +10,17 @@ Built for brownfield systems where requirement traceability, verification eviden
 
 **Full documentation: [https://fastknifes.github.io/openflow/](https://fastknifes.github.io/openflow/)**
 
+- Manual install: [https://fastknifes.github.io/openflow/tutorial/installation](https://fastknifes.github.io/openflow/tutorial/installation)
+- LLM agent install: [https://fastknifes.github.io/openflow/tutorial/installation-for-agents](https://fastknifes.github.io/openflow/tutorial/installation-for-agents)
+- Quickstart: [https://fastknifes.github.io/openflow/tutorial/quickstart](https://fastknifes.github.io/openflow/tutorial/quickstart)
+
 ## Quick Install
 
-For LLM Agents (Claude Code, Cursor, Trae, etc.):
+For LLM Agents (Claude Code, Cursor, Trae, Qoder, etc.):
 
 ```
 Install and configure OpenFlow by following the instructions here:
-https://fastknifes.github.io/openflow/getting-started/installation
+https://fastknifes.github.io/openflow/tutorial/installation-for-agents
 ```
 
 Manual:
@@ -32,6 +36,8 @@ Then enable the plugin in your `opencode.json`:
   "plugins": ["@fastknife/openflow"]
 }
 ```
+
+Optional integrations such as OMO and GitNexus are documented in the install guide. If they are already installed, reuse the existing configuration instead of reinstalling or overwriting it.
 
 ## License
 
