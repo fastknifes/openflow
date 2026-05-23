@@ -432,10 +432,6 @@ function resolveFindingDisposition(
   const designSupported = hasDesignSupport(finding, designReference)
   const taxonomy = inferFindingTaxonomy(finding)
 
-  if (taxonomy === 'intent_gap') {
-    return resolveIntentGapDisposition(finding)
-  }
-
   if (taxonomy === 'contract_divergence') {
     return {
       group: 'ambiguous',
@@ -445,7 +441,7 @@ function resolveFindingDisposition(
     }
   }
 
-  if (taxonomy === 'missing_evidence') {
+  if (taxonomy === 'missing_evidence' && finding.level === 'missing_evidence') {
     return {
       group: 'ambiguous',
       level: 'missing_evidence',
@@ -456,11 +452,10 @@ function resolveFindingDisposition(
 
   switch (finding.level) {
     case 'behavior_violation':
-    case 'blocking_bug':
       if (evidencePresent) {
         return {
           group: 'actionable',
-          level: finding.level === 'blocking_bug' ? 'blocking_bug' : 'behavior_violation',
+          level: 'behavior_violation',
           disposition: 'must_fix',
           metadata: buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true),
         }
@@ -471,28 +466,51 @@ function resolveFindingDisposition(
         disposition: 'needs_decision',
         metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
       }
+    case 'blocking_bug':
+      if (evidencePresent) {
+        return {
+          group: 'actionable',
+          level: 'blocking_bug',
+          disposition: 'must_fix',
+          metadata: buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true),
+        }
+      }
+      return {
+        group: 'ambiguous',
+        level: 'design_ambiguity',
+        disposition: 'needs_decision',
+        metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+      }
     case 'spec_violation':
       if (designSupported && evidencePresent) {
         return {
           group: 'actionable',
-          level: 'behavior_violation',
+          level: 'spec_violation',
+          disposition: 'must_fix',
+          metadata: buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true),
+        }
+      }
+      if (!designSupported && evidencePresent && (hasBehaviorSourceEvidence(finding) || (designReference.raw.trim() && !isLegacyExtraRequirement(finding)))) {
+        return {
+          group: 'actionable',
+          level: 'spec_violation',
           disposition: 'must_fix',
           metadata: buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true),
         }
       }
       if (!designSupported) {
         return {
-          group: evidencePresent ? 'actionable' : 'ambiguous',
-          level: evidencePresent ? 'behavior_violation' : 'missing_evidence',
-          disposition: evidencePresent ? 'must_fix' : 'needs_decision',
+          group: 'ambiguous',
+          level: 'design_ambiguity',
+          disposition: evidencePresent ? 'design_divergence' : 'needs_decision',
           metadata: evidencePresent
-            ? buildRuntimeMetadata(finding, 'behavior_violation', 'fix_implementation', 'blocks_until_resolved', true)
+            ? buildRuntimeMetadata(finding, 'contract_divergence', 'needs_decision', 'needs_human_decision', false)
             : buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
         }
       }
       return {
         group: 'ambiguous',
-        level: 'missing_evidence',
+        level: 'design_ambiguity',
         disposition: 'needs_decision',
         metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
       }
@@ -506,10 +524,10 @@ function resolveFindingDisposition(
         }
       }
       return {
-        group: 'ambiguous',
-        level: 'missing_evidence',
-        disposition: 'needs_decision',
-        metadata: buildRuntimeMetadata(finding, 'missing_evidence', 'needs_decision', 'needs_human_decision', false),
+        group: 'nonBlocking',
+        level: 'regression_risk',
+        disposition: 'design_divergence',
+        metadata: buildRuntimeMetadata(finding, 'regression_risk', 'needs_decision', 'needs_human_decision', false),
       }
     case 'intent_gap':
       return resolveIntentGapDisposition(finding)
@@ -531,12 +549,20 @@ function resolveFindingDisposition(
       if (isAcceptedKnownIssueCandidate(finding)) {
         return {
           group: 'nonBlocking',
-          level: 'intent_gap',
+          level: 'design_ambiguity',
           disposition: 'accepted_known_issue',
           metadata: buildIntentGapMetadata(finding, 'medium', 'aligned'),
         }
       }
-      return resolveIntentGapDisposition(finding)
+      if (taxonomy === 'intent_gap') {
+        return resolveLegacyDesignAmbiguityIntentGap(finding)
+      }
+      return {
+        group: 'ambiguous',
+        level: 'design_ambiguity',
+        disposition: 'design_divergence',
+        metadata: buildRuntimeMetadata(finding, 'intent_gap', 'needs_decision', 'needs_human_decision', false),
+      }
     case 'test_gap':
       if (isBeyondDesignScope(finding)) {
         return { group: 'nonBlocking', level: 'test_gap', disposition: 'false_positive' }
@@ -593,6 +619,27 @@ function resolveIntentGapDisposition(finding: HardenFinding): FindingDisposition
     disposition: 'needs_decision',
     metadata: buildIntentGapMetadata(finding, confidence, alignment),
   }
+}
+
+function resolveLegacyDesignAmbiguityIntentGap(finding: HardenFinding): FindingDispositionDecision {
+  const base = resolveIntentGapDisposition(finding)
+
+  return {
+    ...base,
+    level: 'design_ambiguity',
+    disposition: base.disposition === 'must_fix' || base.disposition === 'accepted_known_issue'
+      ? base.disposition
+      : 'design_divergence',
+  }
+}
+
+function hasBehaviorSourceEvidence(finding: HardenFinding): boolean {
+  return /\bbehavior(?:\.md)?\b|docs[/\\]changes[/\\][^\s]+[/\\]behavior\.md|docs[/\\]current\b/iu.test(`${finding.description}\n${finding.evidence}`)
+}
+
+function isLegacyExtraRequirement(finding: HardenFinding): boolean {
+  return /\b(?:should\s+add|add\s+.+middleware|input\s+validation\s+middleware|extra\s+step|additional\s+step)\b/iu.test(`${finding.description}\n${finding.evidence}`)
+    || isBeyondDesignScope(finding)
 }
 
 function inferIntentConfidence(finding: HardenFinding): HardenFindingConfidence {

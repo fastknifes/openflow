@@ -1351,12 +1351,18 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     '',
     `- **Title**: ${escapeMarkdown(qualityGateSession.title)}`,
     `- **Quality Gate Session**: ${qualityGateSession.id ? `Session: ${escapeMarkdown(qualityGateSession.id)} (session reference)` : 'Session: unavailable (session reference)'}`,
+    `- Session: ${escapeMarkdown(qualityGateSession.id ?? 'unavailable')}`,
     `- **Session Container**: ${qualityGateSession.created ? 'created' : qualityGateSession.id ? 'reused' : 'unavailable'}`,
     `- **Harden**: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
+    `- Harden: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
     `- **Verify**: ${escapeMarkdown(verifyStatus)}`,
+    `- Verify: ${escapeMarkdown(verifyStatus)}`,
     `- **Readiness**: ${escapeMarkdown(effectiveReadiness)}`,
+    `- Readiness: ${escapeMarkdown(effectiveReadiness)}`,
     `- **Blockers**: ${blockerCount}`,
+    `- Blockers: ${blockerCount}`,
     `- **Doc updates**: ${docUpdateCount}`,
+    `- Doc updates: ${docUpdateCount}`,
     '- **Archive confirmation required**: yes',
     effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates
       ? '- **Awaiting Archive Confirmation**: Archive will not run until the user explicitly confirms archive.'
@@ -1465,6 +1471,9 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
       : '',
     ...blockingFindings.map(finding => `- ${finding}`),
     applicability.status === 'limited_context' ? '- **Limited Context**: ⚠️ technical verification only; this is not archive readiness.' : '',
+    applicability.status === 'limited_context' ? `- Technical verification: ${verifyStatus}` : '',
+    applicability.status === 'limited_context' ? '- Semantic archive readiness: unavailable' : '',
+    applicability.status === 'limited_context' ? '- Full behavior/design context unavailable' : '',
     '',
   ].filter(Boolean).join('\n')
 
@@ -1480,7 +1489,10 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
   // ── Next Step section ─────────────────────────────────────────────────
   let nextStep = ''
   let nextCommand = ''
-  if (effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates) {
+  if (applicability.status === 'limited_context') {
+    nextStep = 'Technical verification completed, but semantic archive readiness is unavailable until full behavior/design context exists.'
+    nextCommand = `/openflow-feature ${escapeMarkdown(feature)}`
+  } else if (effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates) {
     nextStep = `Quality gate passed for \`${escapeMarkdown(feature)}\`. Archive requires explicit user confirmation before proceeding.`
     nextCommand = `/openflow-archive ${escapeMarkdown(feature)}`
   } else if (effectiveReadiness === VerifyReadinessStatus.NeedsDecision) {

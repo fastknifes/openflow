@@ -298,7 +298,11 @@ async function collectEvidence(
   const behaviorEvidence = behaviorExists
     ? await collectBehaviorEvidence(ctx.directory, changeBehaviorPath, currentWorkspaceState)
     : []
-  const behaviorScenarios = evaluateBehaviorScenarios(contract, behaviorEvidence)
+  const behaviorScenarios = await evaluateBehaviorScenariosFromAvailableSources(
+    contract,
+    behaviorEvidence,
+    behaviorExists ? changeBehaviorPath : undefined,
+  )
 
   const missingEvidence: string[] = []
   if (!contextAlignmentPresent) missingEvidence.push('context alignment artifact')
@@ -943,7 +947,7 @@ async function formatVerifyResult(
   const behaviorSection = evidence.behaviorScenarios && evidence.behaviorScenarios.length > 0
     ? `
 - behavior_scenarios:
-${evidence.behaviorScenarios.map(s => `  - ${s.scenarioId}: ${s.name} ${s.status === 'verified' ? '✅' : s.status === 'not_applicable' ? 'ℹ️' : '⚠️'} (${s.status}${s.detail ? ` — ${escapeMarkdown(s.detail)}` : ''})`).join('\n')}
+${evidence.behaviorScenarios.map(s => `  - ${s.scenarioId}: ${s.name} ${s.status === 'verified' ? '✅' : s.status === 'not_applicable' ? 'ℹ️' : '⚠️'} (${s.status}${s.detail ? ` — ${s.detail}` : ''})`).join('\n')}
 `
     : ''
   const classifiedEvidenceGapsSection = evidence.classifiedEvidenceGaps && evidence.classifiedEvidenceGaps.length > 0
@@ -1327,6 +1331,83 @@ function evaluateBehaviorScenarios(
         : 'No implementation evidence mapped to this scenario.',
     }
   })
+}
+
+async function evaluateBehaviorScenariosFromAvailableSources(
+  contract: import('../contracts/openflow-contract.js').OpenFlowContract | null,
+  evidenceMappings: import('../types.js').BehaviorScenarioEvidence[],
+  behaviorPath?: string,
+): Promise<BehaviorScenarioCheckResult[] | undefined> {
+  const contractScenarios = evaluateBehaviorScenarios(contract, evidenceMappings)
+  if (contractScenarios && contractScenarios.length > 0) return contractScenarios
+  if (!behaviorPath) return contractScenarios
+
+  const markdownScenarios = await parseBehaviorScenarioDefinitions(behaviorPath)
+  if (markdownScenarios.length === 0) return contractScenarios
+
+  return markdownScenarios.map((scenario) => {
+    const evidence = findBehaviorEvidence(evidenceMappings, scenario.name, scenario.id)
+    if (evidence) {
+      const derivedStatus = deriveStatusFromCoverage(evidence)
+      const coverageLevel = evidence.coverageLevel ?? (derivedStatus === 'verified' ? 'exact' : 'missing')
+      const freshness = evidence.freshness
+      return {
+        scenarioId: scenario.id,
+        name: scenario.name,
+        criticality: scenario.criticality,
+        status: derivedStatus,
+        evidenceType: evidence.evidenceType,
+        evidenceReference: evidence.evidenceReference,
+        detail: buildEvaluationDetail(
+          scenario.name,
+          derivedStatus,
+          coverageLevel,
+          freshness,
+          evidence.equivalenceRationale,
+          evidence.evidenceReference,
+          evidence.reason,
+        ),
+        coverageLevel,
+        ...(freshness ? { freshness } : {}),
+        ...(evidence.equivalenceRationale ? { equivalenceRationale: evidence.equivalenceRationale } : {}),
+      }
+    }
+
+    return {
+      scenarioId: scenario.id,
+      name: scenario.name,
+      criticality: scenario.criticality,
+      status: scenario.criticality === 'optional' ? 'not_applicable' as const : 'missing_evidence' as const,
+      coverageLevel: scenario.criticality === 'optional' ? 'not_applicable' as const : 'missing' as const,
+      detail: scenario.criticality === 'optional'
+        ? 'Boundary scenario recorded for review; explicit blocking evidence is not required.'
+        : `Critical scenario "${scenario.name}" requires explicit verification evidence.`,
+    }
+  })
+}
+
+async function parseBehaviorScenarioDefinitions(
+  behaviorPath: string,
+): Promise<Array<{ id: string; name: string; criticality: import('../types.js').BehaviorCriticality }>> {
+  try {
+    const content = await fs.readFile(behaviorPath, 'utf-8')
+    const scenarios: Array<{ id: string; name: string; criticality: import('../types.js').BehaviorCriticality }> = []
+    const headingPattern = /^###\s+(?:(SC-\d+)\s*:\s*(.+)|Scenario\s*:\s*(.+)|Boundary\s*:\s*(.+))\s*$/gim
+    for (const match of content.matchAll(headingPattern)) {
+      const explicitId = match[1]?.trim()
+      const scenarioName = (match[2] ?? match[3] ?? match[4] ?? '').trim()
+      if (!scenarioName) continue
+      const isBoundary = Boolean(match[4])
+      scenarios.push({
+        id: explicitId ?? `${isBoundary ? 'boundary' : 'scenario'}-${scenarios.length}`,
+        name: scenarioName,
+        criticality: isBoundary ? 'optional' : 'critical',
+      })
+    }
+    return scenarios
+  } catch {
+    return []
+  }
 }
 
 function deriveStatusFromCoverage(
@@ -1886,7 +1967,9 @@ function classifyBehaviorScenarioGap(scenario: BehaviorScenarioCheckResult): Cla
 async function parseBehaviorScenarios(behaviorPath: string): Promise<string[]> {
   try {
     const content = await fs.readFile(behaviorPath, 'utf-8')
-    return [...content.matchAll(/### (?:Scenario|Boundary):\s*(.+)/g)].map(m => (m[1] ?? '').trim()).filter(Boolean)
+    return [...content.matchAll(/^###\s+(?:(?:SC-\d+)\s*:\s*)?(?:Scenario\s*:\s*|Boundary\s*:\s*)?(.+)/gim)]
+      .map(m => (m[1] ?? '').trim())
+      .filter(Boolean)
   } catch {
     return []
   }

@@ -966,7 +966,13 @@ function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFi
   for (const round of rounds) {
     for (const finding of round.findings) {
       const finalFinding = finding as HardenFindingFinalState
-      if (!finalFinding.executorVerdict || !finalFinding.finalStateGroup) continue
+      if (!finalFinding.executorVerdict || !finalFinding.finalStateGroup) {
+        if (isDecisionRequiredFinding(finalFinding)) {
+          finalFinding.finalStateGroup = 'unresolved_needs_decision'
+        } else {
+          continue
+        }
+      }
 
       const key = findingKey(finalFinding)
       if (seen.has(key)) continue
@@ -976,6 +982,12 @@ function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFi
   }
 
   return groups
+}
+
+function isDecisionRequiredFinding(finding: HardenFindingFinalState): boolean {
+  return finding.status === 'needs_decision'
+    || finding.disposition === 'needs_decision'
+    || finding.disposition === 'design_divergence'
 }
 
 function hasFinalFindingStates(groups: Record<FindingsFinalStateGroup, HardenFindingFinalState[]>): boolean {
@@ -1375,9 +1387,6 @@ function formatHardenResult(result: FormattedHardenResult): string {
   const sessionBlock = result.sessionID
     ? `\nSession: ${escapeMarkdown(result.sessionID)}`
     : ''
-  const coordinatorSessionBlock = result.coordinatorSessionId
-    ? `\nCoordinator session: ${escapeMarkdown(result.coordinatorSessionId)}`
-    : ''
   const traceBlock = result.trace && result.trace.length > 0
     ? '\nTrace:\n' + result.trace.map((entry) => {
         const text = escapeMarkdown(entry.result.slice(0, 200) || '(empty result)')
@@ -1392,7 +1401,7 @@ Status: ${result.status}
 Stop reason: ${escapeMarkdown(result.stopReason ?? 'unknown')}
 Rounds: ${result.rounds.length}
 Total tokens consumed: ${result.totalTokensConsumed ?? result.budgetConsumed}
-Summary: ${escapeMarkdown(result.summary)}${sessionBlock}${coordinatorSessionBlock}${traceBlock}${roundBlocks}${finalStateBlock}`
+Summary: ${escapeMarkdown(result.summary)}${sessionBlock}${traceBlock}${roundBlocks}${finalStateBlock}`
 }
 
 function toProjectRelativePath(projectDir: string, filePath: string): string {
