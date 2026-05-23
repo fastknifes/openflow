@@ -391,7 +391,7 @@ export async function handleQualityGate(
 
   // ── 10. Build markdown report ───────────────────────────────────────────
   if (activeRun) {
-    activeRun = await recordQualityGateRunCompletion(ctx, activeRun, readiness, getImplementationRunStatusForReadiness(readiness))
+    activeRun = await recordQualityGateRunCompletion(ctx, activeRun, readiness, getImplementationRunStatusForReadiness(readiness, applicability.status))
     runCompletionRecorded = true
   }
 
@@ -580,7 +580,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
 }
 
-function getImplementationRunStatusForReadiness(readiness: string): ImplementationRunStatus {
+function getImplementationRunStatusForReadiness(readiness: string, applicabilityStatus?: string): ImplementationRunStatus {
+  if (applicabilityStatus === 'limited_context') {
+    return 'blocked'
+  }
   if (readiness === 'ready' || readiness === 'ready_with_doc_updates') {
     return 'ready_for_archive'
   }

@@ -53,24 +53,19 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
 
-  // Load acceptance state early for implementation run confirmation check
-  const earlyAcceptanceStateRaw = await loadAcceptanceState(ctx.directory)
-  const earlyMatchingAcceptanceState = earlyAcceptanceStateRaw?.feature === sanitizedFeature ? earlyAcceptanceStateRaw : null
+  const acceptanceStateRaw = await loadAcceptanceState(ctx.directory)
+  const matchingAcceptanceState = acceptanceStateRaw?.feature === sanitizedFeature ? acceptanceStateRaw : null
 
   const implementationRun = await resolveArchiveImplementationRun(ctx, sanitizedFeature)
-  if (implementationRun && !isArchiveAllowedRunStatus(implementationRun.status)) {
-    // ready_for_archive requires explicit user confirmation before archive proceeds
+  if (implementationRun) {
     if (implementationRun.status === 'ready_for_archive') {
-      if (isArchiveRunConfirmed(earlyMatchingAcceptanceState)) {
-        // User has explicitly confirmed — allow archive to proceed
-      } else {
-        // First encounter: set awaiting state and return confirmation prompt
-        if (earlyMatchingAcceptanceState && earlyMatchingAcceptanceState.archiveRunConfirmationStatus !== 'awaiting') {
+      if (!isArchiveRunConfirmed(matchingAcceptanceState)) {
+        if (matchingAcceptanceState && matchingAcceptanceState.archiveRunConfirmationStatus !== 'awaiting') {
           await setArchiveRunAwaitingConfirmation(ctx.directory)
         }
         return formatArchiveRunConfirmationRequired(sanitizedFeature)
       }
-    } else {
+    } else if (implementationRun.status !== 'archived') {
       return formatImplementationRunArchiveBlock(sanitizedFeature, implementationRun.status)
     }
   }
@@ -94,8 +89,6 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
   const requirementsExists = Boolean(sourceRequirementsPath)
 
-  const acceptanceStateRaw = await loadAcceptanceState(ctx.directory)
-  const matchingAcceptanceState = acceptanceStateRaw?.feature === sanitizedFeature ? acceptanceStateRaw : null
   const issueClarificationSourcePath = await resolvePreferredExistingPath(ctx.directory, [
     acceptanceStateRaw?.issueClarificationPath,
     path.join(sourceChangeWorkspacePath, ISSUE_CLARIFICATION_FILENAME),
@@ -684,6 +677,16 @@ Archive cannot continue because the required document-update confirmation was ex
 ${updates}
 
 Please update the documents or reconfirm the doc-update path before rerunning archive.`
+}
+
+function formatArchiveRunConfirmationRequired(feature: string): string {
+  return `## Archive Confirmation Required
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive is paused because the implementation run is **Awaiting Archive Confirmation**.
+
+Archive requires explicit user confirmation before proceeding. Please confirm archive readiness, then rerun \`/openflow-archive ${escapeMarkdown(feature)}\`.`
 }
 
 function hasSessionMessagesClient(client: unknown): client is {

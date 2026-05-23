@@ -55,7 +55,7 @@ describe('openflow-change command', () => {
 
     expect(result).toContain('## OpenFlow Change Packet')
     expect(result).toContain('add new validation')
-    expect(result).toContain('/openflow-verify demo-feature')
+    expect(result).toContain('openflow-quality-gate')
     expect(state?.feature).toBe('demo-feature')
     expect(state?.phase).toBe('implementation')
     expect(state?.pendingDocUpdates).toHaveLength(1)

@@ -431,8 +431,8 @@ Then:
 
     expect(result).toContain('- status: not_ready')
     expect(result).toContain('### 失败后的可选操作')
-    expect(result).toContain('**Option 1**: 修复失败的检查，然后重新运行 /openflow-verify')
-    expect(result).toContain('**Option 2**: 如果你确定这些失败是可接受的，运行 /openflow-verify --accept-failures 来标记成功')
+    expect(result).toContain('**Option 1**: 修复失败的检查，然后重新运行质量门 (openflow-quality-gate)')
+    expect(result).toContain('**Option 2**: 如果你确定这些失败是可接受的，运行 openflow-quality-gate 并传递接受失败的选项来标记成功')
 
     await rm(testDir, { recursive: true, force: true })
   })

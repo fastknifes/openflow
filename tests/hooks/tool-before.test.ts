@@ -135,7 +135,7 @@ describe('tool-before hook', () => {
     const prompt = (output.args as { prompt: string }).prompt
     expect(prompt).toContain('## OpenFlow Implementation Context')
     expect(prompt).toContain('.sisyphus/plans/demo-feature.md')
-    expect(prompt).toContain('skill(name="openflow-verify", user_message="demo-feature")')
+    expect(prompt).toContain('skill(name="openflow-quality-gate", user_message="demo-feature")')
   })
 
   test('injects verification requirements into verification tasks', async () => {
