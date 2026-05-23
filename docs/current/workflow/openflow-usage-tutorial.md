@@ -393,40 +393,28 @@ openflow-quality-gate
 
 ---
 
-## 8. 一个“问题调查”使用流程
+## 8. 问题调查工作流（兼容性保留）
 
-如果你的输入不是“做个功能”，而是“这里为什么不对”，正确路径通常不是先做 feature 设计，而是先 issue。
+> `/openflow-issue` 是兼容性保留路径，不再是活跃的质量门工作流入口。对于不确定问题，建议直接用自然语言描述，由 AI 判断是否需要进入 `/openflow-feature` 或 `openflow-quality-gate`。
 
-### Step 1：先用 issue 澄清
+如果你的输入不是"做个功能"，而是"这里为什么不对"，正确路径是：
 
-```text
-/openflow-issue order-discount-wrong --readonly
-```
+### Step 1：用自然语言描述问题
 
-这一步的目标是：
-
-- 明确用户期望
-- 明确不能改什么
-- 找证据
-- 对齐当前语义
-- 判断这是 bugfix、data issue、config issue、environment issue，还是 behavior change
+直接描述现象，AI 会根据上下文判断是否需要设计澄清或直接验证。
 
 ### Step 2：根据结论分流
 
-- 如果是明确 bugfix：进入实现
+- 如果是明确 bugfix：进入实现，完成后调用 `openflow-quality-gate`
 - 如果是 `behavior_change`：升级到 `/openflow-feature`
 - 如果是 `doc_ambiguity`：先做用户澄清或决策
 - 如果是数据/配置/环境问题：按对应路径处理
 
-确认为 bugfix 后，也可以直接用 `--resolve` 进入 Work Node（自动 harden + verify）：
+### Step 3：实现后走 quality gate / archive
 
-```text
-/openflow-issue order-discount-wrong --resolve
-```
+主链路始终是代码完成后调用 `openflow-quality-gate`，然后 `/openflow-archive`。
 
-### Step 3：实现后仍然走 harden / verify / archive
-
-也就是说，`issue` 不是替代主流程，而是进入主流程前的调查与分诊入口。
+---
 
 ---
 
