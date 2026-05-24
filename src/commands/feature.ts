@@ -40,6 +40,17 @@ import {
   type QuestionToolContext,
   type QuestionGuardResult,
 } from '../utils/question-guard.js'
+import {
+  discoverContextPackets,
+  renderHarvestSummary,
+  renderMultiCandidateSummary,
+  resolveHarvestChoice,
+  parseHarvestResponse,
+  applyHarvestToSession,
+  applyConfirmedHarvestToRequirementModel,
+  parseItemSelection,
+  type HarvestChoice,
+} from '../phases/feature/context-harvest.js'
 
 interface FeatureSessionIndex {
   bySessionID: Record<string, { feature: string; updatedAt: string }>
@@ -105,6 +116,14 @@ export async function handleFeature(
     return formatGenerationResultAll(sanitizedFeature, session.generatedDocs, session.featureTitle)
   }
 
+  if (
+    session.pendingContextHarvest?.awaitingPacketId &&
+    answer?.trim() &&
+    parseHarvestResponse(answer.trim())
+  ) {
+    return finalizeFeature(ctx, session, toolContext, answer)
+  }
+
   if (answer?.trim()) {
     const messageID = getToolMessageID(toolContext)
     if (messageID && session.lastConsumedMessageId === messageID) {
@@ -116,7 +135,7 @@ export async function handleFeature(
         }
 
         if (shouldGenerateDesign(session) || convergence.kind !== 'ask_next') {
-          return finalizeFeature(ctx, session, toolContext)
+          return finalizeFeature(ctx, session, toolContext, answer)
         }
 
       return formatGenerationResultAll(sanitizedFeature, session.generatedDocs, session.featureTitle)
@@ -173,12 +192,12 @@ export async function handleFeature(
       pendingConfirmations: uniqueStrings([...session.pendingConfirmations, ...convergence.pendingConfirmations]),
     }
     await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
-    return finalizeFeature(ctx, session, toolContext)
+    return finalizeFeature(ctx, session, toolContext, answer)
   }
 
   const pendingQuestion = convergence.question ?? getPendingQuestion(session)
   if (!pendingQuestion) {
-    return finalizeFeature(ctx, session, toolContext)
+    return finalizeFeature(ctx, session, toolContext, answer)
   }
 
   const wasQuestionPickerAlreadyPrompted = session.questionPickerPromptedIds.includes(pendingQuestion.id)
@@ -215,15 +234,157 @@ export async function handleFeature(
   return formatQuestionPrompt(sanitizedFeature, session, pendingQuestion, convergence.rationale)
 }
 
+async function applyHarvestChoiceAndSave(
+  ctx: OpenFlowContext,
+  session: FeatureSession,
+  choice: HarvestChoice,
+  ignoredIds: string[],
+): Promise<FeatureSession> {
+  if (choice.kind === 'ignore') {
+    session = {
+      ...session,
+      pendingContextHarvest: {
+        ignoredPacketIds: [...ignoredIds, choice.candidate.packet.id],
+      },
+    }
+  } else {
+    session = applyHarvestToSession(session, choice)
+    session = {
+      ...session,
+      pendingContextHarvest: {
+        ...session.pendingContextHarvest,
+        ignoredPacketIds: session.pendingContextHarvest?.ignoredPacketIds ?? ignoredIds,
+      },
+    }
+  }
+  await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
+  return session
+}
+
 async function finalizeFeature(
   ctx: OpenFlowContext,
   session: FeatureSession,
-  toolContext?: unknown
+  toolContext?: unknown,
+  answer?: string,
 ): Promise<string> {
   const existingGenerated = session.generatedDocs[0]
   if (session.workflowState === 'completed' && existingGenerated) {
     await clearSessionBindingIfCompleted(ctx.directory, toolContext, session, ctx.config.paths.feature_state)
     return formatGenerationResultAll(session.feature, session.generatedDocs, session.featureTitle, session.requirementModel)
+  }
+
+  // --- Context Harvest ---
+  const ignoredIds = session.pendingContextHarvest?.ignoredPacketIds ?? []
+  let candidates: import('../phases/feature/context-harvest.js').HarvestCandidate[] = []
+
+  try {
+    candidates = await discoverContextPackets(
+      ctx.directory,
+      getToolSessionID(toolContext),
+      session.feature,
+      ignoredIds,
+    )
+  } catch {
+    // Fail-safe: discovery errors fall through to normal generation
+    candidates = []
+  }
+
+  // Handle a pending harvest response from a previous turn
+  if (session.pendingContextHarvest?.awaitingPacketId && answer?.trim()) {
+    const directive = parseHarvestResponse(answer.trim())
+    const candidate = candidates.find(
+      (c) => c.packet.id === session.pendingContextHarvest!.awaitingPacketId,
+    )
+
+    if (directive && candidate) {
+      if (directive === 'ignore') {
+        session = {
+          ...session,
+          pendingContextHarvest: {
+            ignoredPacketIds: [...ignoredIds, candidate.packet.id],
+          },
+        }
+        candidates = candidates.filter((c) => c.packet.id !== candidate.packet.id)
+      } else if (directive === 'use') {
+        session = applyHarvestToSession(session, { kind: 'use', candidate })
+        session = {
+          ...session,
+          pendingContextHarvest: {
+            ...session.pendingContextHarvest,
+            ignoredPacketIds: session.pendingContextHarvest?.ignoredPacketIds ?? ignoredIds,
+          },
+        }
+      } else if (directive === 'edit') {
+        const editText = answer.trim().replace(/^edit[\s:]*/iu, '').trim()
+        const editedItems = parseItemSelection(editText, candidate.items)
+        session = applyHarvestToSession(session, {
+          kind: 'edit',
+          candidate,
+          editedItems,
+          editNote: editText || undefined,
+        })
+        session = {
+          ...session,
+          pendingContextHarvest: {
+            ...session.pendingContextHarvest,
+            ignoredPacketIds: session.pendingContextHarvest?.ignoredPacketIds ?? ignoredIds,
+          },
+        }
+      }
+      await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
+      // Fall through to generation below
+    } else {
+      // Not a recognised harvest response → clear pending and fall back
+      session = { ...session, pendingContextHarvest: undefined }
+      await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
+    }
+  }
+
+  // If there are unconfirmed candidates, present them before generating
+  if (
+    candidates.length > 0 &&
+    !session.pendingContextHarvest?.confirmedPacketId
+  ) {
+    const summary =
+      candidates.length === 1
+        ? renderHarvestSummary(candidates[0]!)
+        : renderMultiCandidateSummary(candidates)
+
+    // Interactive mode
+    if (hasAskQuestion(toolContext)) {
+      const choice = await resolveHarvestChoice(toolContext, candidates)
+      if (choice) {
+        session = await applyHarvestChoiceAndSave(ctx, session, choice, ignoredIds)
+        // Fall through to generation
+      } else {
+        // Cancelled / failed → non-interactive fallback prompt
+        session = {
+          ...session,
+          pendingContextHarvest: {
+            ignoredPacketIds: ignoredIds,
+            awaitingPacketId: candidates[0]!.packet.id,
+          },
+        }
+        await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
+        return `${summary}\n\nPlease reply with **use**, **edit**, or **ignore** to proceed.`
+      }
+    } else {
+      // Non-interactive: print summary and wait for confirmation
+      session = {
+        ...session,
+        pendingContextHarvest: {
+          ignoredPacketIds: ignoredIds,
+          awaitingPacketId: candidates[0]!.packet.id,
+        },
+      }
+      await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
+      return `${summary}\n\nPlease reply with **use**, **edit**, or **ignore** to proceed.`
+    }
+  }
+
+  if (session.draftStatus === 'final' && hasBlockingHarvestOpenQuestion(session)) {
+    await saveFeatureSession(ctx.directory, session, ctx.config.paths.feature_state)
+    return formatHarvestOpenQuestionBlock(session)
   }
 
   try {
@@ -279,6 +440,28 @@ async function finalizeFeature(
     await saveFeatureSession(ctx.directory, failedSession, ctx.config.paths.feature_state)
     return formatGenerationFailure(session.feature, message)
   }
+}
+
+function hasBlockingHarvestOpenQuestion(session: FeatureSession): boolean {
+  return session.pendingConfirmations.some((item) => item.startsWith('Open question from brainstorm'))
+}
+
+function formatHarvestOpenQuestionBlock(session: FeatureSession): string {
+  const questions = session.pendingConfirmations
+    .filter((item) => item.startsWith('Open question from brainstorm'))
+    .map((item) => `- ${escapeMarkdown(item)}`)
+    .join('\n')
+
+  return `## Feature Design Pending
+
+Feature: ${escapeMarkdown(session.feature)}
+
+The confirmed brainstorm packet contains blocking open questions, so OpenFlow will not generate a final design yet.
+
+Pending confirmations:
+${questions}
+
+Answer the open questions, or explicitly ask to generate a draft with assumptions.`
 }
 
 async function prepareRequirementModel(
@@ -566,7 +749,7 @@ function buildSessionRequirementModel(session: FeatureSession): RequirementModel
     answers.problem = session.sourceIntent
   }
   const model = buildRequirementModel(session.feature, answers)
-  return RequirementModelSchema.parse({
+  const sessionModel = RequirementModelSchema.parse({
     ...model,
     featureTitle: session.featureTitle,
     sourceIntent: session.sourceIntent,
@@ -574,6 +757,12 @@ function buildSessionRequirementModel(session: FeatureSession): RequirementModel
     assumptions: session.assumptions,
     pendingConfirmations: session.pendingConfirmations,
   })
+  return RequirementModelSchema.parse(
+    applyConfirmedHarvestToRequirementModel(
+      sessionModel,
+      session.pendingContextHarvest?.confirmedItems,
+    ),
+  )
 }
 
 function uniqueQuestionIds(questionIds: FeatureQuestion['id'][]): FeatureQuestion['id'][] {

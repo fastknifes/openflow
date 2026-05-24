@@ -1,4 +1,5 @@
 import { buildRequirementModel } from './constraint-derivation.js'
+import type { ExtractedItem } from './context-packet.js'
 import type { RequirementModel } from './requirement-model.js'
 
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
@@ -43,6 +44,12 @@ export interface FeatureSession {
   lastQuestionPromptedAt?: string | undefined
   lastAnsweredAt?: string | undefined
   updatedAt: string
+  pendingContextHarvest?: {
+    awaitingPacketId?: string | undefined
+    confirmedPacketId?: string | undefined
+    confirmedItems?: ExtractedItem[] | undefined
+    ignoredPacketIds: string[]
+  } | undefined
 }
 
 type LegacyFeatureSession = {
@@ -158,6 +165,30 @@ export function normalizeFeatureSession(feature: string, raw: unknown): FeatureS
   const pendingQuestionId = resolvePendingQuestionId(answers, parsed.pendingQuestionId ?? parsed.currentQuestionId ?? null)
   const workflowState = resolveWorkflowState(parsed.workflowState, generatedDocs, pendingQuestionId)
 
+  const pendingContextHarvest =
+    parsed.pendingContextHarvest && typeof parsed.pendingContextHarvest === 'object'
+      ? {
+          ...(typeof parsed.pendingContextHarvest.awaitingPacketId === 'string'
+            ? { awaitingPacketId: parsed.pendingContextHarvest.awaitingPacketId }
+            : {}),
+          ...(typeof parsed.pendingContextHarvest.confirmedPacketId === 'string'
+            ? { confirmedPacketId: parsed.pendingContextHarvest.confirmedPacketId }
+            : {}),
+          ...(Array.isArray(parsed.pendingContextHarvest.confirmedItems)
+            ? {
+                confirmedItems: parsed.pendingContextHarvest.confirmedItems.filter(
+                  (item): item is ExtractedItem => isExtractedItem(item),
+                ),
+              }
+            : {}),
+          ignoredPacketIds: Array.isArray(parsed.pendingContextHarvest.ignoredPacketIds)
+            ? parsed.pendingContextHarvest.ignoredPacketIds.filter(
+                (id): id is string => typeof id === 'string',
+              )
+            : [],
+        }
+      : undefined
+
   return {
     version: 3,
     feature,
@@ -185,7 +216,26 @@ export function normalizeFeatureSession(feature: string, raw: unknown): FeatureS
     lastQuestionPromptedAt: typeof parsed.lastQuestionPromptedAt === 'string' ? parsed.lastQuestionPromptedAt : undefined,
     lastAnsweredAt: typeof parsed.lastAnsweredAt === 'string' ? parsed.lastAnsweredAt : undefined,
     updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+    pendingContextHarvest,
   }
+}
+
+function isExtractedItem(value: unknown): value is ExtractedItem {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Partial<Record<keyof ExtractedItem, unknown>>
+  return (
+    typeof record.content === 'string' &&
+    (record.type === 'problem' ||
+      record.type === 'decision' ||
+      record.type === 'constraint' ||
+      record.type === 'nonGoal' ||
+      record.type === 'openQuestion' ||
+      record.type === 'risk' ||
+      record.type === 'example') &&
+    (record.confidence === 'high' || record.confidence === 'medium' || record.confidence === 'low') &&
+    (record.source === 'user' || record.source === 'assistant') &&
+    (record.confirmedBy === undefined || typeof record.confirmedBy === 'string')
+  )
 }
 
 export function getPendingQuestion(session: FeatureSession): FeatureQuestion | undefined {

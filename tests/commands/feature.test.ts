@@ -4,6 +4,7 @@ import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promise
 import { handleFeature } from '../../src/commands/feature.js'
 import { defaultSynthesizer } from '../../src/phases/feature/llm-adapter.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
+import type { BrainstormContextPacket } from '../../src/phases/feature/context-packet.js'
 
 function createContext(directory: string): OpenFlowContext {
   return {
@@ -540,9 +541,9 @@ describe('feature command', () => {
     const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-post-non-interactive', 'message-3'))
 
     expect(result).toContain('## Next Step Options')
-    expect(result).toContain('进入开发计划')
-    expect(result).toContain('检查约束充分性')
-    expect(result).toContain('查看文档')
+    expect(result).toContain('Proceed to implementation plan')
+    expect(result).toContain('Review design documents')
+    expect(result).toContain('Ignore')
 
     const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
       postDesignDecision?: string
@@ -993,5 +994,474 @@ describe('feature command', () => {
       defaultSynthesizer.synthesize = originalSynthesize
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  // --- Context Harvest tests ---
+
+  async function writeContextPacket(root: string, packet: BrainstormContextPacket): Promise<void> {
+    const dir = join(root, '.sisyphus', 'brainstorm', 'context-packets')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, `${packet.id}.json`), JSON.stringify(packet, null, 2), 'utf-8')
+  }
+
+  function makePacket(overrides: Partial<BrainstormContextPacket> & { id: string; featureHint: string }): BrainstormContextPacket {
+    const now = new Date().toISOString()
+    return {
+      id: overrides.id,
+      version: 1,
+      featureHint: overrides.featureHint,
+      sourceSessionID: overrides.sourceSessionID ?? 'session-packet',
+      createdAt: overrides.createdAt ?? now,
+      updatedAt: overrides.updatedAt ?? now,
+      items: overrides.items ?? [],
+    }
+  }
+
+  test('context harvest: no packet → normal generation flow', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-none')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const toolContext = createToolContext(root, 'session-harvest-none')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-none', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-none', 'message-2'))
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-none', 'message-3'))
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).not.toContain('Context Harvest')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: non-interactive single packet returns summary prompt', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-prompt')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-1',
+      featureHint: 'user-login',
+      items: [
+        { type: 'problem', content: 'Users forget passwords often', confidence: 'high', source: 'user' },
+        { type: 'constraint', content: 'Must keep SSO integration', confidence: 'high', source: 'assistant' },
+      ],
+    }))
+
+    const toolContext = createToolContext(root, 'session-harvest-prompt')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-prompt', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-prompt', 'message-2'))
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-prompt', 'message-3'))
+
+    expect(result).toContain('Context Harvest')
+    expect(result).toContain('user-login')
+    expect(result).toContain('Users forget passwords often')
+    expect(result).toContain('Must keep SSO integration')
+    expect(result).toContain('use')
+    expect(result).toContain('ignore')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      pendingContextHarvest?: { awaitingPacketId?: string }
+    }
+    expect(session.pendingContextHarvest?.awaitingPacketId).toBe('pkt-1')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: non-interactive confirm use on next call injects items', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-use-next')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-use',
+      featureHint: 'user-login',
+      items: [
+        { type: 'problem', content: 'Users forget passwords often', confidence: 'high', source: 'user' },
+        { type: 'constraint', content: 'Must keep SSO integration', confidence: 'high', source: 'assistant' },
+      ],
+    }))
+
+    const toolContext = createToolContext(root, 'session-harvest-use')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-use', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-use', 'message-2'))
+
+    // First generation attempt returns harvest prompt
+    const first = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-use', 'message-3'))
+    expect(first).toContain('Context Harvest')
+
+    // Second call with "use" proceeds to generation
+    const second = await handleFeature(createContext(root), 'user-login', 'use', createToolContext(root, 'session-harvest-use', 'message-4'))
+    expect(second).toContain('Feature Design Complete')
+    expect(second).toContain('Must keep SSO integration')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      pendingContextHarvest?: { confirmedPacketId?: string; confirmedItems?: Array<{ content: string }> }
+      assumptions: string[]
+      requirementModel?: {
+        problemStatement?: string
+        constraints: Array<{ description: string }>
+      }
+    }
+    expect(session.pendingContextHarvest?.confirmedPacketId).toBe('pkt-use')
+    expect(session.pendingContextHarvest?.confirmedItems?.some((item) => item.content === 'Must keep SSO integration')).toBe(true)
+    expect(session.assumptions.some((a) => a.includes('Users forget passwords often'))).toBe(true)
+    expect(session.requirementModel?.problemStatement).toBe('减少重复登录操作')
+    expect(session.requirementModel?.constraints.some((constraint) => constraint.description.includes('Must keep SSO integration'))).toBe(true)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: confirmed packet fields appear in generated design docs', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-model-fields')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-model-fields',
+      featureHint: 'user-login',
+      items: [
+        { type: 'constraint', content: 'Keep SSO integration stable', confidence: 'high', source: 'assistant' },
+        { type: 'decision', content: 'Reuse active session binding', confidence: 'medium', source: 'user', confirmedBy: 'alice' },
+        { type: 'nonGoal', content: 'Do not redesign password reset', confidence: 'high', source: 'user' },
+        { type: 'risk', content: 'Token migration may regress existing users', confidence: 'high', source: 'assistant' },
+        { type: 'example', content: 'User opens login and the system returns an SSO challenge', confidence: 'high', source: 'user' },
+        { type: 'constraint', content: 'Medium item confirmed by packet use', confidence: 'medium', source: 'assistant' },
+      ],
+    }))
+
+    const toolContext = createToolContext(root, 'session-harvest-model')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-model', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-model', 'message-2'))
+    await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-model', 'message-3'))
+    const result = await handleFeature(createContext(root), 'user-login', 'use', createToolContext(root, 'session-harvest-model', 'message-4'))
+
+    expect(result).toContain('Feature Design Complete')
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const design = await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'design.md'), 'utf-8')
+    const behavior = await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'behavior.md'), 'utf-8')
+    const sidecar = JSON.parse(await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'design.meta.json'), 'utf-8')) as {
+      constraints: Array<{ description: string }>
+      nonGoals: string[]
+      risks?: Array<{ description: string }>
+      acceptanceCriteria: Array<{ description: string }>
+    }
+
+    expect(design).toContain('Keep SSO integration stable')
+    expect(design).toContain('Decision from brainstorm: Reuse active session binding')
+    expect(design).toContain('Do not redesign password reset')
+    expect(design).toContain('Token migration may regress existing users')
+    expect(behavior).toContain('system returns an SSO challenge')
+    expect(design).toContain('Medium item confirmed by packet use')
+    expect(design).not.toContain('Target users: use')
+    expect(sidecar.constraints.some((constraint) => constraint.description.includes('Keep SSO integration stable'))).toBe(true)
+    expect(sidecar.constraints.some((constraint) => constraint.description.includes('Decision from brainstorm: Reuse active session binding'))).toBe(true)
+    expect(sidecar.constraints.some((constraint) => constraint.description.includes('Medium item confirmed by packet use'))).toBe(true)
+    expect(sidecar.nonGoals.some((nonGoal) => nonGoal.includes('Do not redesign password reset'))).toBe(true)
+    expect(sidecar.risks?.some((risk) => risk.description.includes('Token migration may regress existing users'))).toBe(true)
+    expect(sidecar.acceptanceCriteria.some((criterion) => criterion.description.includes('system returns an SSO challenge'))).toBe(true)
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: blocking open question prevents final design until draft is requested', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-open-question')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-open-question',
+      featureHint: 'user-login',
+      items: [
+        { type: 'openQuestion', content: 'Should SAML be supported on day one?', confidence: 'high', source: 'user' },
+      ],
+    }))
+
+    const toolContext = createToolContext(root, 'session-harvest-open-question')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-open-question', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-open-question', 'message-2'))
+    await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-open-question', 'message-3'))
+    const blocked = await handleFeature(createContext(root), 'user-login', 'use', createToolContext(root, 'session-harvest-open-question', 'message-4'))
+
+    expect(blocked).toContain('Feature Design Pending')
+    expect(blocked).toContain('blocking open questions')
+    expect(blocked).toContain('Should SAML be supported on day one?')
+    await expect(readdir(join(root, 'docs', 'changes'))).rejects.toThrow()
+
+    const draft = await handleFeature(createContext(root), 'user-login', '先生成草稿', createToolContext(root, 'session-harvest-open-question', 'message-5'))
+    expect(draft).toContain('Feature Design Complete')
+    const changeDirs = await readdir(join(root, 'docs', 'changes'))
+    const design = await readFile(join(root, 'docs', 'changes', changeDirs[0]!, 'design.md'), 'utf-8')
+    expect(design).toContain('Draft with Assumptions')
+    expect(design).toContain('Should SAML be supported on day one?')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: non-interactive ignore on next call falls back', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-ignore')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-ignore',
+      featureHint: 'user-login',
+      items: [
+        { type: 'problem', content: 'Users forget passwords often', confidence: 'high', source: 'user' },
+      ],
+    }))
+
+    const toolContext = createToolContext(root, 'session-harvest-ignore')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-ignore', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-ignore', 'message-2'))
+
+    const first = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-ignore', 'message-3'))
+    expect(first).toContain('Context Harvest')
+
+    const second = await handleFeature(createContext(root), 'user-login', 'ignore', createToolContext(root, 'session-harvest-ignore', 'message-4'))
+    expect(second).toContain('Feature Design Complete')
+    expect(second).not.toContain('Users forget passwords often')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      pendingContextHarvest?: { ignoredPacketIds?: string[] }
+    }
+    expect(session.pendingContextHarvest?.ignoredPacketIds).toContain('pkt-ignore')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: interactive use injects items into design', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-interactive-use')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-int-use',
+      featureHint: 'user-login',
+      items: [
+        { type: 'problem', content: 'Users forget passwords often', confidence: 'high', source: 'user' },
+      ],
+    }))
+
+    // Pre-seed a ready-to-generate session so we go straight to finalizeFeature
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
+    await writeFile(join(root, '.sisyphus', 'feature', 'user-login.json'), JSON.stringify({
+      version: 3,
+      feature: 'user-login',
+      workflowState: 'ready_to_generate',
+      pendingQuestionId: null,
+      askedQuestionIds: ['problem', 'target-users', 'scope', 'priority', 'constraints'],
+      questionPickerPromptedIds: [],
+      answers: {
+        problem: '减少重复登录操作',
+        'target-users': '内部开发者',
+        scope: 'new-feature',
+        priority: '快速上线',
+        constraints: '必须兼容现有认证',
+      },
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: new Date().toISOString(),
+    }, null, 2), 'utf-8')
+
+    const { asked, context } = createQuestionToolContext(root, ['Use as-is'], 'session-harvest-int-use')
+    const result = await handleFeature(createContext(root), 'user-login', undefined, context)
+
+    expect(asked.some((a) => a.header === 'Context Harvest')).toBe(true)
+    expect(result).toContain('Feature Design Complete')
+    expect(result).toContain('\\[high\\] Problem: Users forget passwords often')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: interactive ignore skips packet', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-interactive-ignore')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-int-ignore',
+      featureHint: 'user-login',
+      items: [
+        { type: 'problem', content: 'Users forget passwords often', confidence: 'high', source: 'user' },
+      ],
+    }))
+
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
+    await writeFile(join(root, '.sisyphus', 'feature', 'user-login.json'), JSON.stringify({
+      version: 3,
+      feature: 'user-login',
+      workflowState: 'ready_to_generate',
+      pendingQuestionId: null,
+      askedQuestionIds: ['problem', 'target-users', 'scope', 'priority', 'constraints'],
+      questionPickerPromptedIds: [],
+      answers: {
+        problem: '减少重复登录操作',
+        'target-users': '内部开发者',
+        scope: 'new-feature',
+        priority: '快速上线',
+        constraints: '必须兼容现有认证',
+      },
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      updatedAt: new Date().toISOString(),
+    }, null, 2), 'utf-8')
+
+    const { asked, context } = createQuestionToolContext(root, ['Ignore'], 'session-harvest-int-ignore')
+    const result = await handleFeature(createContext(root), 'user-login', undefined, context)
+
+    expect(asked.some((a) => a.header === 'Context Harvest')).toBe(true)
+    expect(result).toContain('Feature Design Complete')
+    expect(result).not.toContain('Users forget passwords often')
+
+    const session = JSON.parse(await readFile(join(root, '.sisyphus', 'feature', 'user-login.json'), 'utf-8')) as {
+      pendingContextHarvest?: { ignoredPacketIds?: string[] }
+    }
+    expect(session.pendingContextHarvest?.ignoredPacketIds).toContain('pkt-int-ignore')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: stale packet falls back to normal flow', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-stale')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const oldDate = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-stale',
+      featureHint: 'user-login',
+      updatedAt: oldDate,
+      items: [
+        { type: 'problem', content: 'Users forget passwords often', confidence: 'high', source: 'user' },
+      ],
+    }))
+
+    const toolContext = createToolContext(root, 'session-harvest-stale')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-stale', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-stale', 'message-2'))
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-stale', 'message-3'))
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).not.toContain('Context Harvest')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: multiple packets in non-interactive shows multi-candidate summary', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-multi')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-a',
+      featureHint: 'user-login',
+      items: [
+        { type: 'problem', content: 'Problem A', confidence: 'high', source: 'user' },
+      ],
+    }))
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-b',
+      featureHint: 'user-login-sso',
+      items: [
+        { type: 'problem', content: 'Problem B', confidence: 'medium', source: 'assistant' },
+      ],
+    }))
+
+    const toolContext = createToolContext(root, 'session-harvest-multi')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-multi', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-multi', 'message-2'))
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-multi', 'message-3'))
+
+    expect(result).toContain('Context Harvest')
+    expect(result).toContain('Multiple brainstorm context packets were found')
+    expect(result).toContain('pkt-a')
+    expect(result).toContain('pkt-b')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: session-local ignore does not suggest packet again', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-session-ignore')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    await writeContextPacket(root, makePacket({
+      id: 'pkt-session-ignore',
+      featureHint: 'user-login',
+      items: [
+        { type: 'problem', content: 'Users forget passwords often', confidence: 'high', source: 'user' },
+      ],
+    }))
+
+    // Pre-seed session with ignored packet ID
+    const sessionPath = join(root, '.sisyphus', 'feature', 'user-login.json')
+    await mkdir(join(root, '.sisyphus', 'feature'), { recursive: true })
+    await writeFile(sessionPath, JSON.stringify({
+      version: 3,
+      feature: 'user-login',
+      workflowState: 'ready_to_generate',
+      pendingQuestionId: null,
+      askedQuestionIds: ['problem', 'target-users', 'scope', 'priority', 'constraints'],
+      questionPickerPromptedIds: [],
+      answers: {
+        problem: '减少重复登录操作',
+        'target-users': '内部开发者',
+        scope: 'new-feature',
+        priority: '快速上线',
+        constraints: '必须兼容现有认证',
+      },
+      assumptions: [],
+      pendingConfirmations: [],
+      skippedQuestionIds: [],
+      draftStatus: 'final',
+      generatedDocs: [],
+      generationAttemptCount: 0,
+      pendingContextHarvest: { ignoredPacketIds: ['pkt-session-ignore'] },
+      updatedAt: new Date().toISOString(),
+    }, null, 2), 'utf-8')
+
+    const result = await handleFeature(createContext(root), 'user-login', undefined, createToolContext(root, 'session-harvest-si'))
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).not.toContain('Context Harvest')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('context harvest: malformed packet file falls back to normal flow', async () => {
+    const root = join(process.cwd(), '.test-feature-harvest-malformed')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const dir = join(root, '.sisyphus', 'brainstorm', 'context-packets')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'bad-packet.json'), 'not-json', 'utf-8')
+
+    const toolContext = createToolContext(root, 'session-harvest-malformed')
+    await handleFeature(createContext(root), 'user-login', undefined, toolContext)
+    await handleFeature(createContext(root), 'user-login', '减少重复登录操作', createToolContext(root, 'session-harvest-malformed', 'message-1'))
+    await handleFeature(createContext(root), 'user-login', 'new-feature', createToolContext(root, 'session-harvest-malformed', 'message-2'))
+    const result = await handleFeature(createContext(root), 'user-login', '必须兼容现有认证', createToolContext(root, 'session-harvest-malformed', 'message-3'))
+
+    expect(result).toContain('Feature Design Complete')
+    expect(result).not.toContain('Context Harvest')
+
+    await rm(root, { recursive: true, force: true })
   })
 })
