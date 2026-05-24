@@ -434,6 +434,8 @@ function resolveFindingDisposition(
     case 'style_or_preference':
       return { group: 'style', level: 'style_or_preference' }
   }
+
+  return { group: 'ambiguous', level: 'design_ambiguity', disposition: 'needs_decision' }
 }
 
 function isDirectoryStructurePreference(finding: HardenFinding): boolean {
