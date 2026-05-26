@@ -2,11 +2,13 @@ import type { Hooks } from '@opencode-ai/plugin'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { OpenFlowContext } from '../types.js'
+import type { ImplementObserver } from '../commands/implement.js'
 import { handleFeature } from '../commands/feature.js'
 import { normalizeFeatureSession, isAwaitingFormalAnswer } from '../phases/feature/state-machine.js'
 import { createAcceptanceHook } from './acceptance.js'
 import {
-  appendGuardMessage,
+  appendOpenFlowNotice,
+  assessFeatureSuggestionEligibility,
   clearRecentFeatureCompletion,
   detectClosureReady,
   decideTrigger,
@@ -15,6 +17,7 @@ import {
   getRecentCompletedFeature,
   getMessageRole,
   hasDesignDoc,
+  removeOpenFlowNotices,
 } from './feature-workflow.js'
 import { getContractRuntime } from '../contracts/runtime.js'
 import { dispatchOpenFlowCommand, extractOpenFlowCommand } from './chat-command-dispatch.js'
@@ -30,7 +33,7 @@ function isCompletionMessage(message: string): boolean {
   return COMPLETION_PHRASES.some(phrase => lower.includes(phrase))
 }
 
-export function createChatMessageHook(ctx: OpenFlowContext) {
+export function createChatMessageHook(ctx: OpenFlowContext, observer?: ImplementObserver) {
   const acceptanceHook = createAcceptanceHook(ctx)
 
   const hook: NonNullable<Hooks['chat.message']> = async (input, output): Promise<void> => {
@@ -46,7 +49,9 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
     // Guard recursion: don't re-trigger on OpenFlow's own guard messages
     if (message.includes(GUARD_BLOCK_TITLE) || message.includes(GUARD_VERIFY_TITLE)) return
 
-    if (await dispatchOpenFlowCommand(ctx, input, output, message)) return
+    clearTransientFeatureDesignNotices(rawOutput)
+
+    if (await dispatchOpenFlowCommand(ctx, input, output, message, observer)) return
 
     // ── Guardian session events (before completion guard, non-blocking) ─
     if (ctx.config.guardian?.enabled) {
@@ -66,12 +71,8 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
       if (guardAppended) return
     }
 
-    // ── Acceptance detection (runs even when feature phase is disabled) ─
+    // ── Acceptance detection ─
     await acceptanceHook({ sessionID: input.sessionID, message })
-
-    if (!ctx.config.feature.enabled) {
-      return
-    }
 
     const activeFeature = await getActiveFeatureSession(ctx.directory, input.sessionID)
     if (activeFeature && !(await hasDesignDoc(ctx, activeFeature))) {
@@ -88,7 +89,12 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
         // Let new-feature detection continue below instead of hijacking the old feature session.
       } else {
         const continuation = await handleFeature(ctx, undefined, message, input)
-        appendGuardMessage(output, continuation)
+        appendOpenFlowNotice(rawOutput, {
+          kind: 'feature-continuation',
+          text: continuation,
+          ephemeral: false,
+          placement: 'prepend',
+        })
         return
       }
     }
@@ -112,45 +118,7 @@ export function createChatMessageHook(ctx: OpenFlowContext) {
       return
     }
 
-    const closureDecision = detectClosureReady(ctx, message)
-    if (closureDecision.isClosureReady && ctx.config.feature.closure.auto_transition) {
-		appendGuardMessage(output, `## OpenFlow: Feature Design Closure Ready
-
-Detected ${closureDecision.level} closure signal(s): ${closureDecision.matchedSignals.map(s => `\`${s}\``).join(', ')}.
-
-Next step: continue the standalone feature design flow until design generation completes.
-
-Recommended entrypoint:
-
-		\`\`\`text
-/openflow-feature
-\`\`\`
-
-Generation policy:
-- OpenFlow can derive the internal feature name from session context or natural language.
-- OpenFlow asks one useful clarification only when it changes the design direction.
-- If you want to proceed early, ask for a draft and assumptions will be marked separately.`)
-      return
-    }
-
-    const decision = decideTrigger(ctx, rawInput, rawOutput, message)
-    if (!decision.shouldTrigger || !decision.feature) return
-
-    if (await hasDesignDoc(ctx, decision.feature)) return
-
-		appendGuardMessage(output, `## OpenFlow: Feature Design Suggested
-
-This request may benefit from OpenFlow feature design docs before implementation.
-
-Suggested user action:
-
-\`\`\`text
-/openflow-feature
-\`\`\`
-
-To create formal design docs, manually run "/openflow-feature" in this same session and continue in natural language. OpenFlow will derive the internal feature name from context.
-
-This is advisory only: it does not block research, reading, or implementation tools, and the assistant must not invoke "/openflow-feature" automatically unless the user explicitly requests it.`)
+    await maybeAppendFeatureSuggestion(ctx, rawInput, rawOutput, message)
   }
 
   return hook
@@ -184,18 +152,25 @@ async function appendCompletionGuardIfNeeded(
   const hasFreshReadiness = implementationState ? await isFreshReadiness(ctx.directory) : false
 
   if (implementationState && !hasFreshReadiness && ['dirty', 'stale', 'blocked'].includes(implementationState.state)) {
-    appendGuardMessage(output, `## OpenFlow: Completion Blocked Until Quality Gate
+    appendOpenFlowNotice(output, {
+      kind: 'completion-blocked',
+      text: `## OpenFlow: Completion Blocked Until Quality Gate
 
 The task appears to be in completion state, but the current implementation state is \`${implementationState.state}\`.
 
 Required next action before claiming completion:
 - Run \`openflow-quality-gate\`
 - Resolve the reported readiness issues
-- Re-check completion after the quality gate is clean`)
+- Re-check completion after the quality gate is clean`,
+      ephemeral: false,
+      placement: 'prepend',
+    })
     return true
   }
 
-  appendGuardMessage(output, `## OpenFlow: Verification Suggested
+  appendOpenFlowNotice(output, {
+    kind: 'verification-suggested',
+    text: `## OpenFlow: Verification Suggested
 
 The task appears to be in completion state.
 
@@ -204,7 +179,10 @@ Recommended next action before archive:
 - Run verification now
 - Skip for now (known risk)
 
-OpenFlow keeps this prompt non-blocking.`)
+OpenFlow keeps this prompt non-blocking.`,
+    ephemeral: false,
+    placement: 'prepend',
+  })
   return true
 }
 
@@ -242,6 +220,84 @@ function looksLikePostFeatureAction(message: string, feature: string): boolean {
   }
 
   return /(实现|开始做|开始开发|编码|落地|archive|归档|verify|验证|start-work|ulw-loop|implement|build|code)/i.test(message)
+}
+
+async function maybeAppendFeatureSuggestion(
+  ctx: OpenFlowContext,
+  input: Record<string, unknown>,
+  output: Record<string, unknown>,
+  message: string,
+): Promise<void> {
+  const eligibility = assessFeatureSuggestionEligibility(message)
+  if (!eligibility.eligible) {
+    return
+  }
+
+  const closureDecision = detectClosureReady(ctx, message)
+  if (closureDecision.isClosureReady && ctx.config.feature.closure.auto_transition) {
+    appendOpenFlowNotice(output, {
+      kind: 'feature-closure-ready',
+      text: buildFeatureClosureReadyNotice(closureDecision),
+      ephemeral: true,
+      placement: 'prepend',
+    })
+    return
+  }
+
+  const decision = decideTrigger(ctx, input, output, message)
+  if (!decision.shouldTrigger || !decision.feature) {
+    return
+  }
+
+  if (await hasDesignDoc(ctx, decision.feature)) {
+    return
+  }
+
+  appendOpenFlowNotice(output, {
+    kind: 'feature-suggestion',
+    text: buildFeatureSuggestionNotice(),
+    ephemeral: true,
+    placement: 'prepend',
+  })
+}
+
+function clearTransientFeatureDesignNotices(output: Record<string, unknown>): void {
+  removeOpenFlowNotices(output, metadata => metadata.ephemeral === true && (metadata.kind === 'feature-suggestion' || metadata.kind === 'feature-closure-ready'))
+}
+
+function buildFeatureClosureReadyNotice(closureDecision: ReturnType<typeof detectClosureReady>): string {
+  return `## OpenFlow: Feature Design Closure Ready
+
+Detected ${closureDecision.level} closure signal(s): ${closureDecision.matchedSignals.map(s => `\`${s}\``).join(', ')}.
+
+Next step: continue the standalone feature design flow until design generation completes.
+
+Recommended entrypoint:
+
+\`\`\`text
+/openflow-feature
+\`\`\`
+
+Generation policy:
+- OpenFlow can derive the internal feature name from session context or natural language.
+- OpenFlow asks one useful clarification only when it changes the design direction.
+- If you want to proceed early, ask for a draft and assumptions will be marked separately.`
+}
+
+function buildFeatureSuggestionNotice(): string {
+  return `## OpenFlow: Feature Design Suggested
+
+This request may benefit from OpenFlow feature design docs before implementation.
+
+Suggested user action:
+
+\`\`\`text
+/openflow-feature
+\`\`\`
+
+To create formal design docs, manually run "/openflow-feature" in this same session and continue in natural language. OpenFlow will derive the internal feature name from context.
+
+This is advisory only: it does not block research, reading, or implementation tools, and the assistant must not invoke "/openflow-feature" automatically unless the user explicitly requests it.`
 }
 
 function shouldSuppressFeatureSuggestionForActiveDesignFlow(

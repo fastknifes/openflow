@@ -116,6 +116,69 @@ describe('chat-message feature guidance', () => {
     await rm(root, { recursive: true, force: true })
   })
 
+  test('does not suggest feature design for short continuation message 继续', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-short-continue-zh')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('继续')
+
+    await hook(createInput('session-short-continue-zh'), output)
+
+    expect(firstOutputText(output)).toBe('继续')
+    expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('does not suggest feature design for short continuation message continue', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-short-continue-en')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('continue')
+
+    await hook(createInput('session-short-continue-en'), output)
+
+    expect(firstOutputText(output)).toBe('continue')
+    expect(firstOutputText(output)).not.toContain('Feature Design Suggested')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('removes stale feature suggestion advisory when replayed message is no longer feature-eligible', async () => {
+    const root = join(process.cwd(), '.test-chat-feature-stale-advisory-cleanup')
+    await rm(root, { recursive: true, force: true })
+    await mkdir(root, { recursive: true })
+
+    const hook = createChatMessageHook(createContext(root))
+    const output = createOutput('继续')
+    output.parts.unshift({
+      id: 'prt-openflow-stale-feature',
+      sessionID: 's1',
+      messageID: 'm1',
+      type: 'text' as const,
+      text: '## OpenFlow: Feature Design Suggested\n\nThis request may benefit from OpenFlow feature design docs before implementation.',
+      synthetic: true,
+      metadata: {
+        openflow: true,
+        kind: 'feature-suggestion',
+        ephemeral: true,
+        idempotencyKey: 'feature-suggestion:m1',
+      },
+    })
+
+    await hook(createInput('session-stale-advisory'), output)
+
+    const allText = output.parts.map(part => (part as { text?: string }).text ?? '').join('\n')
+    expect(allText).toBe('继续')
+    expect(allText).not.toContain('Feature Design Suggested')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
   test('turn-to-turn continuation bridge advances feature from plain user reply', async () => {
     const root = join(process.cwd(), '.test-chat-feature-resume')
     await rm(root, { recursive: true, force: true })

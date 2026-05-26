@@ -1,14 +1,9 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import type { RequirementModel } from '../phases/feature/requirement-model.js'
 import type { OpenFlowContext } from '../types.js'
-import { RequirementModelSchema } from '../phases/feature/requirement-model.js'
 import { getChangePlansPath, getDesignCandidatePaths, getPlanPath } from '../config.js'
 import { findLatestDocument } from '../utils/index.js'
-import { logger } from '../utils/logger.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
-
-const DESIGN_SIDECAR_FILENAMES = ['design.meta.json', 'requirements.json'] as const
 
 export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): Promise<string> {
   if (!feature) throw new Error('Feature name is required')
@@ -17,6 +12,12 @@ export async function handleWritingPlan(ctx: OpenFlowContext, feature: string): 
 
   if (!ctx.config.writingPlan.enabled) {
     return '## Writing Plan Disabled\n\nWriting plan feature is disabled in OpenFlow configuration.'
+  }
+
+  // Gate: verify feature design is complete before allowing plan generation
+  const gateResult = await verifyDesignReadiness(ctx.directory, sanitizedFeature, ctx.config)
+  if (!gateResult.ready) {
+    return `## Writing Plan Blocked\n\n${gateResult.reason}\n\nResolve the blocking issue(s) before generating a plan.`
   }
 
   const designContext = await readDesignContextPacket(ctx.directory, sanitizedFeature, ctx.config)
@@ -131,23 +132,31 @@ export async function readDesignContextPacket(baseDir: string, feature: string, 
     const candidate = await resolveDesignCandidate(candidatePath)
     if (!candidate) continue
 
-    const structuredContext = await readStructuredDesignContext(candidate.workspacePath)
-    if (structuredContext) {
-      return structuredContext
-    }
-
     const designPath = candidate.isFile
       ? candidatePath
       : await findLatestDocument(candidate.workspacePath, /^(?:design|\d{8}-design)\.md$/)
     if (!designPath) continue
 
+    const behaviorPath = await findLatestDocument(candidate.workspacePath, /^(?:behavior|\d{8}-behavior)\.md$/)
+    if (!behaviorPath) {
+      return formatIncompleteDesignContext(candidate.workspacePath, ['behavior.md'])
+    }
+
     const markdownContext = await extractKeySections(designPath)
-    if (markdownContext) {
-      return `### ${path.basename(designPath)}\n\n${markdownContext}`
+    const behaviorContext = await extractKeySections(behaviorPath)
+    if (markdownContext && behaviorContext) {
+      return `### ${path.basename(designPath)}\n\n${markdownContext}\n\n### ${path.basename(behaviorPath)}\n\n${behaviorContext}`
     }
   }
 
-  return null
+  return formatIncompleteDesignContext(feature, ['design.md', 'behavior.md'])
+}
+
+function formatIncompleteDesignContext(workspacePath: string, missingFiles: string[]): string {
+  return `> Design context incomplete for \`${escapeMarkdown(workspacePath)}\`.
+>
+> Missing mandatory document(s): ${missingFiles.map((fileName) => `\`${fileName}\``).join(', ')}.
+> Do NOT generate a plan until the design workspace contains both \`design.md\` and \`behavior.md\`.`
 }
 
 async function findDatedChangeCandidatePaths(baseDir: string, feature: string, config?: import('../types.js').OpenFlowConfig): Promise<string[]> {
@@ -164,6 +173,99 @@ async function findDatedChangeCandidatePaths(baseDir: string, feature: string, c
   }
 }
 
+async function verifyDesignReadiness(
+  baseDir: string,
+  feature: string,
+  config?: import('../types.js').OpenFlowConfig
+): Promise<{ ready: boolean; reason: string }> {
+  const candidatePaths = [
+    ...await getDesignCandidatePaths(baseDir, feature, config),
+    ...await findDatedChangeCandidatePaths(baseDir, feature, config),
+  ]
+
+  const workspacePaths: string[] = []
+  for (const candidatePath of candidatePaths) {
+    const candidate = await resolveDesignCandidate(candidatePath)
+    if (!candidate) continue
+
+    if (!workspacePaths.includes(candidate.workspacePath)) {
+      workspacePaths.push(candidate.workspacePath)
+    }
+  }
+
+  if (workspacePaths.length === 0) {
+    return { ready: false, reason: `No design workspace found for feature "${feature}". Run /openflow-feature first.` }
+  }
+
+  if (workspacePaths.length > 1) {
+    return { ready: false, reason: `Ambiguous feature match: ${workspacePaths.length} dated directories match "${feature}". Use the full dated directory name to disambiguate.` }
+  }
+
+  const workspacePath = workspacePaths[0]!
+  const designPath = path.join(workspacePath, 'design.md')
+  const behaviorPath = path.join(workspacePath, 'behavior.md')
+
+  try {
+    await fs.access(designPath)
+  } catch {
+    return { ready: false, reason: 'design.md not found in workspace. Design generation may not be complete.' }
+  }
+
+  try {
+    await fs.access(behaviorPath)
+  } catch {
+    return { ready: false, reason: 'behavior.md not found in workspace. Design generation may not be complete.' }
+  }
+
+  // Check Cross-Validation status by recomputing from document bodies
+  try {
+    const docOrder = ['requirements.md', 'prd.md', 'design.md', 'behavior.md', 'decisions.md']
+    const documents: Array<{ name: string; content: string }> = []
+    for (const docName of docOrder) {
+      const docPath = path.join(workspacePath, docName)
+      try {
+        const body = await fs.readFile(docPath, 'utf-8')
+        if (body.trim()) {
+          documents.push({ name: docName, content: body })
+        }
+      } catch {
+        // Optional document — skip
+      }
+    }
+
+    if (documents.length === 0) {
+      return { ready: false, reason: 'No formal documents found in workspace for body-based Cross-Validation.' }
+    }
+
+    // Check for blocking/critical gaps in existing Cross-Validation Summary
+    const designDoc = documents.find((d) => d.name === 'design.md')
+    if (designDoc) {
+      const cvMatch = designDoc.content.match(/Cross-Validation Summary[\s\S]*?- Status: (Passed|Blocking|Critical Blocking)/)
+      if (!cvMatch) {
+        return { ready: false, reason: 'Cross-Validation Summary not found in design.md. Design may not be finalized.' }
+      }
+      if (cvMatch[1] !== 'Passed') {
+        return { ready: false, reason: `Cross-Validation status is "${cvMatch[1]}", not "Passed". Resolve blocking gaps first.` }
+      }
+    }
+
+    // Verify feature session state is complete
+    const stateMdPath = path.join(workspacePath, 'state.md')
+    try {
+      const stateContent = await fs.readFile(stateMdPath, 'utf-8')
+      if (!stateContent.includes('`complete`') && !stateContent.includes('complete')) {
+        return { ready: false, reason: 'Feature state in state.md is not "complete". Design must be finalized before planning.' }
+      }
+    } catch {
+      return { ready: false, reason: 'state.md not found. Feature design may not be finalized.' }
+    }
+  } catch {
+    return { ready: false, reason: 'Could not verify Cross-Validation status.' }
+  }
+
+  return { ready: true, reason: '' }
+}
+
 async function resolveDesignCandidate(candidatePath: string): Promise<{ workspacePath: string; isFile: boolean } | null> {
   try {
     const stats = await fs.stat(candidatePath)
@@ -178,58 +280,6 @@ async function resolveDesignCandidate(candidatePath: string): Promise<{ workspac
   }
 
   return null
-}
-
-async function readStructuredDesignContext(workspacePath: string): Promise<string | null> {
-  for (const fileName of DESIGN_SIDECAR_FILENAMES) {
-    const sidecarPath = path.join(workspacePath, fileName)
-
-    try {
-      const content = await fs.readFile(sidecarPath, 'utf-8')
-      const model = RequirementModelSchema.parse(JSON.parse(content) as unknown)
-      const designContext = formatRequirementModelDesignContext(model)
-      if (designContext) {
-        return designContext
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
-        continue
-      }
-
-      logger.debug('Failed to read writing-plan design sidecar, falling back to markdown', {
-        workspacePath,
-        sidecarPath,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  return null
-}
-
-function formatRequirementModelDesignContext(model: RequirementModel): string {
-  const sections: string[] = []
-  const problemStatement = model.problemStatement?.trim() || model.feature
-
-  if (problemStatement) {
-    sections.push(`### Problem Statement\n${problemStatement}`)
-  }
-
-  if (model.goals.length > 0) {
-    sections.push(`### Goals\n${model.goals.map((goal) => `- ${goal}`).join('\n')}`)
-  }
-
-  if (model.constraints.length > 0) {
-    sections.push(`### Constraints\n${model.constraints.map((constraint) => (
-      `- [${constraint.severity.toUpperCase()} / ${constraint.category}] ${constraint.description}`
-    )).join('\n')}`)
-  }
-
-  if (model.acceptanceCriteria.length > 0) {
-    sections.push(`### Acceptance Criteria\n${model.acceptanceCriteria.map((criterion) => `- ${criterion.description}`).join('\n')}`)
-  }
-
-  return sections.join('\n\n')
 }
 
 async function extractKeySections(filePath: string): Promise<string> {
@@ -252,7 +302,7 @@ async function extractKeySections(filePath: string): Promise<string> {
         sectionTitle = line.replace(/^#{1,3}\s+/, '').trim()
 
         const lowerTitle = sectionTitle.toLowerCase()
-        inKeySection = /overview|概述|summary|problem|问题|solution|方案|approach|方法|architecture|架构|decision|决策|constraint|约束|requirement|需求|goal|目标/.test(lowerTitle)
+        inKeySection = /overview|概述|summary|problem|问题|solution|方案|approach|方法|architecture|架构|decision|决策|constraint|约束|requirement|需求|goal|目标|behavior|行为|expected/.test(lowerTitle)
       } else if (inKeySection) {
         currentSection.push(line)
       }

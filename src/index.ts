@@ -121,7 +121,7 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
   }
 
   logger.info('Plugin initialized', {
-    feature: config.feature.enabled,
+    feature: true,
     tdd: config.tdd.enabled,
     verification: config.verification.in_plan,
     archive: config.archive.enabled,
@@ -157,10 +157,10 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
     })
   })
 
-  const chatMessageHook = createChatMessageHook(openflowCtx)
+  const implementationObserver = createImplementationObserver(openflowCtx)
+  const chatMessageHook = createChatMessageHook(openflowCtx, implementationObserver)
   const toolBeforeHook = createToolBeforeHook(openflowCtx)
   const toolAfterHook = createToolAfterHook(openflowCtx)
-  const implementationObserver = createImplementationObserver(openflowCtx)
 
   return {
     tool: {
@@ -278,7 +278,9 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
   }
 }
 
-export const Plugin: OpenCodePlugin = OpenFlowPlugin
-export default OpenFlowPlugin
+export default {
+  id: '@fastknife/openflow',
+  server: OpenFlowPlugin,
+}
 
 export type { OpenFlowConfig } from './types.js'

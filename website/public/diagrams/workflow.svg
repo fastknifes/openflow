@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="360" viewBox="0 0 1120 360" role="img" aria-labelledby="title desc">
+  <title id="title">OpenFlow 工作流流程图</title>
+  <desc id="desc">从 brainstorm 到 feature、writing-plan、implement、quality-gate 和 archive 的主链路。</desc>
+  <defs>
+    <style>.bg{fill:#f8fafc}.box{fill:#fff;stroke:#2563eb;stroke-width:2;rx:16}.soft{fill:#eef6ff;stroke:#60a5fa;stroke-width:2;rx:16}.gate{fill:#fff7ed;stroke:#f97316;stroke-width:2;rx:16}.archive{fill:#f0fdf4;stroke:#16a34a;stroke-width:2;rx:16}.t{font:600 20px system-ui,Segoe UI,sans-serif;fill:#0f172a}.s{font:14px system-ui,Segoe UI,sans-serif;fill:#475569}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}.dash{stroke:#64748b;stroke-width:2;stroke-dasharray:7 6;fill:none;marker-end:url(#arrow)}</style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker>
+  </defs>
+  <rect class="bg" width="1120" height="360" rx="24"/>
+  <text x="40" y="48" class="t">OpenFlow 主工作流：先澄清，再实现，最后用证据归档</text>
+  <rect class="soft" x="40" y="110" width="150" height="90"/><text x="74" y="146" class="t">brainstorm</text><text x="68" y="174" class="s">可选对话探索</text>
+  <rect class="box" x="240" y="110" width="150" height="90"/><text x="284" y="146" class="t">feature</text><text x="268" y="174" class="s">设计与边界</text>
+  <rect class="box" x="440" y="110" width="150" height="90"/><text x="464" y="146" class="t">writing-plan</text><text x="470" y="174" class="s">生成实施计划</text>
+  <rect class="box" x="640" y="110" width="150" height="90"/><text x="678" y="146" class="t">implement</text><text x="666" y="174" class="s">执行并记录 run</text>
+  <rect class="gate" x="840" y="110" width="150" height="90"/><text x="866" y="146" class="t">quality-gate</text><text x="864" y="174" class="s">harden + verify</text>
+  <rect class="archive" x="940" y="250" width="150" height="70"/><text x="977" y="280" class="t">archive</text><text x="965" y="304" class="s">冻结与追溯</text>
+  <path class="dash" d="M190 155H238"/><path class="arrow" d="M390 155H438"/><path class="arrow" d="M590 155H638"/><path class="arrow" d="M790 155H838"/><path class="arrow" d="M915 200C915 232 955 230 985 250"/>
+  <text x="62" y="244" class="s">需求已清晰时可跳过 brainstorm</text>
+  <text x="414" y="244" class="s">计划只保存，不自动开始实现</text>
+  <text x="786" y="244" class="s">AI 完成实现后主动调用质量门</text>
+</svg>

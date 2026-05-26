@@ -32,6 +32,11 @@ describe('writing-plan command', () => {
       '# user-login Design\n\n## Overview\n\nAllow users to log in with email and password.\n\n## Architecture\n\nJWT-based authentication with refresh tokens.\n',
       'utf-8',
     )
+    await writeFile(
+      join(designDir, 'behavior.md'),
+      '# user-login Behavior\n\n## Expected Behavior\n\nUsers can complete login with email and password.\n',
+      'utf-8',
+    )
 
     const result = await handleWritingPlan(createCtx(root), 'user-login')
 
@@ -46,16 +51,58 @@ describe('writing-plan command', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('missing-design: returns warning but still valid packet', async () => {
+  test('missing-design: returns blocking incomplete design context but still valid packet', async () => {
     const root = join(process.cwd(), '.test-wp-missing')
     await rm(root, { recursive: true, force: true })
 
     const result = await handleWritingPlan(createCtx(root), 'no-design-feature')
 
-    expect(result).toContain('No design documents found')
+    expect(result).toContain('Design context incomplete')
+    expect(result).toContain('design.md')
+    expect(result).toContain('behavior.md')
+    expect(result).toContain('Do NOT generate a plan')
     expect(result).toContain('.sisyphus')
     expect(result).toContain('no-design-feature.md')
     expect(result).toContain('## Tasks')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('missing mandatory behavior document: blocks plan context', async () => {
+    const root = join(process.cwd(), '.test-wp-missing-behavior')
+    await rm(root, { recursive: true, force: true })
+
+    const designDir = join(root, 'docs', 'changes', '2026-05-25-user-login')
+    await mkdir(designDir, { recursive: true })
+    await writeFile(join(designDir, 'design.md'), '# user-login Design\n\n## Overview\n\nDesign only.\n', 'utf-8')
+
+    const result = await handleWritingPlan(createCtx(root), 'user-login')
+
+    expect(result).toContain('Design context incomplete')
+    expect(result).toContain('behavior.md')
+    expect(result).toContain('Do NOT generate a plan')
+    expect(result).not.toContain('### design.md')
+
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('ignores design.meta.json sidecar and reads mandatory markdown bodies', async () => {
+    const root = join(process.cwd(), '.test-wp-ignore-sidecar')
+    await rm(root, { recursive: true, force: true })
+
+    const designDir = join(root, 'docs', 'changes', '2026-05-25-user-login')
+    await mkdir(designDir, { recursive: true })
+    await writeFile(join(designDir, 'design.md'), '# user-login Design\n\n## Overview\n\nMarkdown design body.\n', 'utf-8')
+    await writeFile(join(designDir, 'behavior.md'), '# user-login Behavior\n\n## Expected Behavior\n\nMarkdown behavior body.\n', 'utf-8')
+    await writeFile(join(designDir, 'design.meta.json'), JSON.stringify({ feature: 'sidecar-only', goals: ['Do not read me'] }), 'utf-8')
+
+    const result = await handleWritingPlan(createCtx(root), 'user-login')
+
+    expect(result).toContain('### design.md')
+    expect(result).toContain('Markdown design body')
+    expect(result).toContain('### behavior.md')
+    expect(result).toContain('Markdown behavior body')
+    expect(result).not.toContain('Do not read me')
 
     await rm(root, { recursive: true, force: true })
   })

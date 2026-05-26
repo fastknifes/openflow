@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createToolBeforeHook, isImplementationTask, isVerificationTask } from '../../src/hooks/tool-before.js'
 import type { OpenFlowContext } from '../../src/types.js'
 import { defaultConfig } from '../../src/types.js'
+import { implementationRunStore } from '../../src/utils/implementation-run.js'
 
 function createContext(): OpenFlowContext {
   return {
@@ -122,6 +123,19 @@ describe('tool-before hook', () => {
       directory: testDir,
       worktree: testDir,
     }
+    await implementationRunStore.createRun(ctx, {
+      feature: 'demo-feature',
+      sessionID: 'session-1',
+      messageID: 'test-message',
+      agent: 'test-agent',
+      directory: testDir,
+      backend: 'opencode',
+      backendCommand: 'opencode build',
+      status: 'running',
+      containerMode: 'session',
+      eventsPath: join('.sisyphus', 'openflow', 'events', 'demo-feature.jsonl'),
+      observationsPath: join('.sisyphus', 'openflow', 'observations', 'demo-feature.jsonl'),
+    })
     const hook = createToolBeforeHook(ctx)
     const output = {
       args: {

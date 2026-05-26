@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **openflow** (2564 symbols, 5750 relationships, 211 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **openflow** (5700 symbols, 10969 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -117,6 +117,12 @@ AI会记录自己犯过的错误, 犯过的错误文件放在 `docs/current/work
 - omo `F:\ai-code\oh-my-openagent`
 - opencode `F:\ai-code\opencode`
 
+## 文档
+- 在阅读文档时以docs/*.md 文档为准
+- website/*.md 有一定的滞后，请忽略它。
+
+## lsp
+- *.md 文件不需要使用LSP 验证
 
 ## 语言
 默认使用用户输入的语言进行回复，生成的文件也应使用相同语言。  

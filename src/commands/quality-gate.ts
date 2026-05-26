@@ -334,7 +334,16 @@ export async function handleQualityGate(
   // ── 8. Extract readiness from verify output ─────────────────────────────
   const hardenUnavailableReason = parseHardenUnavailableReason(hardenOutput)
   const hardenGate = applyHardenReadinessGate(extractReadinessFromOutput(verifyOutput), hardenStatus, hardenOutput)
-  const readiness = hardenGate.readiness
+  let readiness = hardenGate.readiness
+  const rootMismatch = activeRun ? checkExecutionRootMismatch(activeRun, executionCtx.directory) : null
+  if (rootMismatch?.mismatched) {
+    logger.warn('quality_gate', 'execution root mismatch', {
+      expected: rootMismatch.expected,
+      actual: rootMismatch.actual,
+      runID: activeRun?.runID,
+    })
+    readiness = VerifyReadinessStatus.NotReady
+  }
   logger.info('quality_gate', 'readiness determined', { readiness, hardenStatus, hardenReadinessBlocker: hardenGate.blocker })
   await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'readiness', [
     `readiness=${readiness}`,
@@ -342,6 +351,7 @@ export async function handleQualityGate(
     `verifyStatus=${extractReadinessFromOutput(verifyOutput)}`,
     `blockers=${hardenGate.blockingFindings.length}`,
     `docUpdates=${hardenGate.knownIssues.length}`,
+    rootMismatch?.mismatched ? `rootMismatch=expected ${rootMismatch.expected}, actual ${rootMismatch.actual}` : '',
   ])
   const verifyContent = stripOpenFlowHeader(verifyOutput)
 
@@ -418,6 +428,7 @@ export async function handleQualityGate(
     changedFiles,
     omittedFiles: scopedWorkspace.omittedFiles,
     diffLines,
+    rootMismatch: rootMismatch?.mismatched ? rootMismatch : null,
   })
   logger.info('quality_gate', 'quality gate completed', { feature: sanitizedFeature, readiness })
   return report
@@ -464,6 +475,21 @@ function resolveImplementationRunExecutionRoot(ctx: OpenFlowContext, run: Implem
     return run.worktree
   }
   return run.directory || ctx.directory
+}
+
+function checkExecutionRootMismatch(
+  activeRun: ImplementationRun,
+  executionRoot: string,
+): { mismatched: boolean; expected: string; actual: string } {
+  const expected = activeRun.worktree || activeRun.directory
+  if (!expected) return { mismatched: false, expected: '', actual: executionRoot }
+
+  const normalize = (filePath: string) => filePath.replace(/\\/g, '/').toLowerCase().replace(/\/$/, '')
+  return {
+    mismatched: normalize(expected) !== normalize(executionRoot),
+    expected,
+    actual: executionRoot,
+  }
 }
 
 async function appendQualityGateRunEvent(
@@ -1317,6 +1343,7 @@ interface QualityGateReportInput {
   changedFiles: string[]
   omittedFiles: string[]
   diffLines: number
+  rootMismatch: { expected: string; actual: string } | null
 }
 
 function buildQualityGateReport(input: QualityGateReportInput): string {
@@ -1343,6 +1370,7 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     changedFiles,
     omittedFiles,
     diffLines,
+    rootMismatch,
   } = input
 
   const effectiveReadiness = hardenUnavailableReason === 'harden_unavailable_missing_plan' && applicability.archiveReadinessEligible
@@ -1471,6 +1499,9 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     hardenUnavailableReason ? `- **Harden Unavailable**: \`${hardenUnavailableReason}\`` : '',
     hardenReadinessBlocker
       ? `- **Harden Gate**: ❌ harden status \`${hardenStatus ?? 'unknown'}\` blocks archive readiness despite verify output.`
+      : '',
+    rootMismatch
+      ? `- **Root Mismatch**: ❌ execution root does not match the active ImplementationRun. Expected \`${escapeMarkdown(rootMismatch.expected)}\`; actual \`${escapeMarkdown(rootMismatch.actual)}\`.`
       : '',
     ...blockingFindings.map(finding => `- ${finding}`),
     applicability.status === 'limited_context' ? '- **Limited Context**: ⚠️ technical verification only; this is not archive readiness.' : '',

@@ -51,10 +51,24 @@ export async function handoffToBackend(
     await updateRunBackend(ctx, run, 'opencode', command, 'running')
     await recordBackendEvent(ctx, run, { type: 'backend_started', backend: 'opencode', command })
     await recordObservation(ctx, run.observationsPath, `Backend started: opencode (${command})`)
+    await recordObservation(ctx, run.observationsPath, `Implementation context: runID=${run.runID}, feature=${run.feature}, executionRoot=${run.worktree || run.directory}, worktree=${run.worktree || '(none)'}, planPath=.sisyphus/plans/${run.feature}.md, containerMode=${run.containerMode}`)
     return { success: true, backend: 'opencode', command }
   }
 
-  const command = `/start-work ${run.feature}`
+  const executionRoot = run.worktree || run.directory
+  const planPath = `.sisyphus/plans/${run.feature}.md`
+  const command = [
+    `/start-work ${run.feature}`,
+    '',
+    'OpenFlow Implementation Context:',
+    `- runID: ${run.runID}`,
+    `- feature: ${run.feature}`,
+    `- executionRoot: ${executionRoot}`,
+    `- worktree: ${run.worktree || '(none)'}`,
+    `- planPath: ${planPath}`,
+    `- containerMode: ${run.containerMode}`,
+    `- mustUseExistingImplementationRun: true`,
+  ].join('\n')
   if (activeHandoffs.has(toolContext.sessionID)) {
     const error = 'Recursion guard: handoff already in progress'
     logger.warn('orchestrator', 'backend handoff blocked by recursion guard', { runID: run.runID, sessionID: toolContext.sessionID })

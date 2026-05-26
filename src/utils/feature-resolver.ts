@@ -68,7 +68,8 @@ export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
         lowConfidenceReason: 'generic_slug',
       }
     }
-    return { slug: direct }
+    // Always preserve sourceIntent - command text is natural-language requirement intent, not a feature ID
+    return { slug: direct, sourceIntent: trimmed }
   }
 
   if (looksLikeGenericFeatureInstruction(trimmed)) {
@@ -106,7 +107,7 @@ export async function findIncompleteFeatureSessions(projectDir: string, featureS
       const filePath = createSafePath(projectDir, featureStateDir, file)
       try {
         const content = JSON.parse(await fs.readFile(filePath, 'utf-8')) as Record<string, unknown>
-        if (content.workflowState === 'completed') continue
+        if (content.workflowState === 'complete' || content.workflowState === 'completed') continue
         const stat = await fs.stat(filePath)
         candidates.push({
           slug: path.basename(file, '.json'),

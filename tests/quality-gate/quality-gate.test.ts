@@ -430,6 +430,50 @@ describe('handleQualityGate', () => {
     await rm(storeRoot, { recursive: true, force: true }).catch(() => {})
   }, 120000)
 
+  test('active ImplementationRun root mismatch blocks ready_for_archive transition', async () => {
+    const actualRoot = await createGitFixture('run-root-mismatch-actual', 'multi-file')
+    const expectedRoot = await createGitFixture('run-root-mismatch-expected', 'multi-file')
+    const storeRoot = join(process.cwd(), '.test-quality-gate-root-mismatch-store')
+    await rm(storeRoot, { recursive: true, force: true }).catch(() => {})
+    await mkdir(storeRoot, { recursive: true })
+    const ctx = createStandardContext(storeRoot, {
+      harden: { ...defaultConfig.harden, enabled: false },
+    })
+    const callLog: CallLog = { order: [] }
+
+    const run = await implementationRunStore.createRun(ctx, {
+      feature: FEATURE_A,
+      sessionID: 'session-root-mismatch',
+      messageID: 'message-root-mismatch',
+      agent: 'build',
+      directory: actualRoot,
+      worktree: expectedRoot,
+      backend: 'opencode',
+      backendCommand: 'Use OpenCode native build agent',
+      status: 'quality_gate_pending',
+      containerMode: 'worktree',
+      eventsPath: '.sisyphus/openflow/events/root-mismatch.jsonl',
+      observationsPath: '.sisyphus/openflow/observations/root-mismatch.jsonl',
+    })
+
+    const output = await handleQualityGate(ctx, { feature: FEATURE_A, sessionID: 'session-root-mismatch' }, {
+      overrideHarden: createMockHarden(callLog),
+      overrideVerify: createMockVerifyWithReadiness(callLog, 'ready'),
+    })
+
+    const updatedRun = await implementationRunStore.getRun(ctx, run.runID)
+    const events = await readRunEvents(storeRoot, run.eventsPath)
+
+    expect(output).toContain('Root Mismatch')
+    expect(output).toContain('not_ready')
+    expect(updatedRun?.status).toBe('blocked')
+    expect(events[1]?.result).toBe('not_ready')
+
+    await rm(actualRoot, { recursive: true, force: true }).catch(() => {})
+    await rm(expectedRoot, { recursive: true, force: true }).catch(() => {})
+    await rm(storeRoot, { recursive: true, force: true }).catch(() => {})
+  }, 120000)
+
   test('active ImplementationRun readiness results transition to final run statuses', async () => {
     const cases: Array<{ readiness: 'ready_with_doc_updates' | 'not_ready' | 'needs_decision'; status: string }> = [
       { readiness: 'ready_with_doc_updates', status: 'ready_for_archive' },

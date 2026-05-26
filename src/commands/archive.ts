@@ -34,7 +34,7 @@ import {
 import { stripOpenFlowCommandTokens } from './verify.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { implementationRunStore } from '../utils/implementation-run.js'
-import { getSchedulerLoop } from '../index.js'
+import { removeWorktree } from '../utils/implementation-worktree.js'
 
 const RECENT_BUILDS_WINDOW = 5
 
@@ -48,6 +48,16 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
   const resolvedFeature = candidateFeature || await findActiveFeature(ctx)
   if (!resolvedFeature) {
+    // Fallback: check for limited-context state or code changes that suggest
+    // the user wants to archive work done outside an explicit workflow.
+    const acceptanceStatePeek = await loadAcceptanceState(ctx.directory)
+    const isLimitedContext = acceptanceStatePeek?.feature?.startsWith('limited-context-') ?? false
+    const hasCodeChanges = (await collectFileChanges(ctx.directory)).length > 0
+
+    if (isLimitedContext || hasCodeChanges) {
+      return formatQualityGateFirstBlock(acceptanceStatePeek?.feature)
+    }
+
     throw new OpenFlowError(ErrorCode.INVALID_INPUT, 'Feature name is required. Usage: /openflow-archive <feature-name>')
   }
 
@@ -58,6 +68,10 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
   const implementationRun = await resolveArchiveImplementationRun(ctx, sanitizedFeature)
   if (implementationRun) {
+    if (hasArchiveExecutionRootMismatch(implementationRun, ctx.directory) && implementationRun.status === 'ready_for_archive') {
+      return formatArchiveRootMismatchBlock(sanitizedFeature, implementationRun.worktree ?? '', ctx.directory)
+    }
+
     if (implementationRun.status === 'ready_for_archive') {
       if (!isArchiveRunConfirmed(matchingAcceptanceState)) {
         if (matchingAcceptanceState && matchingAcceptanceState.archiveRunConfirmationStatus !== 'awaiting') {
@@ -111,6 +125,7 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const gateApplicability = matchingAcceptanceState?.qualityGateApplicability
   const isPostHocIssue = await detectPostHocIssueMode(ctx, sanitizedFeature, matchingAcceptanceState)
   let postHocIssueReady = isPostHocIssue && (readiness === VerifyReadinessStatus.Ready || readiness === VerifyReadinessStatus.ReadyWithDocUpdates)
+  const skipQualityGateChecks = implementationRun?.status === 'ready_for_archive'
 
   // Plan-only fallback: when no matching acceptance state exists but a plan file
   // is present and there's no design.md (limited context), allow post-hoc archive
@@ -126,46 +141,48 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
     }
   }
 
-  if (gateApplicability && !gateApplicability.archiveReadinessEligible && !postHocIssueReady) {
-    return formatQualityGateApplicabilityBlock(sanitizedFeature, gateApplicability.status, gateApplicability.nextStep)
-  }
+  if (!skipQualityGateChecks) {
+    if (gateApplicability && !gateApplicability.archiveReadinessEligible && !postHocIssueReady) {
+      return formatQualityGateApplicabilityBlock(sanitizedFeature, gateApplicability.status, gateApplicability.nextStep)
+    }
 
-  if (readiness === VerifyReadinessStatus.NotReady || readiness === VerifyReadinessStatus.NeedsDecision) {
-    return formatReadinessBlock(sanitizedFeature, readiness)
-  }
+    if (readiness === VerifyReadinessStatus.NotReady || readiness === VerifyReadinessStatus.NeedsDecision) {
+      return formatReadinessBlock(sanitizedFeature, readiness)
+    }
 
-  if ((hardenTerminalSummary?.unresolvedMustFixCount ?? 0) > 0) {
-    return formatHardenSummaryBlock(sanitizedFeature, 'unresolved harden must-fix findings')
-  }
+    if ((hardenTerminalSummary?.unresolvedMustFixCount ?? 0) > 0) {
+      return formatHardenSummaryBlock(sanitizedFeature, 'unresolved harden must-fix findings')
+    }
 
-  if ((hardenTerminalSummary?.unresolvedNeedsDecisionCount ?? 0) > 0) {
-    return formatHardenSummaryBlock(sanitizedFeature, 'harden summary requires decision')
-  }
+    if ((hardenTerminalSummary?.unresolvedNeedsDecisionCount ?? 0) > 0) {
+      return formatHardenSummaryBlock(sanitizedFeature, 'harden summary requires decision')
+    }
 
-  if (readiness === VerifyReadinessStatus.ReadyWithDocUpdates && matchingAcceptanceState && !hasAcceptedKnownIssues) {
-    const confirmationState = getArchiveDocUpdateConfirmationState(matchingAcceptanceState)
+    if (readiness === VerifyReadinessStatus.ReadyWithDocUpdates && matchingAcceptanceState && !hasAcceptedKnownIssues) {
+      const confirmationState = getArchiveDocUpdateConfirmationState(matchingAcceptanceState)
 
-    if (!confirmationState.confirmed) {
-      if (!confirmationState.waiting) {
-        if (confirmationState.declined) {
-          return formatDocUpdateConfirmationDeclined(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates)
+      if (!confirmationState.confirmed) {
+        if (!confirmationState.waiting) {
+          if (confirmationState.declined) {
+            return formatDocUpdateConfirmationDeclined(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates)
+          }
+
+          matchingAcceptanceState.archiveUsedDocUpdateConfirmPath = true
+          await saveAcceptanceState(ctx.directory, matchingAcceptanceState)
+          await setWaitingForDocUpdateConfirm(ctx.directory, matchingAcceptanceState.pendingDocUpdates[0]?.file ?? `docs/changes/${sanitizedFeature}`)
+          return formatDocUpdateConfirmationRequired(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates, false)
         }
 
-        matchingAcceptanceState.archiveUsedDocUpdateConfirmPath = true
-        await saveAcceptanceState(ctx.directory, matchingAcceptanceState)
-        await setWaitingForDocUpdateConfirm(ctx.directory, matchingAcceptanceState.pendingDocUpdates[0]?.file ?? `docs/changes/${sanitizedFeature}`)
-        return formatDocUpdateConfirmationRequired(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates, false)
+        return formatDocUpdateConfirmationRequired(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates, true)
       }
-
-      return formatDocUpdateConfirmationRequired(sanitizedFeature, matchingAcceptanceState.pendingDocUpdates, true)
     }
-  }
 
-  const implementationState = matchingAcceptanceState ? await getImplementationState(ctx.directory) : null
-  const implementationStateValue = implementationState?.state ?? 'clean'
+    const implementationState = matchingAcceptanceState ? await getImplementationState(ctx.directory) : null
+    const implementationStateValue = implementationState?.state ?? 'clean'
 
-  if (matchingAcceptanceState && implementationStateValue !== 'clean' && implementationStateValue !== 'verified') {
-    return formatImplementationStateBlock(sanitizedFeature, implementationStateValue)
+    if (matchingAcceptanceState && implementationStateValue !== 'clean' && implementationStateValue !== 'verified') {
+      return formatImplementationStateBlock(sanitizedFeature, implementationStateValue)
+    }
   }
 
   const buildChanges = await collectFileChanges(ctx.directory)
@@ -176,12 +193,14 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   const phasedChanges = await collectPhasedSessionChanges(ctx, matchingAcceptanceState?.sessionID, phaseCutoff)
   const driftItems = await collectDriftItems(ctx, sourceDesignPath, phasedChanges)
 
-  if (useLegacyReadinessFallback && driftItems.length > 0 && Boolean(ctx.config.archive.drift_check)) {
-    return formatDriftDecisionRequired(sanitizedFeature, driftItems)
-  }
+  if (!skipQualityGateChecks) {
+    if (useLegacyReadinessFallback && driftItems.length > 0 && Boolean(ctx.config.archive.drift_check)) {
+      return formatDriftDecisionRequired(sanitizedFeature, driftItems)
+    }
 
-  if (useLegacyReadinessFallback && matchingAcceptanceState?.verificationFailureCategory === 'security') {
-    return formatSecurityVerificationBlock(sanitizedFeature)
+    if (useLegacyReadinessFallback && matchingAcceptanceState?.verificationFailureCategory === 'security') {
+      return formatSecurityVerificationBlock(sanitizedFeature)
+    }
   }
 
   let issueResolutionGenerated = false
@@ -286,38 +305,15 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
 
     const autoPromoteCurrent = Boolean(ctx.config.archive.auto_promote_current)
     let promotionResult: { applied: CurrentPromotionSuggestion[]; skipped: CurrentPromotionSuggestion[] }
-    let promotionTaskId: string | undefined
 
     if (autoPromoteCurrent) {
-      const scheduler = getSchedulerLoop()
-      if (scheduler !== undefined) {
-        const resources = promotionSuggestions
-          .filter((s) => s.type !== 'REMOVE')
-          .map((s) => ({
-            kind: 'file' as const,
-            id: path.relative(ctx.directory, s.targetPath).replace(/\\/g, '/'),
-            mode: 'write' as const,
-          }))
-        promotionTaskId = scheduler.submitTask({
-          type: 'current-promotion',
-          payload: {
-            projectDir: ctx.directory,
-            suggestions: promotionSuggestions,
-          },
-          resources,
-        })
-        promotionResult = { applied: [], skipped: promotionSuggestions }
-      } else if (ctx.config.archive.sync_promotion_fallback !== false) {
-        promotionResult = await applyPromotionSuggestions({
-          projectDir: ctx.directory,
-          suggestions: promotionSuggestions,
-        })
-      } else {
-        throw new OpenFlowError(
-          ErrorCode.OPERATION_FAILED,
-          'DRG scheduler is not started and sync promotion fallback is disabled. Enable fallback or start the scheduler.',
-        )
-      }
+      // Archive is an atomic operation — always apply promotion synchronously.
+      // The previous async DRG path caused promotions to silently fail when the
+      // scheduler task was not processed before the session ended.
+      promotionResult = await applyPromotionSuggestions({
+        projectDir: ctx.directory,
+        suggestions: promotionSuggestions,
+      })
     } else {
       promotionResult = { applied: [], skipped: promotionSuggestions }
     }
@@ -339,7 +335,39 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
       }
     }
 
-    await markArchivedIfNeeded(ctx, sanitizedFeature, promotionSuggestions, autoPromoteCurrent)
+    let worktreeCleanedUp = false
+    if (implementationRun?.worktreeKind === 'derived' && implementationRun.worktree && archiveCommitHash) {
+      const worktreeBranch = implementationRun.branch ?? `openflow/implement-${sanitizedFeature}`
+      let worktreeMerged = false
+
+      try {
+        execSync(`git merge ${worktreeBranch} --no-edit`, { cwd: ctx.directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        worktreeMerged = true
+        logger.info('orchestrator', 'merged worktree branch into main repo', { feature: sanitizedFeature, branch: worktreeBranch })
+      } catch (mergeErr) {
+        logger.warn('orchestrator', 'failed to merge worktree branch into main repo', { feature: sanitizedFeature, branch: worktreeBranch, error: mergeErr instanceof Error ? mergeErr.message : String(mergeErr) })
+      }
+
+      try {
+        const removeResult = await removeWorktree(ctx, sanitizedFeature)
+        if (removeResult.success) {
+          try {
+            execSync(`git branch -d ${worktreeBranch}`, { cwd: ctx.directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+            worktreeCleanedUp = worktreeMerged
+            logger.info('orchestrator', 'worktree cleaned up after archive', { feature: sanitizedFeature, worktree: implementationRun.worktree })
+          } catch (branchErr) {
+            logger.warn('orchestrator', 'failed to delete worktree branch', { feature: sanitizedFeature, branch: worktreeBranch, error: branchErr instanceof Error ? branchErr.message : String(branchErr) })
+          }
+        } else {
+          logger.warn('orchestrator', 'failed to clean up worktree', { feature: sanitizedFeature, error: removeResult.error })
+        }
+      } catch (cleanupErr) {
+        logger.warn('orchestrator', 'worktree cleanup error', { feature: sanitizedFeature, error: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr) })
+      }
+    }
+
+    const promotionApplied = promotionResult.applied.length > 0
+    await markArchivedIfNeeded(ctx, sanitizedFeature, promotionSuggestions, promotionApplied)
     await cleanupBuildData(ctx.directory)
     await cleanupArchivedChangeWorkspaceSources(sourceChangeWorkspacePath, archivedChangeWorkspaceSources)
 
@@ -376,11 +404,8 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
       governanceDecisionTargetPath,
       hasImplementationMapper,
       postHocIssueReady,
+      worktreeCleanedUp,
     )
-
-    if (promotionTaskId) {
-      return `${archiveResult}\n\n### Current Promotion (Async)\n- DRG task submitted: \`${escapeMarkdown(promotionTaskId)}\`\n- Query status with the scheduler API.`
-    }
 
     return archiveResult
   } catch (error) {
@@ -462,6 +487,29 @@ async function resolveArchiveImplementationRun(ctx: OpenFlowContext, feature: st
 
   const runs = await implementationRunStore.listRuns(ctx, { feature })
   return runs[0] ?? null
+}
+
+function hasArchiveExecutionRootMismatch(run: ImplementationRun, archiveRoot: string): boolean {
+  if (run.worktreeKind !== 'derived' || !run.worktree) {
+    return false
+  }
+
+  const normalize = (filePath: string) => filePath.replace(/\\/g, '/').toLowerCase().replace(/\/$/, '')
+  return normalize(run.worktree) !== normalize(archiveRoot)
+}
+
+function formatArchiveRootMismatchBlock(feature: string, expectedRoot: string, actualRoot: string): string {
+  return [
+    '## Archive Blocked — Root Mismatch',
+    '',
+    `- **Feature**: ${escapeMarkdown(feature)}`,
+    `- **Expected Root**: \`${escapeMarkdown(expectedRoot)}\``,
+    `- **Actual Root**: \`${escapeMarkdown(actualRoot)}\``,
+    '',
+    'Archive cannot proceed because the execution root does not match the implementation run\'s worktree.',
+    '',
+    'This implementation was executed in an isolated worktree. Archive must be run from that worktree context.',
+  ].join('\n')
 }
 
 async function recordArchiveRunEvent(ctx: OpenFlowContext, run: ImplementationRun): Promise<void> {
@@ -589,6 +637,27 @@ Archive stopped because no verification readiness was found for **${escapeMarkdo
 The current acceptance state (\`.sisyphus/acceptance.local.md\`) belongs to **${escapeMarkdown(staleFeature)}**, not **${escapeMarkdown(feature)}**.
 
   Run \`openflow-quality-gate\` to generate fresh readiness for this feature before archiving.`
+}
+
+function formatQualityGateFirstBlock(limitedContextFeature?: string): string {
+  const contextHint = limitedContextFeature
+    ? `\n\nA limited-context acceptance state (\`${escapeMarkdown(limitedContextFeature)}\`) was detected — this means code changes were tracked but never verified through a quality gate.`
+    : '\n\nCode changes were detected but no feature workflow or verification readiness exists.'
+
+  return `## Archive Requires Quality Gate
+
+Archive cannot proceed because no active feature or verification readiness was found.${contextHint}
+
+### Required Next Step
+
+Run \`openflow-quality-gate\` first. The quality gate will:
+
+1. Detect the implementation context (limited context / no design docs)
+2. Run technical verification (typecheck, lint, test)
+3. Set readiness status and mark \`postHocIssue\` if applicable
+4. Make the work eligible for post-hoc issue archive
+
+After the quality gate reports readiness, run \`/openflow-archive\` again.`
 }
 
 function formatImplementationStateBlock(
@@ -1069,6 +1138,7 @@ function formatArchiveResult(
   governanceDecisionTargetPath: string | null,
   hasImplementationMapper: boolean,
   postHocIssueReady: boolean,
+  worktreeCleanedUp: boolean,
 ): string {
   const safePath = escapeMarkdown(archiveDir)
   const reportedArchiveMode = postHocIssueReady ? 'post_hoc_issue' : archiveMode
@@ -1085,6 +1155,9 @@ function formatArchiveResult(
     : ''
   const governanceBlock = archiveMode === 'issue' || archiveMode === 'mixed' || postHocIssueReady
     ? `\n### Governance Promotion\n- decision applied: ${governanceDecisionTargetPath ? `✅ ${escapeMarkdown(governanceDecisionTargetPath)}` : '❌ none'}\n`
+    : ''
+  const worktreeBlock = worktreeCleanedUp
+    ? `\n### Worktree\n- ✅ worktree merged and cleaned up\n`
     : ''
   
 
@@ -1119,6 +1192,7 @@ ${issueArtifactsBlock}
 ${readinessWarningBlock}
 ${docUpdateConfirmBlock}
 ${governanceBlock}
+${worktreeBlock}
 
 ### Current Promotion
 - suggestions: ${promotionSuggestions.length}

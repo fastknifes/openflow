@@ -48,6 +48,17 @@ async function readEvents(ctx: OpenFlowContext, run: ImplementationRun): Promise
   }
 }
 
+async function readMismatchEvents(ctx: OpenFlowContext): Promise<Array<Record<string, unknown>>> {
+  const mismatchPath = join(ctx.directory, '.sisyphus', 'openflow', 'events', 'mismatch.jsonl')
+  try {
+    const content = await readFile(mismatchPath, 'utf8')
+    return content.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
+
 describe('implementation observer hooks', () => {
   afterEach(async () => {
     await rm(TEST_ROOT, { recursive: true, force: true })
@@ -166,5 +177,182 @@ describe('implementation observer hooks', () => {
     observer.clearActiveRun('session-1')
     expect(observer.getActiveRun('session-1')).toBeUndefined()
     expect(observer.getActiveRun('session-2')?.runID).toBe(secondRun.runID)
+  })
+})
+
+describe('implementation observer mismatch detection', () => {
+  afterEach(async () => {
+    await rm(TEST_ROOT, { recursive: true, force: true })
+  })
+
+  test('records mismatch when backend chat message has no active run', async () => {
+    const root = join(TEST_ROOT, 'mismatch-chat-backend')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+
+    // Send /start-work message without setting active run
+    await observer.chatMessageHook(
+      { sessionID: 'session-1' },
+      { parts: [{ type: 'text', text: '/start-work my-feature' }] },
+    )
+
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(1)
+    expect(mismatches[0]).toMatchObject({
+      type: 'implementation_context_mismatch',
+      sessionID: 'session-1',
+      reason: 'no_active_run',
+      originalEventType: 'backend_started',
+    })
+  })
+
+  test('records mismatch when quality-gate chat message has no active run', async () => {
+    const root = join(TEST_ROOT, 'mismatch-chat-qg')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+
+    await observer.chatMessageHook(
+      { sessionID: 'session-1' },
+      { parts: [{ type: 'text', text: 'Quality Gate complete. Readiness: Ready' }] },
+    )
+
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(1)
+    expect(mismatches[0]).toMatchObject({
+      type: 'implementation_context_mismatch',
+      sessionID: 'session-1',
+      reason: 'no_active_run',
+      originalEventType: 'quality_gate_started',
+    })
+  })
+
+  test('records mismatch when backend tool call has no active run', async () => {
+    const root = join(TEST_ROOT, 'mismatch-tool-backend')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+
+    await observer.toolBeforeHook(
+      { tool: 'task', sessionID: 'session-1', callID: 'call-1' },
+      { args: {} },
+    )
+
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(1)
+    expect(mismatches[0]).toMatchObject({
+      type: 'implementation_context_mismatch',
+      sessionID: 'session-1',
+      reason: 'no_active_run',
+      originalEventType: 'backend_started',
+    })
+  })
+
+  test('records mismatch when backend tool completion has no active run', async () => {
+    const root = join(TEST_ROOT, 'mismatch-tool-complete')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+
+    await observer.toolAfterHook(
+      { tool: 'task', sessionID: 'session-1', callID: 'call-1' },
+      { output: 'done' },
+    )
+
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(1)
+    expect(mismatches[0]).toMatchObject({
+      type: 'implementation_context_mismatch',
+      sessionID: 'session-1',
+      reason: 'no_active_run',
+      originalEventType: 'backend_completed',
+    })
+  })
+
+  test('records mismatch when quality-gate command has no active run', async () => {
+    const root = join(TEST_ROOT, 'mismatch-command-qg')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+
+    await observer.commandBeforeHook(
+      { command: 'openflow-quality-gate', sessionID: 'session-1', arguments: 'my-feature' },
+      {},
+    )
+
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(1)
+    expect(mismatches[0]).toMatchObject({
+      type: 'implementation_context_mismatch',
+      sessionID: 'session-1',
+      reason: 'no_active_run',
+      originalEventType: 'quality_gate_started',
+    })
+  })
+
+  test('records mismatch when event hook receives backend events with no active run', async () => {
+    const root = join(TEST_ROOT, 'mismatch-event')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+
+    await observer.event({ sessionID: 'session-1', type: 'backend_completed' })
+
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(1)
+    expect(mismatches[0]).toMatchObject({
+      type: 'implementation_context_mismatch',
+      sessionID: 'session-1',
+      reason: 'no_active_run',
+      originalEventType: 'backend_completed',
+    })
+  })
+
+  test('does not record mismatch for unrelated session events', async () => {
+    const root = join(TEST_ROOT, 'mismatch-unrelated')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+
+    // Set active run for session-1
+    const run = await createRun(ctx, { sessionID: 'session-1' })
+    observer.setActiveRun(run)
+
+    // Send tool event for session-2 (wrong session)
+    await observer.toolBeforeHook(
+      { tool: 'task', sessionID: 'session-2', callID: 'call-1' },
+      { args: {} },
+    )
+
+    // session-1 run should not have status changed
+    expect((await implementationRunStore.getRun(ctx, run.runID))?.status).toBe('created')
+    // session-2 should get mismatch
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(1)
+    expect(mismatches[0]).toMatchObject({
+      sessionID: 'session-2',
+      reason: 'no_active_run',
+    })
+  })
+
+  test('correct run does not produce mismatch events', async () => {
+    const root = join(TEST_ROOT, 'no-mismatch-happy-path')
+    await mkdir(root, { recursive: true })
+    const ctx = createContext(root)
+    const observer = createImplementationObserver(ctx)
+    const run = await createRun(ctx, { sessionID: 'session-1', backendCommand: 'task' })
+    observer.setActiveRun(run)
+
+    await observer.toolBeforeHook(
+      { tool: 'task', sessionID: 'session-1', callID: 'call-1' },
+      { args: {} },
+    )
+
+    const mismatches = await readMismatchEvents(ctx)
+    expect(mismatches).toHaveLength(0)
+    const events = await readEvents(ctx, run)
+    expect(events.map(event => event.type)).toEqual(['backend_started'])
+    expect((await implementationRunStore.getRun(ctx, run.runID))?.status).toBe('starting_backend')
   })
 })

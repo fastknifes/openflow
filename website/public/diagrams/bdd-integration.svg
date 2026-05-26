@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="400" viewBox="0 0 1120 400" role="img" aria-labelledby="title desc">
+  <title id="title">BDD 指导集成测试</title><desc id="desc">behavior.md 中的关键场景映射到集成测试证据，再被质量门检查覆盖。</desc>
+  <defs><style>.bg{fill:#f8fafc}.doc{fill:#eef6ff;stroke:#2563eb;stroke-width:2;rx:16}.test{fill:#f0fdf4;stroke:#16a34a;stroke-width:2;rx:16}.gate{fill:#fff7ed;stroke:#f97316;stroke-width:2;rx:16}.t{font:600 20px system-ui,Segoe UI,sans-serif;fill:#0f172a}.s{font:14px system-ui,Segoe UI,sans-serif;fill:#475569}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker></defs>
+  <rect class="bg" width="1120" height="400" rx="24"/>
+  <text x="40" y="48" class="t">BDD 指导集成测试：从行为场景到证据覆盖</text>
+  <rect class="doc" x="60" y="95" width="210" height="120"/><text x="105" y="132" class="t">behavior.md</text><text x="90" y="162" class="s">用户可见行为</text><text x="90" y="186" class="s">关键场景 / 失败行为</text>
+  <rect class="doc" x="340" y="95" width="210" height="120"/><text x="380" y="132" class="t">BDD 场景</text><text x="365" y="162" class="s">Given / When / Then</text><text x="365" y="186" class="s">Critical / Advisory</text>
+  <rect class="test" x="620" y="95" width="210" height="120"/><text x="662" y="132" class="t">集成测试</text><text x="650" y="162" class="s">API / UI / smoke / QA</text><text x="650" y="186" class="s">一条证据可覆盖多场景</text>
+  <rect class="gate" x="900" y="95" width="170" height="120"/><text x="940" y="132" class="t">质量门</text><text x="925" y="162" class="s">exact / equivalent</text><text x="925" y="186" class="s">partial / missing 阻塞</text>
+  <path class="arrow" d="M270 155H338"/><path class="arrow" d="M550 155H618"/><path class="arrow" d="M830 155H898"/>
+  <rect class="doc" x="230" y="285" width="660" height="65"/><text x="265" y="313" class="t">核心原则</text><text x="385" y="313" class="s">测试不是只验证代码路径，而是证明关键行为场景仍成立。</text>
+</svg>

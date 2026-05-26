@@ -178,27 +178,16 @@ describe('plan enhancer', () => {
     await mkdir(designDir, { recursive: true })
 
     await writeFile(PLAN_PATH, '# Demo Plan\n\n## TODOs\n\n- [ ] Implement demo feature\n', 'utf-8')
-    await writeFile(join(designDir, 'design.md'), '# Design\n\n## Overview\n\nLegacy markdown should not win.\n', 'utf-8')
-
-    const model = createMinimalRequirementModel('demo-feature')
-    model.problemStatement = 'Use structured feature output to enrich the plan.'
-    model.goals = ['Explain the problem clearly to the implementation agent']
-    model.constraints = [
-      {
-        id: 'c-enhancer-sidecar',
-        category: 'compatibility',
-        severity: 'must',
-        description: 'Keep markdown extraction as a fallback path',
-        rationale: 'Legacy workspaces do not have sidecars',
-        verificationMethod: 'Fallback tests still pass',
-        sourceQuestionId: 'constraints',
-      },
-    ]
-    model.acceptanceCriteria = [
-      { id: 'ac-enhancer-sidecar', description: 'The plan includes acceptance criteria from the sidecar' },
-    ]
-
-    await writeFile(join(designDir, 'design.meta.json'), JSON.stringify(model, null, 2), 'utf-8')
+    await writeFile(
+      join(designDir, 'design.md'),
+      '# Design\n\n## Overview\n\nUse markdown feature output to enrich the plan.\n\n## Goals\n\n- Explain the problem clearly to the implementation agent\n\n## Design Constraints\n\n- Keep markdown extraction as the canonical path\n',
+      'utf-8',
+    )
+    await writeFile(
+      join(designDir, 'behavior.md'),
+      '# Behavior\n\n## Expected Behavior\n\nThe plan includes acceptance criteria from behavior markdown.\n',
+      'utf-8',
+    )
 
     const config = {
       ...defaultConfig,
@@ -226,11 +215,10 @@ describe('plan enhancer', () => {
 
     expect(result).toBe(true)
     expect(enhanced).toContain('## Design Context')
-    expect(enhanced).toContain('Use structured feature output to enrich the plan.')
+    expect(enhanced).toContain('Use markdown feature output to enrich the plan.')
     expect(enhanced).toContain('Explain the problem clearly to the implementation agent')
-    expect(enhanced).toContain('[MUST / compatibility] Keep markdown extraction as a fallback path')
-    expect(enhanced).toContain('The plan includes acceptance criteria from the sidecar')
-    expect(enhanced).not.toContain('Legacy markdown should not win.')
+    expect(enhanced).toContain('Keep markdown extraction as the canonical path')
+    expect(enhanced).toContain('The plan includes acceptance criteria from behavior markdown')
 
     await rm(TEST_ROOT, { recursive: true, force: true })
   })

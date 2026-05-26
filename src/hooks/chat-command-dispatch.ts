@@ -1,9 +1,11 @@
 import type { Hooks } from '@opencode-ai/plugin'
+import type { ToolContext } from '@opencode-ai/plugin/tool'
 import type { OpenFlowContext } from '../types.js'
 import { handleFeature } from '../commands/feature.js'
 import { handleArchive, handleInit, handleStatus, handleConfig, handleMigrateDocs } from '../commands/index.js'
 import { handleChange } from '../commands/change.js'
 import { handleWritingPlan } from '../commands/writing-plan.js'
+import { handleImplement, type ImplementObserver } from '../commands/implement.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { appendGuardMessage } from './feature-workflow.js'
 import { detectPlanAgent } from '../utils/agent-router.js'
@@ -11,11 +13,61 @@ import { detectPlanAgent } from '../utils/agent-router.js'
 type ChatInput = Parameters<NonNullable<Hooks['chat.message']>>[0]
 type ChatOutput = Parameters<NonNullable<Hooks['chat.message']>>[1]
 
+type OpenFlowImplementParseResult = { feature: string; useWorktree: boolean } | { error: string }
+
+export function parseOpenFlowImplementCommand(command: string): OpenFlowImplementParseResult | undefined {
+  const match = command.match(/^\/openflow-implement(?:\s+(.*))?$/)
+  if (!match) return undefined
+
+  const tokens = match[1]?.trim().split(/\s+/).filter(Boolean) ?? []
+  const supportedFlags = '--no-worktree'
+  let useWorktree = true
+  const featureTokens: string[] = []
+
+  for (const token of tokens) {
+    if (token === '--no-worktree') {
+      useWorktree = false
+      continue
+    }
+
+    if (token.startsWith('--')) {
+      return { error: `Unsupported flag: ${token}. Supported flags: ${supportedFlags}` }
+    }
+
+    featureTokens.push(token)
+  }
+
+  const feature = featureTokens.join(' ').trim()
+  if (!feature) {
+    return { error: 'Feature name is required. Usage: /openflow-implement <feature-name> [--no-worktree]' }
+  }
+
+  return { feature, useWorktree }
+}
+
+function buildToolContextFromChatInput(input: ChatInput): ToolContext | undefined {
+  const rawInput = input as Record<string, unknown>
+  const sessionID = typeof rawInput.sessionID === 'string' ? rawInput.sessionID : undefined
+  if (!sessionID) return undefined
+
+  return {
+    sessionID,
+    messageID: '',
+    agent: '',
+    directory: typeof rawInput.directory === 'string' ? rawInput.directory : '',
+    worktree: typeof rawInput.worktree === 'string' ? rawInput.worktree : '',
+    abort: new AbortController().signal,
+    metadata: () => undefined,
+    ask: async () => undefined,
+  }
+}
+
 export async function dispatchOpenFlowCommand(
   ctx: OpenFlowContext,
   input: ChatInput,
   output: ChatOutput,
   message: string,
+  observer?: ImplementObserver,
 ): Promise<boolean> {
   const openFlowCommand = extractOpenFlowCommand(message)
   if (!openFlowCommand) return false
@@ -130,6 +182,18 @@ export async function dispatchOpenFlowCommand(
     } catch (err) {
       appendGuardMessage(output, err instanceof Error ? err.message : String(err))
     }
+    return true
+  }
+
+  const parsedImplement = parseOpenFlowImplementCommand(trimmed)
+  if (parsedImplement) {
+    if ('error' in parsedImplement) {
+      appendGuardMessage(output, parsedImplement.error)
+      return true
+    }
+    const toolContext = buildToolContextFromChatInput(input)
+    const result = await handleImplement(ctx, parsedImplement.feature, parsedImplement.useWorktree, toolContext, observer)
+    appendGuardMessage(output, result)
     return true
   }
 

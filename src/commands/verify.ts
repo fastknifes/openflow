@@ -73,6 +73,8 @@ const OPENFLOW_COMMAND_TOKENS = [
   'openflow-migrate-docs',
   'openflow-writing-plan',
   'openflow-brainstorm',
+  'openflow-implement',
+  'openflow-quality-gate',
   'slash-command',
   'command',
   'auto',

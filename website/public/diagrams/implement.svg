@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="420" viewBox="0 0 1120 420" role="img" aria-labelledby="title desc">
+  <title id="title">openflow-implement 工作原理</title>
+  <desc id="desc">openflow-implement 创建 ImplementationRun，并根据是否安装 OMO 选择执行后端。</desc>
+  <defs><style>.bg{fill:#f8fafc}.box{fill:#fff;stroke:#2563eb;stroke-width:2;rx:16}.run{fill:#eef6ff;stroke:#3b82f6;stroke-width:2;rx:16}.omo{fill:#faf5ff;stroke:#a855f7;stroke-width:2;rx:16}.native{fill:#ecfeff;stroke:#06b6d4;stroke-width:2;rx:16}.t{font:600 20px system-ui,Segoe UI,sans-serif;fill:#0f172a}.s{font:14px system-ui,Segoe UI,sans-serif;fill:#475569}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}.label{font:600 14px system-ui,Segoe UI,sans-serif;fill:#334155}</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker></defs>
+  <rect class="bg" width="1120" height="420" rx="24"/>
+  <text x="40" y="48" class="t">/openflow-implement：不是直接写代码，而是创建可追踪执行运行</text>
+  <rect class="box" x="50" y="100" width="190" height="90"/><text x="78" y="136" class="t">用户命令</text><text x="80" y="165" class="s">/openflow-implement feature</text>
+  <rect class="run" x="300" y="92" width="230" height="106"/><text x="335" y="130" class="t">ImplementationRun</text><text x="326" y="160" class="s">记录 feature / session / worktree</text><text x="342" y="182" class="s">backend / events / 状态</text>
+  <rect class="box" x="600" y="92" width="210" height="106"/><text x="642" y="130" class="t">后端检测</text><text x="628" y="160" class="s">是否安装并启用 OMO？</text>
+  <rect class="omo" x="880" y="60" width="190" height="100"/><text x="920" y="98" class="t">OMO 路径</text><text x="902" y="128" class="s">委派 /start-work</text>
+  <rect class="native" x="880" y="220" width="190" height="100"/><text x="900" y="258" class="t">OpenCode 路径</text><text x="902" y="288" class="s">原生 plan/build 执行</text>
+  <path class="arrow" d="M240 145H298"/><path class="arrow" d="M530 145H598"/><path class="arrow" d="M810 130C840 112 850 110 878 110"/><path class="arrow" d="M810 160C845 196 850 270 878 270"/>
+  <text x="820" y="105" class="label">有 OMO</text><text x="820" y="244" class="label">无 OMO</text>
+  <rect class="box" x="300" y="270" width="510" height="80"/><text x="330" y="304" class="t">共同约束</text><text x="330" y="332" class="s">实现必须尊重 docs/changes/* 设计边界；完成后必须回到 openflow-quality-gate。</text>
+</svg>

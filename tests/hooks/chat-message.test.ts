@@ -223,6 +223,7 @@ describe('chat-message hook', () => {
     await rm(root, { recursive: true, force: true })
     await mkdir(join(root, 'docs', 'changes', feature), { recursive: true })
     await writeFile(join(root, 'docs', 'changes', feature, 'design.md'), '# design', 'utf-8')
+    await writeFile(join(root, 'docs', 'changes', feature, 'behavior.md'), '# behavior', 'utf-8')
     try {
       const ctx = createContext(root)
       const hook = createChatMessageHook(ctx)

@@ -1,6 +1,7 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolContext } from '@opencode-ai/plugin/tool'
-import type { ImplementationBackend, ImplementationContainerMode, OpenFlowContext } from '../types.js'
+import type { ImplementationBackend, ImplementationContainerMode, ImplementationRunStatus, OpenFlowContext } from '../types.js'
 import { implementationRunStore, recordObservation } from '../utils/implementation-run.js'
 import { handoffToBackend } from '../utils/implementation-backend.js'
 import { createWorktree, isMainWorktreeDirty } from '../utils/implementation-worktree.js'
@@ -52,30 +53,124 @@ export async function handleImplement(
   const containerMode: ImplementationContainerMode = effectiveUseWorktree ? 'worktree' : 'session'
   const backend: ImplementationBackend = 'opencode'
   const backendCommand = ''
-  const mainWorktreeDirty = isMainWorktreeDirty(ctx)
+  const mainWorktreeDirty = existsSync(join(ctx.directory, '.git')) && isMainWorktreeDirty(ctx)
 
   // ── 3. Check for duplicate active run ───────────────────────────────────
   logger.debug('orchestrator', 'checking for duplicate active run', { sanitizedFeature, sessionID: sessionID || undefined })
   const activeRun = await implementationRunStore.getActiveRun(ctx, sanitizedFeature, sessionID || undefined)
+    ?? (await implementationRunStore.listRuns(ctx, sessionID ? { feature: sanitizedFeature, sessionID } : { feature: sanitizedFeature }))[0]
   if (activeRun) {
-    logger.warn('orchestrator', 'duplicate active run blocked', { feature: sanitizedFeature, runID: activeRun.runID })
+    const resumeStatuses: ImplementationRunStatus[] = [
+      'created', 'starting_backend', 'running', 'quality_gate_pending', 'ready_for_archive'
+    ]
+
+    if (resumeStatuses.includes(activeRun.status)) {
+      logger.info('orchestrator', 'duplicate active run resumed', { feature: sanitizedFeature, runID: activeRun.runID, status: activeRun.status })
+      return [
+        '## Implementation Run — Resumed',
+        '',
+        `- **Feature**: ${sanitizedFeature}`,
+        `- **Run ID**: ${activeRun.runID}`,
+        `- **Status**: ${activeRun.status}`,
+        `- **Started**: ${activeRun.startedAt}`,
+        activeRun.worktree ? `- **Worktree**: \`${activeRun.worktree}\`` : '',
+        `- **Directory**: \`${activeRun.directory}\``,
+        '',
+        activeRun.status === 'quality_gate_pending'
+          ? 'An implementation run is active and awaiting quality gate. Run `/openflow-quality-gate` to proceed.'
+          : activeRun.status === 'ready_for_archive'
+            ? 'Implementation is verified and ready for archive. Run `/openflow-archive` to proceed.'
+            : 'An implementation run already exists for this feature. Resume this run instead of creating a new one.',
+        '',
+        `Active run directory: \`${activeRun.directory}\``,
+      ].filter(Boolean).join('\n')
+    }
+
+    if (activeRun.status === 'failed' || activeRun.status === 'cancelled') {
+      return [
+        '## Implementation Run — Recovery Required',
+        '',
+        `- **Feature**: ${sanitizedFeature}`,
+        `- **Run ID**: ${activeRun.runID}`,
+        `- **Status**: ${activeRun.status}`,
+        '',
+        `The previous run ended with status \`${activeRun.status}\`. To start a new implementation:`,
+        '',
+        '1. Cancel or clean up the failed run manually',
+        '2. Then run `/openflow-implement ' + sanitizedFeature + '` again',
+      ].join('\n')
+    }
+
+    if (activeRun.status === 'blocked') {
+      return [
+        '## Implementation Run — Blocked Run Exists',
+        '',
+        `- **Feature**: ${sanitizedFeature}`,
+        `- **Run ID**: ${activeRun.runID}`,
+        `- **Status**: ${activeRun.status}`,
+        '',
+        'The implementation run is blocked. Review the blocking issue and resolve it before retrying.',
+        '',
+        `Active run directory: \`${activeRun.directory}\``,
+      ].join('\n')
+    }
+
+    if (activeRun.status === 'archived') {
+      return [
+        '## Implementation Run — Already Archived',
+        '',
+        `- **Feature**: ${sanitizedFeature}`,
+        `- **Run ID**: ${activeRun.runID}`,
+        `- **Status**: ${activeRun.status}`,
+        '',
+        'This feature has already been archived. To start a new implementation cycle, begin with `/openflow-feature`.',
+      ].join('\n')
+    }
+
     return [
-      '## Implementation Run — Duplicate Blocked',
+      '## Implementation Run — Active Run Exists',
       '',
       `- **Feature**: ${sanitizedFeature}`,
       `- **Active Run ID**: ${activeRun.runID}`,
       `- **Status**: ${activeRun.status}`,
-      `- **Started**: ${activeRun.startedAt}`,
       '',
-      'An active implementation run already exists for this feature. Complete or cancel the existing run before starting a new one.',
-      '',
-      `Active run directory: \`${activeRun.directory}\``,
+      'An implementation run already exists for this feature. Check its status before creating a new one.',
     ].join('\n')
   }
 
   // ── 4. Prepare scoped paths ─────────────────────────────────────────────
   const eventsPath = join('.sisyphus', 'openflow', 'events', `${sanitizedFeature}.jsonl`)
   const observationsPath = join('.sisyphus', 'openflow', 'observations', `${sanitizedFeature}.jsonl`)
+
+  if (!sessionID) {
+    logger.warn('orchestrator', 'no sessionID available, run creation blocked', { sanitizedFeature })
+    return [
+      '## Implementation Run — Session Required',
+      '',
+      `- **Feature**: ${sanitizedFeature}`,
+      '',
+      'Cannot create an implementation run without a valid session ID. This command must be invoked through the chat hook (not as a standalone tool call without context).',
+      '',
+      'Please use `/openflow-implement ' + sanitizedFeature + '` from the chat input.',
+    ].join('\n')
+  }
+
+  // ── 4b. Dirty-main policy for --no-worktree ──────────────────────────────
+  if (!effectiveUseWorktree && mainWorktreeDirty) {
+    logger.warn('orchestrator', 'dirty main worktree blocked for --no-worktree', { feature: sanitizedFeature })
+    return [
+      '## Implementation Run — Dirty Main Worktree',
+      '',
+      `- **Feature**: ${sanitizedFeature}`,
+      `- **Mode**: session (--no-worktree)`,
+      '',
+      'The main worktree has uncommitted or untracked changes that may conflict with the implementation.',
+      '',
+      '**Options:**',
+      '1. Use worktree isolation (default): `/openflow-implement ' + sanitizedFeature + '`',
+      '2. Commit or stash your changes first, then retry with `--no-worktree`',
+    ].join('\n')
+  }
 
   // ── 5. Optionally create worktree ───────────────────────────────────────
   if (effectiveUseWorktree) {
@@ -88,6 +183,9 @@ export async function handleImplement(
       baseRef = result.baseRef
       logger.info('orchestrator', 'worktree created', { path: result.path, branch: result.branch, baseRef })
       await recordObservation(ctx, observationsPath, `Worktree ${worktree ? 'reused' : 'created'} for feature ${sanitizedFeature} at ${result.path} (branch: ${result.branch ?? 'unknown'})`)
+      if (mainWorktreeDirty) {
+        await recordObservation(ctx, observationsPath, `WARNING: Main worktree is dirty while using isolated worktree for ${sanitizedFeature}. Changes in main worktree are not affected by this run.`)
+      }
     } else {
       logger.warn('orchestrator', 'worktree creation failed', { feature: sanitizedFeature, error: result.error })
       return [
@@ -192,6 +290,8 @@ export async function handleImplement(
     '---',
     '',
     `*Implementation run created at ${new Date().toISOString()}*`,
+    '',
+    `> 提醒：实现完成并通过质量门禁后，请运行 \`/openflow-archive ${sanitizedFeature}\` 来归档本次变更。`,
   ].filter(Boolean).join('\n')
 }
 

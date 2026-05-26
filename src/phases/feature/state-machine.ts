@@ -3,7 +3,7 @@ import type { ExtractedItem } from './context-packet.js'
 import type { RequirementModel } from './requirement-model.js'
 
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
-export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
+export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'failed' | 'draft_blocked' | 'complete'
 export type FeatureDraftStatus = 'final' | 'draft_with_assumptions'
 export type PostDesignDecision = 'proceed_to_plan' | 'review_docs' | 'inspect'
 
@@ -239,9 +239,7 @@ function isExtractedItem(value: unknown): value is ExtractedItem {
 }
 
 export function getPendingQuestion(session: FeatureSession): FeatureQuestion | undefined {
-  if (!session.pendingQuestionId) {
-    return QUESTIONS.find((question) => !session.answers[question.id])
-  }
+  if (!session.pendingQuestionId) return undefined
 
   return QUESTIONS.find((question) => question.id === session.pendingQuestionId)
 }
@@ -257,15 +255,14 @@ export function applyFeatureAnswer(session: FeatureSession, answer: string, cons
     ...session.answers,
     [pendingQuestion.id]: trimmedAnswer,
   }
-  const nextPendingQuestionId = resolvePendingQuestionId(answers, null)
 
   const nextSession: FeatureSession = {
     ...session,
     answers,
     askedQuestionIds: uniqueQuestionIds([...session.askedQuestionIds, pendingQuestion.id]),
-    pendingQuestionId: nextPendingQuestionId,
-    promptMode: nextPendingQuestionId ? 'question' : 'discussion',
-    workflowState: nextPendingQuestionId ? 'collecting' : 'ready_to_generate',
+    pendingQuestionId: null,
+    promptMode: 'discussion',
+    workflowState: 'collecting',
     lastConsumedMessageId: consumedMessageId ?? session.lastConsumedMessageId,
     lastAnsweredAt: new Date().toISOString(),
   }
@@ -287,7 +284,7 @@ export function markQuestionPrompted(session: FeatureSession, questionId: Featur
 export function markGenerating(session: FeatureSession): FeatureSession {
   const nextSession: FeatureSession = {
     ...session,
-    workflowState: 'generating',
+    workflowState: 'ready_to_generate',
     pendingQuestionId: null,
     promptMode: 'discussion',
     generationAttemptCount: session.generationAttemptCount + 1,
@@ -305,7 +302,7 @@ export function markCompleted(session: FeatureSession, generatedPaths: string | 
 
   const nextSession: FeatureSession = {
     ...session,
-    workflowState: 'completed',
+    workflowState: 'complete',
     pendingQuestionId: null,
     promptMode: 'discussion',
     generatedDocs,
@@ -325,6 +322,16 @@ export function markGenerationFailed(session: FeatureSession, message: string): 
   }
 }
 
+export function markDraftBlocked(session: FeatureSession, reason: string): FeatureSession {
+  return {
+    ...session,
+    workflowState: 'draft_blocked',
+    pendingQuestionId: null,
+    promptMode: 'discussion',
+    lastError: reason,
+  }
+}
+
 export function isAwaitingFormalAnswer(session: FeatureSession): boolean {
   return session.workflowState === 'collecting'
     && session.promptMode === 'question'
@@ -333,9 +340,7 @@ export function isAwaitingFormalAnswer(session: FeatureSession): boolean {
 
 export function shouldGenerateDesign(session: FeatureSession): boolean {
   return session.workflowState === 'ready_to_generate'
-    || session.workflowState === 'generating'
     || session.workflowState === 'failed'
-    || (session.workflowState === 'collecting' && !getPendingQuestion(session))
 }
 
 export function getRecommendedOptionLabel(session: FeatureSession, question: FeatureQuestion): string | undefined {
@@ -385,15 +390,15 @@ function resolveWorkflowState(
   pendingQuestionId: FeatureQuestionId | null
 ): FeatureWorkflowState {
   if (generatedDocs.length > 0) {
-    return 'completed'
+    return 'complete'
   }
 
-  if (workflowState === 'generating' || workflowState === 'failed') {
+  if (workflowState === 'failed' || workflowState === 'draft_blocked') {
     return workflowState
   }
 
   if (!pendingQuestionId) {
-    return workflowState === 'completed' ? 'completed' : 'ready_to_generate'
+    return workflowState === 'complete' ? 'complete' : 'ready_to_generate'
   }
 
   return 'collecting'

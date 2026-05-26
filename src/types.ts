@@ -432,7 +432,7 @@ export interface OpenFlowContext {
   enhancedPlans: Set<string>
 }
 
-export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
+export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'failed' | 'draft_blocked' | 'complete'
 
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
 
@@ -690,6 +690,7 @@ export type ImplementationRunStatus =
   | 'archiving'
   | 'archived'
   | 'blocked'
+  | 'failed'
   | 'cancelled'
 
 /** Backend type for implementation execution */

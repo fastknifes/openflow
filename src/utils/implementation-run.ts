@@ -30,7 +30,7 @@ export async function recordObservation(
   }
 }
 
-const TERMINAL_STATUSES = new Set<ImplementationRunStatus>(['archived', 'blocked', 'cancelled'])
+const TERMINAL_STATUSES = new Set<ImplementationRunStatus>(['archived', 'blocked', 'failed', 'cancelled'])
 
 let lastTimestamp = 0
 

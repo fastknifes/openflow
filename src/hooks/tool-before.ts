@@ -5,6 +5,7 @@ import { getVerifySkill } from '../skills/verify-skill.js'
 import { logger } from '../utils/logger.js'
 import { formatSecurityChecks, formatQualityChecks } from '../utils/verification-checks.js'
 import { buildImplementationContextPrompt } from './implementation-context.js'
+import { checkImplementationGuard } from './implementation-guard.js'
 import { isImplementationTask, isVerificationTask } from './task-classification.js'
 
 function buildVerificationPrompt(ctx: OpenFlowContext, currentPrompt: string): string | undefined {
@@ -59,6 +60,20 @@ ${currentPrompt}`
 
 export function createToolBeforeHook(ctx: OpenFlowContext) {
   const hook: NonNullable<Hooks['tool.execute.before']> = async (input, output): Promise<void> => {
+    // Plan→implement guard: block implementation-like actions when plan exists but no run
+    const guardOptions = {
+      ctx,
+      ...(typeof input.tool === 'string' ? { tool: input.tool } : {}),
+      ...(output.args ? { taskArgs: output.args as Record<string, unknown> } : {}),
+      ...(typeof input.sessionID === 'string' ? { sessionID: input.sessionID } : {}),
+    }
+    const guardResult = await checkImplementationGuard(guardOptions)
+    if (guardResult.blocked) {
+      output.args = { ...(output.args as Record<string, unknown>), prompt: guardResult.message }
+      logger.info('implementation guard blocked action', { feature: guardResult.feature, tool: input.tool })
+      return
+    }
+
     if (input.tool !== 'task') return
 
     const args = output.args as Record<string, unknown> | undefined
