@@ -1,0 +1,348 @@
+[
+  {
+    "id": "proc_2026-05-31T1544_f3e7f0",
+    "workspaceId": "mptxxwjm",
+    "title": "tsc noEmit",
+    "command": "npx tsc --noEmit",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 15684,
+    "startedAt": "2026-05-31T15:44:48.367Z",
+    "outputSizeBytes": 1119,
+    "notify": {
+      "sessionID": "ses_181510a40ffeKKNpegOS43ga6w",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T15:44:52.332Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 2,
+    "stoppedAt": "2026-05-31T15:44:52.315Z"
+  },
+  {
+    "id": "proc_2026-05-31T1546_dfb270",
+    "workspaceId": "mptxxwjm",
+    "title": "tsc noEmit retry",
+    "command": "npx tsc --noEmit",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 21728,
+    "startedAt": "2026-05-31T15:46:28.556Z",
+    "outputSizeBytes": 0,
+    "notify": {
+      "sessionID": "ses_181510a40ffeKKNpegOS43ga6w",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T15:46:32.956Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T15:46:32.945Z"
+  },
+  {
+    "id": "proc_2026-05-31T1608_0abc35",
+    "workspaceId": "mptxxwjm",
+    "title": "typecheck",
+    "command": "npm run typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 21168,
+    "startedAt": "2026-05-31T16:08:32.380Z",
+    "outputSizeBytes": 599,
+    "notify": {
+      "sessionID": "ses_18138df9affexaBKZJhIWy0nG8",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:08:36.072Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 2,
+    "stoppedAt": "2026-05-31T16:08:36.057Z"
+  },
+  {
+    "id": "proc_2026-05-31T1609_80c9f5",
+    "workspaceId": "mptxxwjm",
+    "title": "typecheck",
+    "command": "npm run typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 19736,
+    "startedAt": "2026-05-31T16:09:35.537Z",
+    "outputSizeBytes": 258,
+    "notify": {
+      "sessionID": "ses_18138df9affexaBKZJhIWy0nG8",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:09:39.962Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 2,
+    "stoppedAt": "2026-05-31T16:09:39.950Z"
+  },
+  {
+    "id": "proc_2026-05-31T1610_9a726b",
+    "workspaceId": "mptxxwjm",
+    "title": "test",
+    "command": "npm run test",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 11344,
+    "startedAt": "2026-05-31T16:10:07.755Z",
+    "outputSizeBytes": 49294,
+    "notify": {
+      "sessionID": "ses_18138df9affexaBKZJhIWy0nG8",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:10:09.028Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:10:09.011Z"
+  },
+  {
+    "id": "proc_2026-05-31T1612_83d76d",
+    "workspaceId": "mptxxwjm",
+    "title": "typecheck-verify",
+    "command": "rtk npm typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 15320,
+    "startedAt": "2026-05-31T16:12:15.804Z",
+    "outputSizeBytes": 93,
+    "notify": {
+      "sessionID": "ses_18138df9affexaBKZJhIWy0nG8",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:12:19.818Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:12:19.804Z"
+  },
+  {
+    "id": "proc_2026-05-31T1612_6dced7",
+    "workspaceId": "mptxxwjm",
+    "title": "test-verify",
+    "command": "rtk npm test",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 21148,
+    "startedAt": "2026-05-31T16:12:51.846Z",
+    "outputSizeBytes": 49204,
+    "notify": {
+      "sessionID": "ses_18138df9affexaBKZJhIWy0nG8",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:12:52.743Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:12:52.730Z"
+  },
+  {
+    "id": "proc_2026-05-31T1612_7670ab",
+    "workspaceId": "mptxxwjm",
+    "title": "test-verify",
+    "command": "rtk npm test",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 22396,
+    "startedAt": "2026-05-31T16:12:54.076Z",
+    "outputSizeBytes": 49194,
+    "notify": {
+      "sessionID": "ses_18138df9affexaBKZJhIWy0nG8",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:12:54.942Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:12:54.926Z"
+  },
+  {
+    "id": "proc_2026-05-31T1613_7fe49b",
+    "workspaceId": "mptxxwjm",
+    "title": "typecheck",
+    "command": "rtk npm typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 18452,
+    "startedAt": "2026-05-31T16:13:43.028Z",
+    "outputSizeBytes": 93,
+    "notify": {
+      "sessionID": "ses_18138df9affexaBKZJhIWy0nG8",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:13:46.758Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:13:46.749Z"
+  },
+  {
+    "id": "proc_2026-05-31T1630_4caa46",
+    "workspaceId": "mptxxwjm",
+    "title": "typecheck",
+    "command": "npm run typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 23252,
+    "startedAt": "2026-05-31T16:30:49.935Z",
+    "outputSizeBytes": 653,
+    "notify": {
+      "sessionID": "ses_18123d93fffew5HJaRwKA0qVOG",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:30:53.533Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 2,
+    "stoppedAt": "2026-05-31T16:30:53.512Z"
+  },
+  {
+    "id": "proc_2026-05-31T1631_30b11b",
+    "workspaceId": "mptxxwjm",
+    "title": "typecheck",
+    "command": "npm run typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 19924,
+    "startedAt": "2026-05-31T16:31:22.391Z",
+    "outputSizeBytes": 55,
+    "notify": {
+      "sessionID": "ses_18123d93fffew5HJaRwKA0qVOG",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:31:26.145Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:31:26.129Z"
+  },
+  {
+    "id": "proc_2026-05-31T1631_878485",
+    "workspaceId": "mptxxwjm",
+    "title": "test",
+    "command": "npm test",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 19548,
+    "startedAt": "2026-05-31T16:31:33.213Z",
+    "outputSizeBytes": 49224,
+    "notify": {
+      "sessionID": "ses_18123d93fffew5HJaRwKA0qVOG",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:31:34.191Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:31:34.173Z"
+  },
+  {
+    "id": "proc_2026-05-31T1632_43276e",
+    "workspaceId": "mptxxwjm",
+    "title": "git diff",
+    "command": "git diff -- src/commands/harden.ts src/orchestrator/harden-executors.ts",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 11224,
+    "startedAt": "2026-05-31T16:32:01.642Z",
+    "outputSizeBytes": 34805,
+    "notify": {
+      "sessionID": "ses_18123d93fffew5HJaRwKA0qVOG",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:32:01.868Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:32:01.856Z"
+  },
+  {
+    "id": "proc_2026-05-31T1632_2287e7",
+    "workspaceId": "mptxxwjm",
+    "title": "git status",
+    "command": "git status --short",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 8444,
+    "startedAt": "2026-05-31T16:32:35.459Z",
+    "outputSizeBytes": 462,
+    "notify": {
+      "sessionID": "ses_18123d93fffew5HJaRwKA0qVOG",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:32:35.708Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:32:35.692Z"
+  },
+  {
+    "id": "proc_2026-05-31T1642_e02af2",
+    "workspaceId": "mptxxwjm",
+    "title": "Refresh GitNexus index",
+    "command": "npx gitnexus analyze",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 21400,
+    "startedAt": "2026-05-31T16:42:10.358Z",
+    "outputSizeBytes": 307,
+    "notify": {
+      "sessionID": "ses_18116efc6ffecT1mL1ID7vC9hi",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T16:42:22.513Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T16:42:22.501Z"
+  },
+  {
+    "id": "proc_2026-05-31T1708_96237d",
+    "workspaceId": "mptxxwjm",
+    "title": "typecheck",
+    "command": "npm run typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 20120,
+    "startedAt": "2026-05-31T17:08:15.332Z",
+    "outputSizeBytes": 55,
+    "notify": {
+      "sessionID": "ses_180feff29ffeEQEHEMNRWoP3Ew",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-05-31T17:08:19.172Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T17:08:19.155Z"
+  },
+  {
+    "id": "proc_2026-05-31T1713_eb45c6",
+    "workspaceId": "mptxxwjm",
+    "title": "git diff quality gate",
+    "command": "git diff -- src/commands/quality-gate.ts src/commands/harden.ts src/orchestrator/harden-executors.ts",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 11884,
+    "startedAt": "2026-05-31T17:13:42.410Z",
+    "outputSizeBytes": 57428,
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T17:13:42.695Z"
+  },
+  {
+    "id": "proc_2026-05-31T1713_24226e",
+    "workspaceId": "mptxxwjm",
+    "title": "revert quality gate",
+    "command": "git checkout -- src/commands/quality-gate.ts",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 23200,
+    "startedAt": "2026-05-31T17:13:55.683Z",
+    "outputSizeBytes": 0,
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T17:13:55.865Z"
+  },
+  {
+    "id": "proc_2026-05-31T1714_c74008",
+    "workspaceId": "mptxxwjm",
+    "title": "git diff focused after fixes",
+    "command": "git diff -- src/commands/quality-gate.ts src/commands/harden.ts src/orchestrator/harden-executors.ts",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 12360,
+    "startedAt": "2026-05-31T17:14:09.019Z",
+    "outputSizeBytes": 36845,
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-05-31T17:14:09.227Z"
+  }
+]

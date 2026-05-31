@@ -27,11 +27,12 @@ interface SchedulerLoopOptions {
 
 interface SubmitTaskInput {
   type: string
-  payload?: TaskPayload
-  dependsOn?: string[]
-  resources?: ResourceLock[]
-  timeoutMs?: number
-  runAfter?: number
+  payload?: TaskPayload | undefined
+  dependsOn?: string[] | undefined
+  resources?: ResourceLock[] | undefined
+  timeoutMs?: number | undefined
+  runAfter?: number | undefined
+  idPrefix?: string | undefined
 }
 
 interface RunningTaskState {
@@ -75,7 +76,7 @@ export class SchedulerLoop {
 
   submitTask(input: SubmitTaskInput): string {
     const now = Date.now()
-    const taskId = this.createTaskId()
+    const taskId = `${input.idPrefix ?? ''}${this.createTaskId()}`
     const task: SchedulerTask = {
       id: taskId,
       type: input.type,
@@ -114,6 +115,25 @@ export class SchedulerLoop {
   listTasks(filter?: TaskFilter): SchedulerStatus {
     const tasks = this.dagEngine.listTasks().filter((task) => this.matchesFilter(task, filter))
     return { tasks, corrupted: this.corrupted }
+  }
+
+  listTasksByPrefix(prefix: string): SchedulerTask[] {
+    return this.dagEngine.listTasks().filter((task) => task.id.startsWith(prefix))
+  }
+
+  cancelTasksByPrefix(prefix: string): string[] {
+    const cancelled: string[] = []
+    for (const task of this.listTasksByPrefix(prefix)) {
+      if (!this.isTerminalStatus(task.status)) {
+        this.cancelTask(task.id)
+        cancelled.push(task.id)
+      }
+    }
+    return cancelled
+  }
+
+  areAllTasksTerminal(prefix: string): boolean {
+    return this.listTasksByPrefix(prefix).every((task) => this.isTerminalStatus(task.status))
   }
 
   cancelTask(taskId: string): SchedulerTask {
@@ -407,6 +427,10 @@ export class SchedulerLoop {
       return false
     }
     return true
+  }
+
+  private isTerminalStatus(status: TaskStatus): boolean {
+    return status === 'succeeded' || status === 'failed' || status === 'cancelled' || status === 'blocked'
   }
 
   private createTaskId(): string {

@@ -141,7 +141,7 @@ export async function handleVerify(
     return `## Verify
 
 ### Evidence
-- checks_run: active_feature_resolution ❌ (no explicit feature and no active plan in .sisyphus/plans)
+- checks_run: active_feature_resolution ❌ (no explicit feature and no active plan)
 - observed_behavior_summary: no verification context was resolved
 - intended_vs_actual_delta: unknown (feature context missing)
 - doc_alignment_summary: skipped (feature context missing)
@@ -151,7 +151,7 @@ export async function handleVerify(
 ### Readiness
 - status: ${VerifyReadinessStatus.NotReady}
 - reason: active feature is required to build an evidence packet
-- next_step: run openflow-quality-gate or create an active plan under .sisyphus/plans/
+- next_step: run openflow-quality-gate or create an active plan via /openflow-writing-plan
 `
   }
 
@@ -253,7 +253,7 @@ async function collectEvidence(
 
   const checksRun = [
     `active_feature_resolution ✅ (${feature})`,
-    `plan_exists ${planExists ? '✅' : mode === 'issue' ? 'ℹ️' : '⚠️'} (${planExists ? 'found' : mode === 'issue' ? `not required in issue mode (.sisyphus/plans/${feature}.md)` : `missing .sisyphus/plans/${feature}.md`})`,
+    `plan_exists ${planExists ? '✅' : mode === 'issue' ? 'ℹ️' : '⚠️'} (${planExists ? 'found' : mode === 'issue' ? 'not required in issue mode' : `missing plan for ${feature}`})`,
     `context_alignment ${contextAlignmentPresent ? '✅' : '⚠️'} (${contextAlignmentPresent ? `found ${contextAlignmentPath}` : `missing ${contextAlignmentPath}`})`,
     `behavior_exists ${behaviorExists ? '✅' : 'ℹ️'} (${behaviorExists ? 'found' : 'not found'} docs/changes/${changeDir}/behavior.md)`,
     `changes_workspace ${changesExists ? '✅' : '⚠️'} (${changesExists ? 'found' : 'missing'} docs/changes/${changeDir})`,
@@ -298,7 +298,7 @@ async function collectEvidence(
 
   const currentWorkspaceState = captureCurrentWorkspaceState(ctx.directory)
   const behaviorEvidence = behaviorExists
-    ? await collectBehaviorEvidence(ctx.directory, changeBehaviorPath, currentWorkspaceState)
+    ? await collectBehaviorEvidence(ctx.directory, changeBehaviorPath, currentWorkspaceState, ctx.config.paths.evidence_dir)
     : []
   const behaviorScenarios = await evaluateBehaviorScenariosFromAvailableSources(
     contract,
@@ -1485,13 +1485,14 @@ async function collectBehaviorEvidence(
   projectDir: string,
   behaviorPath: string,
   currentState: import('../types.js').CurrentWorkspaceState,
+  evidenceDir?: string,
 ): Promise<import('../types.js').BehaviorScenarioEvidence[]> {
   const tableEvidence = await validateReferencedBehaviorEvidenceFiles(
     projectDir,
     await parseBehaviorEvidenceMappings(behaviorPath),
     currentState,
   )
-  const fileEvidence = await parseBehaviorEvidenceFiles(projectDir, currentState)
+  const fileEvidence = await parseBehaviorEvidenceFiles(projectDir, currentState, evidenceDir)
   return mergeBehaviorEvidence(tableEvidence, fileEvidence)
 }
 
@@ -1531,7 +1532,7 @@ async function validateReferencedBehaviorEvidenceFile(
   currentState: import('../types.js').CurrentWorkspaceState,
 ): Promise<import('../types.js').BehaviorScenarioEvidence> {
   const normalizedReference = evidence.evidenceReference.replace(/\\/g, '/')
-  if (!normalizedReference.startsWith('.sisyphus/evidence/')) return evidence
+  if (!normalizedReference.startsWith('.sisyphus/evidence/') && !normalizedReference.startsWith('.openflow/evidence/')) return evidence
 
   const evidencePath = createSafePath(projectDir, ...normalizedReference.split('/'))
   let content = ''
@@ -1582,8 +1583,10 @@ async function validateReferencedBehaviorEvidenceFile(
 async function parseBehaviorEvidenceFiles(
   projectDir: string,
   currentState: import('../types.js').CurrentWorkspaceState,
+  evidenceDirOverride?: string,
 ): Promise<import('../types.js').BehaviorScenarioEvidence[]> {
-  const evidenceDir = path.join(projectDir, '.sisyphus', 'evidence')
+  const evidenceBaseDir = evidenceDirOverride ?? '.sisyphus/evidence'
+  const evidenceDir = path.join(projectDir, evidenceBaseDir)
   try {
     const entries = await fs.readdir(evidenceDir, { withFileTypes: true })
     const evidenceFiles = entries
@@ -1595,7 +1598,7 @@ async function parseBehaviorEvidenceFiles(
     for (const fileName of evidenceFiles) {
       const filePath = path.join(evidenceDir, fileName)
       const content = await fs.readFile(filePath, 'utf-8')
-      result.push(parseBehaviorEvidenceFile(fileName, content, currentState))
+      result.push(parseBehaviorEvidenceFile(fileName, content, currentState, evidenceBaseDir))
     }
     return result
   } catch {
@@ -1607,6 +1610,7 @@ function parseBehaviorEvidenceFile(
   fileName: string,
   content: string,
   currentState: import('../types.js').CurrentWorkspaceState,
+  evidenceBaseDir = '.sisyphus/evidence',
 ): import('../types.js').BehaviorScenarioEvidence {
   const fields = parseMarkdownEvidenceFields(content)
   const scenarioId = getEvidenceField(fields, 'scenario reference', 'scenario id', 'scenario') || inferScenarioIdFromEvidenceFileName(fileName)
@@ -1643,7 +1647,7 @@ function parseBehaviorEvidenceFile(
   }
 
   const reasonParts = [
-    `Evidence file .sisyphus/evidence/${fileName} ${status === 'verified' ? 'validates' : 'does not fully validate'} scenario "${scenarioId}".`,
+    `Evidence file ${evidenceBaseDir}/${fileName} ${status === 'verified' ? 'validates' : 'does not fully validate'} scenario "${scenarioId}".`,
     `Test: ${testFileMethod || 'missing'}.`,
     `Command/steps: ${commandSteps || 'missing'}.`,
     `Core code: ${coreCodeMapping || 'missing'}.`,
@@ -1658,7 +1662,7 @@ function parseBehaviorEvidenceFile(
     scenarioId,
     status,
     evidenceType,
-    evidenceReference: `.sisyphus/evidence/${fileName}`,
+    evidenceReference: `${evidenceBaseDir}/${fileName}`,
     reason: reasonParts.join(' '),
     criticality: 'critical',
     coverageLevel,

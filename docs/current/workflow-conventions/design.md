@@ -1,350 +1,335 @@
-# 重构 OpenFlow 的质量门工作流：将 harden 从 quality-gate 拆成独立可改代码节点；新增 final-verify 与 code-mapper 内部节点；quality-gate 收敛为只读 readiness 判定节点；集成测试 - Design
-
-## Human Consensus Summary
-
-Feature title: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-Internal slug: openflow-implement-quality-gate
-Source intent: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-Problem or improvement target: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-Expected result: Solve: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。; Serve target users: 内部开发者; Honor priority: 风险最小
-
-## Identity And Assumptions
-
-- Feature slug: openflow-implement-quality-gate
-- Feature title: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-- Source intent: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-- Assumptions:
-  - Not specified.
-- Pending confirmations:
-  - Not specified.
+# harden-drg-async - Design
 
 ## Overview
 
-Feature: openflow-implement-quality-gate
-Target users: 内部开发者
-In scope: openflow-implement-quality-gate workflow; Address the stated problem: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-Out of scope: Large product-surface expansion beyond workflow optimization
+Feature: harden-drg-async
+Completeness: complete
 
+Primary goals:
+- reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。
+- 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。
+- quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。
+- harden 输出格式必须与现有格式兼容
+- DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务
 ## Problem
 
-质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
+**Current state:** 重新设计 harden 工作流，使用 DRG 做异步 AI 对话交互
 
+**Desired change:** reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。; 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。; quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。
 ## Goals
 
-- Solve: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-- Serve target users: 内部开发者
-- Honor priority: 风险最小
+### g-0001: reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。
+> Derived from confirmed constraint evidence
+
+### g-0002: 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。
+> Derived from confirmed constraint evidence
+
+### g-0003: quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。
+> Derived from confirmed constraint evidence
+
+### g-0004: harden 输出格式必须与现有格式兼容
+> Derived from confirmed constraint evidence
+
+### g-0005: DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务
+> Derived from confirmed decision evidence
 
 ## Non-Goals
 
-- Unrelated product areas or workflows
-- Broad product expansion outside the workflow itself
+- 不改造 DRG 为事件总线
+- 不支持并行 harden
+- 不支持分布式多进程对抗
+- 不修改 reviewer/executor 的 prompt 策略
+## Design Decisions
 
-## 新旧流程对照
+### 惰性创建，链式传递 session ID。reviewer\_round\_1 现场
+- **Decision:** 惰性创建，链式传递 session ID。reviewer\_round\_1 现场创建 reviewer session，executor\_round\_1 现场创建 executor session。后续任务从上游任务输出中读取 ID 复用。
+- **Rationale:** From feature-fact \(high confidence\)
 
-| 维度 | 旧流程（当前） | 新流程（本 feature） |
-|------|----------------|---------------------|
-| harden 执行 | quality-gate 内部调用 `handleHarden()` | 独立节点，可由 quality-gate 编排器按风险触发或独立调用 |
-| verify 执行 | quality-gate 内部调用 `handleVerify()` | 独立 verify 节点产出 evidence packet |
-| readiness 判定 | quality-gate 合并 harden + verify 结果后判定 | quality-gate 只读取 final-verify result，不执行任何主动验证 |
-| constraints enforcement | quality-gate 中 `verifyConstraintSatisfaction()`（当前独立在 `constraint-verifier.ts`） | final-verify 中执行（迁移 `constraint-verifier.ts` 的调用），quality-gate 只消费结果 |
-| mapper 生成 | quality-gate Ready 后调用 `generateBehaviorCodeMapper()` | 独立 code-mapper 节点，条件不变 |
-| 节点编排 | 单体 `handleQualityGate()` 内顺序调用 | 编排器按序触发独立节点链 |
+### 当前 harden 的同步 in-process reviewer→execut
+- **Decision:** 当前 harden 的同步 in-process reviewer→executor 循环（src/commands/harden.ts 中的 runAdversarialLoop）将被替换为 DRG 异步任务链。rebuttal 子循环被移除，由 reviewer↔executor 的多轮对抗替代。
+- **Rationale:** From feature-fact \(high confidence\)
 
-## 节点职责边界
+### 现有 DRG 引擎（src/orchestrator/drg-engine.ts
+- **Decision:** 现有 DRG 引擎（src/orchestrator/drg-engine.ts）需要扩展：支持运行时动态添加任务节点（用于表达 reviewer→executor→reviewer 的循环链）；支持任务间数据传递（session ID 链式传递）。
+- **Rationale:** From feature-fact \(high confidence\)
 
-### harden（独立可改代码节点）
+### DRG 角色
+- **Decision:** DRG 角色: 全局单例任务调度器，插件启动时初始化，不改造成事件总线 \(理由: 事件总线无法表达串行依赖约束，DRG 的 DAG 模型天然适合 reviewer→executor 串行执行\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-- **输入**：feature, feature-scoped diff, design, plan, behavior
-- **输出**：harden result（findings, status: pass / pass_with_risks / needs_human / max_rounds_reached / rejected）
-- **职责**：契约加固；reviewer 判断实现是否符合契约；executor 最小修复
-- **禁止**：不能改文档解决契约分歧；不能批准 contract divergence
-- **调用方**：quality-gate 编排器（按风险判定触发）或独立调用
+### harden 隔离
+- **Decision:** harden 隔离: 每次 harden 调用创建独立 DAG（harden-<uuid\>），结束后归档销毁 \(理由: 独立 DAG 便于调试和归档，不同 harden 实例互不干扰\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-### verify（证据收集节点）
+### 对抗模型
+- **Decision:** 对抗模型: 异步通信总线，reviewer 和 executor 各持长 session，DRG 调度思考回合任务在已有 session 上追加消息 \(理由: 长 session 保留完整对抗历史，提升推理一致性；像聊天一样追加消息更自然\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-- **输入**：feature, execution root, design/plan/behavior context
-- **输出**：evidence packet（checks_run, check_results, observed_behavior_summary, intended_vs_actual_delta, doc_alignment_summary, current_decisions_conflict_summary, known_risks_or_missing_evidence）
-- **职责**：收集技术证据、检查 behavior scenario coverage、评估 doc alignment
-- **不负责**：不做最终 readiness 判定；不做 constraints enforcement
-- **调用方**：quality-gate 编排器
+### 任务粒度
+- **Decision:** 任务粒度: 思考回合任务，让 reviewer/executor session 基于当前消息历史生成下一轮报告 \(理由: 与现有 DRG 任务执行模型匹配\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-### final-verify（最终一致性验证节点）
+### Session 创建
+- **Decision:** Session 创建: 惰性创建，首个需要某类型 session 的 DRG 任务现场创建，session ID 链式传递 \(理由: 避免预创建未使用的 session，链式传递是最简单的不依赖外部状态的方案\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-- **输入**：verify evidence packet, harden result, constraints.md + git diff（如存在约束文件）, execution root
-- **输出**：final verification result（readiness_recommendation: Ready / ReadyWithDocUpdates / NotReady / NeedsDecision, constraint_satisfaction: satisfied / blocked / skipped, root_mismatch: boolean, behavior_coverage: summary）
-- **职责**：
-  1. 汇总 verify evidence 和 harden result
-  2. 执行 constraints enforcement（implementation-constraints 的 enforcement 归属点）
-  3. 检查 execution root mismatch
-  4. 评估 behavior scenario 覆盖完整性
-  5. 产出最终 readiness_recommendation
-- **约束证据要求**：必须是命令输出（grep、测试结果），不接受口头陈述或 observation log
-- **调用方**：quality-gate 编排器
+### 默认轮次
+- **Decision:** 默认轮次: 1 轮对抗（reviewer→executor→reviewer），可配置最多 10 轮，串行执行 \(理由: 多数 harden 只需一轮收敛，减少不必要的 token 消耗\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-### code-mapper（独立内部节点）
+### 终止条件
+- **Decision:** 终止条件: reviewer 判定无争议（executor 上报为空或全部认可），或达到 max rounds \(理由: executor 不能单方面静默结束，避免跳过真正的问题\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-- **输入**：feature, behavior.md, evidence packet（来自 verify）
-- **输出**：`docs/changes/{feature}/implementation-mapper.md`
-- **触发条件**：final-verify 返回 Ready 或 ReadyWithDocUpdates，且存在 `behavior.md`
-- **生成失败**：不阻断 readiness，降级为 warning observation
-- **调用方**：quality-gate 编排器（在 final-verify 之后）
+### 驳回规则
+- **Decision:** 驳回规则: 同一 finding 被 executor 连续拒绝 3 次，reviewer session 自维护计数器，达到后不再上报 \(理由: 防止无限循环，reviewer 自维护最简洁，不增加架构复杂度\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
-### quality-gate（只读 readiness 判定节点）
-
-- **输入**：final-verify result, code-mapper result（如有）
-- **输出**：readiness 报告 + acceptance state 更新 + ImplementationRun 状态更新
-- **职责**：
-  1. 优先使用当前调用链中已绑定的结构化 `ImplementationRun` / `runID`
-  2. 若当前调用链缺少 run，再从持久化 run store 恢复 active `ImplementationRun`
-  3. 若仍无 run，则降级为当前目录的 limited-context / no-run 验证
-  4. 读取 final-verify result
-  5. 映射为最终 readiness（Ready / ReadyWithDocUpdates / NotReady / NeedsDecision）
-  6. 写 acceptance state
-  7. 更新 ImplementationRun 状态
-  8. 输出 readiness 报告
-- **禁止**：不执行 harden；不执行 verify；不做 constraints enforcement；不生成 mapper；不改代码
-
-## ImplementationRun 解析优先级
-
-quality-gate 依赖 `ImplementationRun` 的主要目的不是“重新获取计划内容”，而是恢复**结构化运行状态**，尤其是 execution root、worktree 路径、run 状态和 root mismatch 校验基线。
-
-推荐的解析优先级如下：
-
-1. **当前调用链已绑定的结构化 run / runID**
-   - 例如 implement → quality-gate 的同链路调用，或当前 session 中已显式注入 `ImplementationRun`。
-   - 这是首选路径，避免无意义地扫描磁盘 run store。
-2. **当前会话可用的内存 active run**
-   - 例如 observer / session 层已经绑定了 active run。
-   - 可直接复用，但仍需做 execution root 与 terminal status 轻量校验。
-3. **持久化 run store 恢复 active run**
-   - 仅当前两级都缺失时，调用 `findActiveImplementationRun()` / run store 扫描。
-   - 该路径用于跨会话恢复、AI 重启恢复、worktree 隔离恢复。
-4. **无 run 降级路径**
-   - 若完全无法解析 run，则以当前目录继续 limited-context / no-run 验证。
-   - 这种模式下不能提供完整的 run 生命周期保护，但仍可执行有限质量验证。
-
-无论 run 来源是什么，都必须保留两类轻量校验：
-
-- execution root 是否与 run 记录一致
-- run 是否已经进入 terminal status（如 `archived` / `blocked` / `failed` / `cancelled`）
-
-## 节点编排顺序
-
-```
-实现/修复完成
-  ↓
-quality-gate 编排器启动
-  ↓
-1. 解析 feature + execution root
-   - 优先复用当前调用链的结构化 `ImplementationRun`
-   - 缺失时再从持久化 run store 恢复 active run
-   - 仍缺失则降级为当前目录验证
-  ↓
-2. Applicability 分类
-  ├─ not_applicable / needs_workflow_stage → 返回适用性报告，终止
-  └─ applicable / limited_context → 继续
-  ↓
-3. 风险评估 → 决定是否触发 harden
-  ↓
-4. [如需 harden] 执行 harden 节点
-  ↓
-5. 执行 verify 节点
-  ↓
-6. 执行 final-verify 节点
-  ↓
-7. quality-gate 读取 final-verify result → 判定 readiness
-  ↓
-8. [如 Ready/ReadyWithDocUpdates 且有 behavior.md] 执行 code-mapper 节点
-  ↓
-9. 写 acceptance state + 更新 run 状态 + 输出报告
-```
-
-## 保留不变量
-
-| # | 不变量 | 来源 | 验证方式 |
-|---|--------|------|----------|
-| I1 | execution root mismatch 强制 NotReady | quality-gate-workflow.md 规则 36-37 | 集成测试 |
-| I2 | Applicability 分类语义不变（not_applicable / needs_workflow_stage / limited_context / applicable） | quality-gate-workflow.md 规则 10-16 | 回归测试 |
-| I3 | harden 不能通过改文档解决契约分歧 | quality-gate-workflow.md 规则 13-14 | 集成测试 |
-| I4 | 约束验证证据必须是命令输出（grep、测试结果） | implementation-constraints/design.md D5 | 集成测试 |
-| I5 | implementation-mapper 仅在 Ready/ReadyWithDocUpdates 且存在 behavior.md 时生成 | quality-gate-workflow.md 规则 41 | 集成测试 |
-| I6 | quality-gate 不自动归档 | quality-gate-workflow.md 规则 50 | 回归测试 |
-| I7 | limited_context 不得升级为完整 archive readiness | quality-gate-workflow.md 规则 15 | 集成测试 |
-| I8 | harden 的 finding 类型集不变 | quality-gate-workflow.md 规则 11 | 回归测试 |
-
-## implementation-constraints enforcement 归属
-
-采用方案 B：enforcement 前移到 final-verify。
-
-| 维度 | 方案 B（采用） |
-|------|---------------|
-| enforcement 执行点 | final-verify 节点 |
-| quality-gate 角色 | 只读取 final-verify 的 constraint_satisfaction 结果 |
-| 语义变更 | "enforcement is at quality gate" → "enforcement is performed during final-verify, consumed by quality-gate readiness judgment" |
-| 对 implementation-constraints 文档的影响 | design.md D3 和 QualityGate 增强章节需更新 enforcement 归属描述 |
-| 对 behavior.md 的影响 | 场景 4 和 5 的触发描述需从 "quality gate reads and enforces" 改为 "final-verify reads and enforces, quality-gate consumes result" |
-| 实现迁移路径 | `src/commands/constraint-verifier.ts` 已有 `verifyConstraintSatisfaction()` 和注释 "Transitional path — this will migrate to final-verify"，final-verify 直接导入复用 |
-
-## Behavior Alignment
-
-| Behavior Scenario | Design Response | Risk |
-|------------------|-----------------|------|
-| openflow-implement-quality-gate addresses the stated problem: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。 | Captured as observable product/workflow behavior; implementation structure is deferred until planning. | Medium |
-| openflow-implement-quality-gate works for the target users: 内部开发者 | Captured as observable product/workflow behavior; implementation structure is deferred until planning. | Medium |
-| openflow-implement-quality-gate implementation reflects the selected priority: 风险最小 | Captured as observable product/workflow behavior; implementation structure is deferred until planning. | Medium |
+### DAG 动态生长
+- **Decision:** DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务 \(理由: 不需要编排器，reviewer 和 executor 自行决定是否继续对抗\)
+- **Rationale:** From brainstorm-packet-v1 \(high confidence\)
 
 ## Design Constraints
 
-- [may] Optimize workflow steps without introducing unnecessary product surface area
-- [must] Code edits must still be verified, but code edits alone must not automatically trigger Full Quality Gate.
-- [must] Full Quality Gate must remain mandatory after `/openflow-implement` final implementation work.
-- [must] Full Quality Gate must run when the user explicitly requests quality gate, final verification, or equivalent delivery-readiness validation.
-- [must] Full Quality Gate must run when the current task is clearly a formal feature or bugfix delivery.
-- [must] `/openflow-quality-gate` must remain available outside `/openflow-implement` as an explicit verification capability.
-- [must] Making `/openflow-quality-gate` available outside `/openflow-implement` must not make it the default automatic response to all code edits.
-- [must] In casual coding conversations, the assistant must not invoke Full Quality Gate merely because it edited code.
-- [must] In casual coding conversations, the assistant may autonomously perform lightweight verification appropriate to the change.
-- [should] In casual coding conversations, the assistant should ask before invoking Full Quality Gate unless a mandatory trigger applies.
-- [must] The workflow must distinguish Full Quality Gate from lightweight verification.
-- [must] Lightweight verification may include diff review, targeted tests, typecheck, lint, build, or change-risk summary depending on the target project.
-- [must] Full Quality Gate represents final/formal verification and readiness assessment, not the default verification path for every edit.
-- [must] Quality gate admission must evaluate the target workspace/project being modified, not assume changes are inside the OpenFlow repository.
-- [must] Admission rules must avoid hard-coding OpenFlow repository paths as the basis for target-project risk classification.
-- [must] Admission must upgrade to Full Quality Gate when change impact is unclear, formal delivery is intended, or the target project lacks adequate verification for behavior-changing edits.
-- [should] Admission should treat security, permission, data, deployment, dependency, public API, shared infrastructure, and cross-module changes as Full Quality Gate candidates.
-- [must] Keep a rollback path available for the change
-- [must] Keep the change scope narrow to reduce regression surface area
-- [must] Protect existing behavior with explicit regression coverage
+- [must] [time] DRG 保持为全局单例任务调度器（不是事件总线），插件启动时初始化。所有异步任务共享同一个 SchedulerLoop 和 DagEngine 实例，统一状态存储。
+  - Rationale: From feature-fact
+- [must] [scope] 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。
+  - Rationale: From feature-fact
+- [must] [scope] 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。
+  - Rationale: From feature-fact
+- [must] [scope] DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。
+  - Rationale: From feature-fact
+- [must] [scope] 默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。
+  - Rationale: From feature-fact
+- [must] [scope] 流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。
+  - Rationale: From feature-fact
+- [must] [scope] 同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。
+  - Rationale: From feature-fact
+- [must] [scope] reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。
+  - Rationale: From feature-fact
+- [must] [scope] quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。
+  - Rationale: From feature-fact
+- [must] [scope] DRG 引擎核心不因本功能修改
+- [must] [scope] harden 输出格式必须与现有格式兼容
+- [must] [scope] quality-gate 编排逻辑不修改
+- [must] [scope] 同一时间最多一个 harden DAG 运行
+## Execution Safety / Confirmation Guard
 
-## Risks And Mitigations
+Automatic execution is constrained by the following confirmation / safety guard mechanisms:
+- quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。
+## State Isolation / Safety
 
-- Risk: The change could accidentally weaken `/openflow-implement` final verification.
-  - Mitigation: Treat `/openflow-implement` final verification as a mandatory Full Quality Gate trigger and protect it with regression coverage.
-- Risk: Casual coding could still over-trigger Full Quality Gate if prompt wording remains too broad.
-  - Mitigation: Explicitly state that code edits require verification, but do not by themselves require Full Quality Gate.
-- Risk: Target-project risk could be misclassified by OpenFlow-repository-specific path rules.
-  - Mitigation: Define admission around target workspace context, verification capability, formal-delivery intent, and risk categories rather than fixed OpenFlow paths.
-- Risk: Opening `/openflow-quality-gate` outside `/openflow-implement` could be confused with making it automatic everywhere.
-  - Mitigation: Document it as an explicit public verification capability whose automatic use is still governed by admission rules.
+Global/cross-session state is constrained by the following isolation mechanisms:
+- 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。
+## Architecture Overview
 
-## Testing Strategy
+### Components
+- **quality-gate**: Entry point and readiness owner for harden execution
+  - Decide whether harden should start before creating a DAG
+  - Consume the final harden\_result/readiness output
+  - Expose final findings and Code Changes for user review
+- **DRG harden DAG**: Isolated task graph for one complex harden run
+  - Keep each harden run isolated with a per-run DAG identity
+  - Chain reviewer/executor task outputs to downstream tasks
+  - Support abort/timeout/failure propagation without mixing runs
+- **reviewer session**: Adversarial reviewer that owns findings and convergence decisions
+  - Report findings into the harden message flow
+  - Review executor replies and decide whether another round is needed
+  - Produce the final harden result when convergence or limits are reached
+- **executor session**: Repair agent that responds to reviewer findings
+  - Fix high-confidence findings when applicable
+  - Report rejected or deferred findings back through DRG task output
+  - Keep code changes visible for final quality-gate review
+## Task Flows
 
-Use targeted tests and review to verify: 风险最小
+### quality-gate harden DRG flow
 
-- Regression test that `/openflow-implement` still requires Full Quality Gate at final verification.
-- Regression test that an explicit user request for quality gate/final verification can run Full Quality Gate outside `/openflow-implement`.
-- Regression test or prompt-behavior fixture that casual coding with a low-risk edit selects lightweight verification and does not automatically invoke Full Quality Gate.
-- Regression test or scenario review that high-risk or unclear target-project changes upgrade to Full Quality Gate or ask before invoking it when no mandatory trigger applies.
-- Review that admission wording avoids OpenFlow-repository-specific path assumptions for target-project risk classification.
-- **New**: Test that quality gate output does NOT contain `nextCommand: openflow-quality-gate` when NotReady.
-- **New**: Test that quality gate report contains "Code Changes" section when harden/verify modify files.
-- **New**: Test that retry counter stops at 2 and escalates to user on third NotReady.
+```mermaid
+flowchart LR
+  QG[quality-gate] --> DAG[harden DAG]
+  DAG --> R1[reviewer round]
+  R1 --> E1[executor round]
+  E1 --> R2[reviewer assessment]
+  R2 --> RESULT[harden_result / readiness]
+```
 
-<!-- OPENFLOW:CROSS_VALIDATION_SUMMARY:BEGIN -->
+1. **quality-gate**: Evaluate harden need and create an isolated harden DAG when required
+   → Output: harden DAG identity and initial reviewer task
+2. **reviewer session**: Report adversarial findings from the current message history
+   → Output: findings for executor task input
+3. **executor session**: Fix high-confidence findings and report unresolved findings
+   → Output: code changes and executor reply
+4. **reviewer session**: Assess executor reply and decide whether to continue or finish
+   → Output: final harden\_result or next round request
+5. **quality-gate**: Consume the final harden\_result for readiness assessment
+   → Output: quality-gate readiness and user-visible final report
 
-### 集成测试（必须）
+## Data Contracts
 
-| 测试 | 验证目标 | 对应不变量 |
-|------|----------|-----------|
-| harden 独立可调用 | harden 节点可独立运行并产出 findings | — |
-| quality-gate 不直接调用 harden | `handleQualityGate` 不包含 `handleHarden` 调用 | DC1 |
-| verify → final-verify → readiness | 节点链顺序正确 | DC4 |
-| run 解析优先级正确 | 已绑定 run 时不必扫描磁盘；缺失时仍可恢复 active run | DC7 |
-| root mismatch 强制 NotReady | execution root 不匹配时 readiness = NotReady | I1 |
-| constraints 缺证据阻断 | final-verify 在 blocking constraint 无命令输出时返回 blocked | I4 |
-| code-mapper 生成条件 | Ready + behavior.md → mapper 生成；其他情况 → 不生成 | I5 |
-| limited_context 不升级 | limited_context + Ready → 不自动等于 archive readiness | I7 |
-| harden 契约分歧不可通过改文档解决 | finding = contract_divergence → executor 只改代码 | I3 |
+### harden\_result
+Purpose: Final output consumed by quality-gate and shown to the user during assessment
 
-### 回归测试
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| findings | Finding\[\] | Yes | Reviewer findings and final disposition |
+| codeChanges | CodeChange\[\] | No | Visible code changes for quality-gate review |
+| readiness | ReadinessStatus | Yes | Final readiness signal consumed by quality-gate |
 
-- 现有 quality-gate 测试必须全部通过
-- 现有 harden 测试必须全部通过
-- 现有 verify 测试必须全部通过
-- 现有 implementation-mapper 测试必须全部通过
+## Integration Boundaries
+
+### quality-gate → harden DRG flow
+Contract: quality-gate owns start/stop/readiness decisions and consumes final harden\_result output
+Allowed:
+- Create an isolated harden DAG for complex harden cases
+- Read final harden\_result and Code Changes for final assessment
+Forbidden:
+- Bypass quality-gate readiness ownership
+- Start unbounded harden execution without quality-gate guardrails
+
+### harden DRG flow → DRG engine
+Contract: Use per-run DAG/task identities while preserving DRG engine boundaries
+Allowed:
+- Add runtime harden tasks and chain task outputs
+Forbidden:
+- Modify DRG core semantics for feature-specific behavior
+- Mix multiple harden runs in one DAG namespace
 
 ## Success Criteria
 
-- [ ] openflow-implement-quality-gate addresses the stated problem: 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。
-- [ ] openflow-implement-quality-gate works for the target users: 内部开发者
-- [ ] openflow-implement-quality-gate implementation reflects the selected priority: 风险最小
-- [ ] Casual coding code edits use basic or lightweight verification by default instead of automatically invoking Full Quality Gate.
-- [ ] `/openflow-implement` final verification still requires Full Quality Gate.
-- [ ] User-explicit quality gate or final-verification requests can invoke Full Quality Gate outside `/openflow-implement`.
-- [ ] Admission decisions are based on the target workspace/project context rather than OpenFlow repository path assumptions.
+- [ ] Verify that 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。
+  - Verification: Design and implementation review
+  - Evidence type: manual-review
+- [ ] Verify that 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。
+  - Verification: Design and implementation review
+  - Evidence type: manual-review
+- [ ] Verify that harden 输出格式必须与现有格式兼容
+  - Verification: Compatibility review and regression test
+  - Evidence type: manual-review
+- [ ] Verify that 默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。
+  - Verification: Design and implementation review
+  - Evidence type: manual-review
+- [ ] Verify that 流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。
+  - Verification: Automated or integration test
+  - Evidence type: manual-review
+- [ ] Verify that 同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。
+  - Verification: Design and implementation review
+  - Evidence type: manual-review
+- [ ] Verify that reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。
+  - Verification: Design and implementation review
+  - Evidence type: manual-review
+- [ ] Verify that DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。
+  - Verification: Design and implementation review
+  - Evidence type: manual-review
+## Behavior Scenarios
 
-## 与 implementation-constraints 的对齐
+### reviewer and executor exchange adversarial findings
+**Actor:** reviewer
 
-| 维度 | implementation-constraints 现有表述 | 需更新为 |
-|------|-------------------------------------|----------|
-| D3 blocking 语义 | "quality gate 时 enforcement（阻断）" | "final-verify 时 enforcement（阻断），quality-gate 消费判定结果" |
-| QualityGate 增强章节 | quality-gate 中 `verifyConstraintSatisfaction()` | final-verify 中 `verifyConstraintSatisfaction()`，quality-gate 读取结果 |
-| behavior 场景 4 | "quality gate reads the constraints file" | "final-verify reads the constraints file, quality-gate consumes result" |
-| behavior 场景 4 触发 | "/openflow-quality-gate" 触发 | "/openflow-quality-gate" 触发编排器，enforcement 在 final-verify 中执行 |
+**Given:**
+- reviewer and executor sessions are available or can be lazily created
 
-## 实现完成后必须同步的文档
+**When:** the relevant workflow step executes
 
-- [ ] `docs/changes/2026-05-27-openflow-harden-quality-gate-final-verify-code-mapper/workflow-sync-draft.md`：作为 `docs/current` 同步草案维护，不能替代 current authority
-- [ ] `docs/current/workflow/quality-gate-workflow.md`：替换为新的节点编排流程
-- [ ] `docs/current/workflow/archive-workflow.md` 第 5 节：更新 mapper 生成来源描述
-- [ ] 确认 `docs/decisions/ADR-001-docs-governance-and-workflow.md` 中 implementation-mapper 的 authority 定义不受影响
+**Then:**
+- reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。
+
+### each harden run uses an isolated DAG
+**Actor:** system
+
+**Given:**
+- A harden request is ready to run
+
+**When:** the workflow reaches the described trigger point
+
+**Then:**
+- 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。
+
+### reviewer and executor exchange adversarial findings
+**Actor:** reviewer
+
+**Given:**
+- reviewer and executor sessions are available or can be lazily created
+
+**When:** the workflow reaches the described trigger point
+
+**Then:**
+- DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务
+
+### reviewer and executor exchange adversarial findings
+**Actor:** reviewer
+
+**Given:**
+- reviewer and executor sessions are available or can be lazily created
+
+**When:** the relevant workflow step executes
+
+**Then:**
+- 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。
+
+## Risks And Mitigations
+
+Not specified.
+## Testing Strategy
+
+### Unit Tests
+Test synthesized requirement helpers, safety guard decisions, and edge-case classifiers in isolation
+
+### Integration Tests
+Test DRG task chaining, DAG state transitions, timeout/abort behavior, and output compatibility contracts
+
+### End-to-End Tests
+Run quality-gate with a complex harden case and verify the reviewer → executor → reviewer flow reaches a final harden result
+
+### Manual Verification
+Review generated docs and quality-gate final report for safety guard visibility, Code Changes disclosure, and compatibility expectations
 
 <!-- OPENFLOW:CROSS_VALIDATION_SUMMARY:BEGIN -->
-
 ## Cross-Validation Summary
 
 - Status: Passed
 - Documents checked in order:
-
+- design.md: present
+- behavior.md: present
 - Non-blocking gaps: 0
 <!-- OPENFLOW:CROSS_VALIDATION_SUMMARY:END -->
 
-# 质量门准入策略：完整质量门开放给其他对话使用，但不再作为任何代码修改后的默认自动动作；随心编程默认轻量验证，/openflow-implement、用户显式要求、正式交付或高风险准入时才运行完整质量门。 - Design
+<!-- OPENFLOW:DESIGN_REVIEW_SUMMARY:BEGIN -->
+## Design Sufficiency Review
 
-## Architecture Decision: State Machine + Pyramid Layering
+- Status: Not Ready
+- Structural Completeness: structurally_complete
+- Design Readiness: needs_implementation_constraints
+- Blocking findings: 1
+- Warnings: 0
+- Summary: Design is generated, but implementation constraints are not yet sufficient for reliable planning.
 
-### Decision
+### Findings
 
-Refactor `handleQualityGate` from a monolithic "god function" into a **state machine** with four explicit phases. Each phase is a self-contained state with single responsibility.
+#### F-0002: constraint_specificity
+- Severity: blocking
+- Finding: 8 important constraint(s) are not sufficiently covered by scenarios, criteria, and architecture.
+- Suggested fix: Add implementation-level constraints that name owners, triggers, state changes, failure behavior, and verification methods.
 
-### Pyramid Structure
+### Constraint Coverage Matrix
 
-```
-Top:    Quality Gate = Readiness Assessment Only (not execution, not command)
-        └── Must NOT command retry; must NOT auto-loop
+| Constraint | Goals | Scenarios | Criteria | Architecture | Sufficiency | Missing Details |
+|------------|-------|-----------|----------|--------------|-------------|-----------------|
+| DRG 保持为全局单例任务调度器（不是事件总线），插件启动时初始化。所有异步任务共享同一个 SchedulerLoop 和 DagEngine 实例，统一状态存储。 | 0 | 0 | 0 | 0 | missing | strong verification |
+| 每次 harden 调用创建独立 DAG（如 harden-<uuid>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。 | 1 | 1 | 1 | 5 | partial | strong verification |
+| 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。 | 2 | 3 | 6 | 4 | sufficient | - |
+| DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。 | 0 | 1 | 2 | 2 | partial | strong verification |
+| 默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。 | 2 | 3 | 5 | 4 | sufficient | - |
+| 流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。 | 2 | 3 | 5 | 4 | sufficient | - |
+| 同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。 | 2 | 3 | 5 | 4 | sufficient | - |
+| reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。 | 2 | 3 | 5 | 4 | sufficient | - |
+| quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。 | 1 | 0 | 0 | 3 | partial | strong verification |
+| DRG 引擎核心不因本功能修改 | 0 | 0 | 0 | 0 | missing | strong verification |
+| harden 输出格式必须与现有格式兼容 | 1 | 0 | 1 | 0 | partial | - |
+| quality-gate 编排逻辑不修改 | 0 | 0 | 0 | 0 | missing | strong verification |
+| 同一时间最多一个 harden DAG 运行 | 1 | 1 | 1 | 5 | partial | strong verification |
 
-Layer 1: Detect  → Risk assessment + applicability classification
-Layer 2: Harden  → Adversarial review + code fixes (changes visible to user)
-Layer 3: Verify  → Evidence checks + test execution (changes visible to user)
-Layer 4: Assess  → Final readiness classification based on Harden+Verify results
-```
-
-### State Machine Transitions
-
-```
-Detect ──[harden required]──→ Harden ──[complete]──→ Verify ──[complete]──→ Assess
-   ↑                                                              │
-   └──────────────────[NotReady, retry < 2]───────────────────────┘
-   └──────────────────[NotReady, retry >= 2]──→ STOP, escalate to user
-```
-
-### Design Patterns Applied
-
-1. **State Pattern**: Each phase (Detect/Harden/Verify/Assess) is an independent state class.
-2. **Template Method**: Each state follows `enter → execute → exit` skeleton; shared logic (code-change capture) lives in base class.
-3. **Observer Pattern**: State transitions notify `ImplementationRunStore`, `AcceptanceState`, `Logger`.
-4. **Chain of Responsibility**: Admission strategy evaluation uses strategy chain (`Formal → Explicit → HighRisk → Casual`).
-
-### Dead Loop Fix
-
-- Remove unconditional "re-invoke the gate" from skill instruction.
-- Remove `nextCommand: openflow-quality-gate` from NotReady/NeedsDecision output.
-- Add max-retry guard (2 rounds); third NotReady forces escalation to user.
-
-### Code Change Visibility
-
-- Harden state captures `git diff --stat` before and after execution.
-- Verify state captures file changes during verification.
-- Quality Gate report includes aggregated "Code Changes" section.
-- Changes are persisted to `acceptance-state` via observer.
+### Next Required Facts
+- **implementation_constraints**: Which concrete APIs, state transitions, payload fields, and ownership rules must the implementation follow?
+  - Reason: 8 important constraint(s) are not sufficiently covered by scenarios, criteria, and architecture.
+  - Example: Define task ids, output schema, state transitions, and ownership for each workflow step.
+<!-- OPENFLOW:DESIGN_REVIEW_SUMMARY:END -->

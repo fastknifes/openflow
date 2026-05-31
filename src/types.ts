@@ -1,3 +1,5 @@
+import type { SchedulerLoop } from './orchestrator/scheduler-loop.js'
+
 export interface FeatureConfig {
   enabled: boolean
   trigger_mode: FeatureTriggerMode
@@ -161,7 +163,7 @@ export interface HardenFinding {
   lines?: string
   id?: string
   normalizedKey?: string
-  confidence?: HardenFindingConfidence
+  confidence?: HardenFindingConfidence | undefined
   status?: HardenFindingStatus
   disposition?: Disposition
   repeatCount?: number
@@ -389,7 +391,7 @@ export const defaultConfig: OpenFlowConfig = {
   writingPlan: {},
   harden: {
     enabled: true,
-    maxRounds: 5,
+    maxRounds: 1,
     maxArgumentRoundsPerFinding: 2,
   },
   guardian: {
@@ -432,6 +434,7 @@ export interface OpenFlowContext {
   $: unknown
   config: OpenFlowConfig
   enhancedPlans: Set<string>
+  schedulerLoop?: SchedulerLoop
 }
 
 export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'failed' | 'draft_blocked' | 'complete'

@@ -246,6 +246,7 @@ function hasEvidence(finding: Pick<HardenFinding, 'evidence' | 'files'>): boolea
 
 interface ParsedFinding {
   level: HardenFindingLevel
+  confidence?: HardenFindingConfidence
   description: string
   evidence: string
   files: string[]
@@ -316,12 +317,22 @@ function extractFindingsByLevel(rawFindings: string): ParsedFinding[] {
 }
 
 function buildParsedFinding(level: HardenFindingLevel, text: string): ParsedFinding {
-  return {
+  const finding: ParsedFinding = {
     level,
     description: extractStructuredDescription(text),
     evidence: extractStructuredEvidence(text),
     files: extractFiles(text),
   }
+  const confidence = extractConfidence(text)
+  if (confidence !== undefined) {
+    finding.confidence = confidence
+  }
+  return finding
+}
+
+function extractConfidence(text: string): HardenFindingConfidence | undefined {
+  const match = text.match(/(?:^|\n)Confidence:\s*(high|medium|low)\b/i)
+  return match?.[1] ? match[1].toLowerCase() as HardenFindingConfidence : undefined
 }
 
 function extractStructuredDescription(text: string): string {
@@ -336,6 +347,7 @@ function extractStructuredDescription(text: string): string {
     }
     if (line.match(/^#{1,3}\s/)) continue
     if (line.match(/^Level:/i)) continue
+    if (line.match(/^Confidence:/i)) continue
     if (line.match(/^(Evidence|Files?|Lines?):/i)) break
     if (line.match(/^Description:/i)) {
       descriptionLines.push(line.replace(/^Description:\s*/i, '').trim())
@@ -388,6 +400,7 @@ function buildFindingIdentity(finding: ParsedFinding | HardenFinding): HardenFin
     description: finding.description.trim(),
     evidence: finding.evidence.trim(),
     files: [...new Set(finding.files)],
+    ...(finding.confidence ? { confidence: finding.confidence } : {}),
   }
 
   return {

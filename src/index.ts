@@ -18,6 +18,7 @@ import { createSystemTransformHook } from './hooks/system-transform.js'
 import { OPENFLOW_TOOL_COMMANDS } from './commands/manifest.js'
 import { SchedulerLoop, type StopOptions } from './orchestrator/index.js'
 import { currentPromotionExecutor } from './phases/archive/current-promotion-executor.js'
+import { createHardenExecutorExecutor, createHardenReviewerExecutor } from './orchestrator/harden-executors.js'
 import { defaultConfig } from './types.js'
 
 type OpenFlowContext = BaseOpenFlowContext & PluginInput
@@ -119,6 +120,14 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
     ...ctx,
     config,
     enhancedPlans: new Set(),
+    schedulerLoop,
+  }
+
+  if (!schedulerLoop.hasExecutor('harden-reviewer')) {
+    schedulerLoop.registerExecutor('harden-reviewer', createHardenReviewerExecutor(openflowCtx))
+  }
+  if (!schedulerLoop.hasExecutor('harden-executor')) {
+    schedulerLoop.registerExecutor('harden-executor', createHardenExecutorExecutor(openflowCtx))
   }
 
   logger.info('Plugin initialized', {

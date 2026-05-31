@@ -1,0 +1,191 @@
+{
+  // ═══════════════════════════════════════════════════════════════════
+  // OpenFlow 默认配置文件
+  // 所有配置项均列出，带有注释说明。修改后保存即生效（支持热重载）。
+  // 配置加载优先级：openflow.json > openflow.jsonc > opencodeConfig.openflow
+  // ═══════════════════════════════════════════════════════════════════
+
+  // 语言设置："zh-CN" | "en"
+  "locale": "zh-CN",
+
+  // ── 路径配置 ──────────────────────────────────────────────────────
+  "paths": {
+    // 文档变更工作区
+    "changes": "docs/changes",
+    // 归档目录
+    "archive": "docs/archive",
+    // 当前需求文档目录
+    "current_requirements": "docs/current/requirements",
+    // 当前设计文档目录
+    "current_design": "docs/current/design",
+    // 当前规格说明目录
+    "current_spec": "docs/current/spec",
+    // 当前工作流文档目录
+    "current_workflow": "docs/current/workflow",
+    // 构建输出目录
+    "builds": ".openflow/builds",
+    // 计划文件目录
+    "plans": ".openflow/plans",
+    // 验收状态文件路径
+    "acceptance_state": ".openflow/acceptance.local.md",
+    // Feature 状态目录
+    "feature_state": ".openflow/feature",
+    // 变更单元索引文件
+    "change_units": ".openflow/change-units.json",
+    // Guardian 状态目录
+    "guardian_state": ".openflow/guardian",
+    // Boulder 状态文件路径（OMO 集成用）
+    "boulder_state": ".sisyphus/boulder.json",
+    // 证据目录
+    "evidence_dir": ".openflow/evidence",
+    // 实现运行记录目录
+    "implementation_runs": ".openflow/runs",
+    // Worktree 隔离目录
+    "worktree_dir": ".openflow/worktree"
+  },
+
+  // ── Feature 管理 ─────────────────────────────────────────────────
+  "feature": {
+    "enabled": true,
+    // 触发模式："smart"（智能判断）| "always"（总是触发）| "never"（禁用）
+    "trigger_mode": "smart",
+    // 是否生成 PRD 文档
+    "generate_prd": true,
+    // Feature 闭环配置
+    "closure": {
+      "enabled": true,
+      "auto_transition": true,
+      // 强信号：直接触发生成正式文档
+      "strong_signals": [
+        "按这个做",
+        "按这个方案推进",
+        "生成正式文档",
+        "就按这个方向",
+        "go with this",
+        "proceed with this",
+        "generate formal docs"
+      ],
+      // 弱信号：累计达到阈值后触发
+      "weak_signals": [
+        "可以",
+        "好",
+        "确认",
+        "没问题",
+        "done",
+        "looks good",
+        "approved"
+      ],
+      // 弱信号累计阈值
+      "weak_signal_threshold": 2
+    }
+  },
+
+  // ── TDD（测试驱动开发） ──────────────────────────────────────────
+  "tdd": {
+    "enabled": true
+  },
+
+  // ── 验证配置 ─────────────────────────────────────────────────────
+  "verification": {
+    // 是否在 plan 阶段嵌入验证
+    "in_plan": true,
+    // 安全检查项："secret" | "vuln" | "dependency"
+    "security": ["secret", "vuln"],
+    // 质量检查项："lint" | "typecheck" | "test" | "format"
+    "quality": ["lint", "typecheck", "test"],
+    // 自动修复
+    "auto_fix": false,
+    // 完成时是否给出提示
+    "completion_prompt": true,
+    // 是否允许接受失败
+    "allow_accept_failures": true
+  },
+
+  // ── 验收配置 ─────────────────────────────────────────────────────
+  "acceptance": {
+    "enabled": true,
+    "trigger_words_zh": [
+      "调整",
+      "改一下",
+      "测试发现",
+      "验收",
+      "检查",
+      "问题",
+      "还有问题",
+      "需要改"
+    ],
+    "trigger_words_en": [
+      "adjust",
+      "fix",
+      "test found",
+      "acceptance",
+      "check",
+      "issue",
+      "tweak",
+      "modify"
+    ],
+    "doc_sync_prompt": true,
+    "drift_detection": true
+  },
+
+  // ── 归档配置 ─────────────────────────────────────────────────────
+  "archive": {
+    "enabled": true,
+    "drift_check": true,
+    "auto_promote_current": true
+  },
+
+  // ── 写计划配置 ───────────────────────────────────────────────────
+  "writingPlan": {
+    // 写计划模式："pyramid" | "pattern" | "mixed" | false（禁用）
+    "mode": "pyramid"
+  },
+
+  // ── Harden（加固审查）配置 ───────────────────────────────────────
+  "harden": {
+    "enabled": true,
+    // 最大审查轮次
+    "maxRounds": 1,
+    // 每个发现的最大辩论轮次
+    "maxArgumentRoundsPerFinding": 2
+    // 审查者（Reviewer）使用的模型，格式："providerID/modelID"
+    // 例："new_api_compatible/kimi-k2.6"、"anthropic/claude-sonnet-4-20250514"
+    // 不配置时使用 opencode 默认模型。取消注释以启用：
+    // "reviewerModel": "new_api_compatible/kimi-k2.6",
+    // 执行者（Executor）使用的模型，格式同上
+    // "executorModel": "anthropic/claude-sonnet-4-20250514"
+  },
+
+  // ── Guardian（漂移守护）配置 ─────────────────────────────────────
+  "guardian": {
+    "enabled": true,
+    "auto_start": true,
+    "auto_fix": true,
+    "max_retries": 3,
+    "contract_cache": true
+  },
+
+  // ── 日志配置 ─────────────────────────────────────────────────────
+  "logging": {
+    // 日志级别："debug" | "info" | "warn" | "error"
+    "level": "info",
+    // 输出目标："console" | "file" | "both"
+    "output": "console",
+    // 日志文件目录
+    "path": ".openflow/logs",
+    // 保留的最大日志文件数
+    "maxFiles": 7,
+    // 日志分类过滤，"all" 表示全部，或指定数组：
+    // ["harden", "session", "quality_gate", "config", "drift", "orchestrator", "feature", "archive", "default"]
+    "categories": "all",
+    // 日志格式："text" | "json"
+    "format": "text"
+  },
+
+  // ── 执行质量策略 ─────────────────────────────────────────────────
+  "executionQualityPolicy": {
+    "enabled": true,
+    // 默认质量模式："fast" | "balanced" | "strict"
+    "defaultMode": "balanced"
+  }
+}

@@ -20,6 +20,7 @@ import { findActiveFeature } from '../utils/feature-resolver.js'
 import { appendOmittedDiffManifest, extractDiffBlockPaths, scopeDiffToFeature } from '../utils/diff-scope.js'
 import { logger } from '../utils/logger.js'
 import { registerHardenSession, clearHardenSessions } from '../hooks/system-transform.js'
+import { HardenDagManager } from '../orchestrator/harden-dag-manager.js'
 
 interface HardenArgs {
   full?: boolean
@@ -39,6 +40,14 @@ interface SessionClientLike {
 interface AgentRunResult {
   text: string
   tokens: number
+  sessionID?: string
+  findings?: HardenFinding[]
+  converged?: boolean
+  reason?: string
+  rejectedCounts?: Record<string, number>
+  dispositions?: unknown[]
+  fixReport?: string
+  codeChanges?: string
 }
 
 interface FormattedHardenTraceEntry extends HardenTraceEntry {
@@ -126,7 +135,7 @@ Summary: harden is disabled in OpenFlow configuration.`
 Status: rejected
 Rounds: 0
 Total tokens consumed: 0
-Summary: no feature was provided and no active plan was found under .sisyphus/plans/.`
+Summary: no feature was provided and no active plan was found.`
   }
 
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
@@ -180,83 +189,110 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
 
   if (complexity === 'simple' && !args?.full) {
     logger.info('harden', 'entering simple mode', { feature: sanitizedFeature })
+    const dagManager = createHardenDagManager(ctx, sanitizedFeature)
     const coordinatorSessionID = currentSessionID ?? await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`)
-    const reviewerSessionID = await createHardenSession(ctx, sanitizedFeature, 'Harden Round 1/1 - Reviewer', coordinatorSessionID, 'reviewer')
-    const reviewerPrompt = buildReviewerPrompt(planSummary, reviewerDiffStr)
-    const trace: FormattedHardenTraceEntry[] = []
-    const review = await runAgentTask(
-      ctx,
-      reviewerSessionID,
-      'oracle',
-      REVIEWER_SYSTEM_PROMPT,
-      reviewerPrompt,
-      activeModels.reviewerModel,
-    )
-    const grouped = classifyFindings(review.text, designLookup.paths)
-    const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
-    trace.push(buildTraceEntry(1, 'oracle', review, inferReviewerStopReasonCandidate(grouped)))
-    const executorFindings = filterExecutorFindings(findings)
-    const executorSessionID = await createHardenSession(ctx, sanitizedFeature, 'Harden Round 1/1 - Executor', coordinatorSessionID, 'executor')
-    const execution = await runAgentTask(
-      ctx,
-      executorSessionID,
-      'deep',
-      EXECUTOR_SYSTEM_PROMPT,
-      buildExecutorPrompt(executorFindings, planSummary, collectScopedFilePaths(executorFindings, diffStr)),
-      activeModels.executorModel,
-    )
-    const dispositions = parseExecutorDisposition(execution.text, executorFindings)
-    applyExecutorDispositions(executorFindings, dispositions)
-    trace.push(buildTraceEntry(1, 'deep', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'disposition_reported'))
+    try {
+      const reviewerPrompt = buildReviewerPrompt(planSummary, reviewerDiffStr)
+      const trace: FormattedHardenTraceEntry[] = []
+      const review = await runDrgAgentTask(
+        dagManager,
+        1,
+        undefined,
+        'harden-reviewer',
+        REVIEWER_SYSTEM_PROMPT,
+        reviewerPrompt,
+        activeModels.reviewerModel,
+        { parentSessionID: coordinatorSessionID, feature: sanitizedFeature, title: 'Harden Round 1/1 - Reviewer', maxRounds: 1 },
+      )
+      const grouped = classifyFindings(review.text, designLookup.paths)
+      const findings = review.findings ?? [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
+      trace.push(buildTraceEntry(1, 'harden-reviewer', review, review.reason ?? inferReviewerStopReasonCandidate(grouped)))
+      const executorFindings = filterExecutorFindings(findings)
+      const execution = await runDrgAgentTask(
+        dagManager,
+        1,
+        undefined,
+        'harden-executor',
+        EXECUTOR_SYSTEM_PROMPT,
+        buildExecutorPrompt(executorFindings, planSummary, collectScopedFilePaths(executorFindings, diffStr)),
+        activeModels.executorModel,
+        { parentSessionID: coordinatorSessionID, feature: sanitizedFeature, title: 'Harden Round 1/1 - Executor' },
+      )
+      const dispositions = parseExecutorDisposition(execution.text, executorFindings)
+      applyExecutorDispositions(executorFindings, dispositions)
+      trace.push(buildTraceEntry(1, 'harden-executor', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'disposition_reported'))
 
-    // Simple mode: one-time rebuttal for rejected findings (no multi-round repair loop)
-    const rebuttalResult = await runRejectedFindingRebuttals(
-      ctx,
-      sanitizedFeature,
-      coordinatorSessionID,
-      1,
-      1,
-      ctx.config.harden.maxArgumentRoundsPerFinding,
-      executorFindings,
-      dispositions,
-      planSummary,
-      trace,
-    )
-    const combinedFixReport = [execution.text, rebuttalResult.report].filter(part => part.trim()).join('\n\n')
-    const hasUnresolvedRebuttal = rebuttalResult.needsHuman
+      const reviewerSessionID = review.sessionID ?? ''
+      const executorSessionID = execution.sessionID ?? ''
+      const rebuttalResult = await runRejectedFindingRebuttals(
+        ctx,
+        sanitizedFeature,
+        coordinatorSessionID,
+        1,
+        1,
+        ctx.config.harden.maxArgumentRoundsPerFinding,
+        executorFindings,
+        dispositions,
+        planSummary,
+        trace,
+        dagManager,
+        reviewerSessionID,
+        executorSessionID,
+      )
+      const combinedFixReport = [execution.fixReport ?? execution.text, rebuttalResult.report].filter(part => part.trim()).join('\n\n')
+      const hasUnresolvedRebuttal = rebuttalResult.needsHuman
+      const finalReview = await runDrgAgentTask(
+        dagManager,
+        1,
+        reviewerSessionID,
+        'harden-reviewer',
+        REVIEWER_SYSTEM_PROMPT,
+        buildReviewerPrompt(planSummary, reviewerDiffStr, executorFindings, combinedFixReport),
+        activeModels.reviewerModel,
+        { parentSessionID: coordinatorSessionID, feature: sanitizedFeature, title: 'Harden Round 1/1 - Final Reviewer', priorExecutorText: execution.text, maxRounds: 1 },
+      )
+      const finalGrouped = classifyFindings(finalReview.text, designLookup.paths)
+      const finalFindings = finalReview.findings ?? [...finalGrouped.actionable, ...finalGrouped.ambiguous, ...finalGrouped.nonBlocking]
+      trace.push(buildTraceEntry(1, 'harden-reviewer', finalReview, finalReview.reason ?? inferReviewerStopReasonCandidate(finalGrouped)))
 
-    const status = grouped.ambiguous.length > 0
-      ? 'needs_human'
-      : hasUnresolvedRebuttal
+      const status = finalReview.reason === 'max_rounds_reached'
+        ? 'max_rounds_reached'
+        : finalGrouped.ambiguous.length > 0
         ? 'needs_human'
-        : grouped.actionable.length > 0
-          ? 'needs_human'
-          : findings.length > 0
-            ? 'pass_with_risks'
-            : 'pass'
-
-    return formatHardenResult({
-      status,
-      rounds: [{ round: 1, findings, fixReport: combinedFixReport || execution.text }],
-      budgetConsumed: review.tokens + execution.tokens + rebuttalResult.tokens,
-      totalTokensConsumed: review.tokens + execution.tokens + rebuttalResult.tokens,
-      summary: summarizeReviewOutcome(findings, grouped.actionable.length, grouped.ambiguous.length, grouped.nonBlocking.length),
-      stopReason: grouped.ambiguous.length > 0
-        ? 'review_inconclusive'
         : hasUnresolvedRebuttal
-          ? 'rebuttal_unresolved'
-          : grouped.actionable.length > 0
-            ? 'actionable_findings'
-            : findings.length > 0
-              ? 'non_blocking_only'
-              : 'no_findings',
-      sessionID: coordinatorSessionID,
-      coordinatorSessionId: coordinatorSessionID,
-      trace,
-    })
+          ? 'needs_human'
+          : finalGrouped.actionable.length > 0
+            ? 'needs_human'
+            : finalFindings.length > 0
+              ? 'pass_with_risks'
+              : 'pass'
+
+      return formatHardenResult({
+        status,
+        rounds: [{ round: 1, findings: finalFindings, fixReport: combinedFixReport || execution.text }],
+        budgetConsumed: review.tokens + execution.tokens + rebuttalResult.tokens + finalReview.tokens,
+        totalTokensConsumed: review.tokens + execution.tokens + rebuttalResult.tokens + finalReview.tokens,
+        summary: summarizeReviewOutcome(finalFindings, finalGrouped.actionable.length, finalGrouped.ambiguous.length, finalGrouped.nonBlocking.length),
+        stopReason: finalReview.reason ?? (finalGrouped.ambiguous.length > 0
+          ? 'review_inconclusive'
+          : hasUnresolvedRebuttal
+            ? 'rebuttal_unresolved'
+            : finalGrouped.actionable.length > 0
+              ? 'actionable_findings'
+              : finalFindings.length > 0
+                ? 'non_blocking_only'
+                : 'no_findings'),
+        sessionID: coordinatorSessionID,
+        coordinatorSessionId: coordinatorSessionID,
+        trace,
+      })
+    } finally {
+      dagManager.archiveAndDestroy()
+    }
   }
 
-  logger.info('harden', 'entering standard adversarial mode', { feature: sanitizedFeature, maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds })
+  const maxRounds = Math.min(10, Math.max(1, args?.maxRounds ?? ctx.config.harden.maxRounds))
+  logger.info('harden', 'entering standard adversarial mode', { feature: sanitizedFeature, maxRounds })
   const coordinatorSessionID = currentSessionID ?? await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`)
   const diffScopeContext: DiffScopeContext = {
     directory: ctx.directory,
@@ -269,12 +305,12 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
     archiveDir: ctx.config.paths.archive,
   }
 
-  const result = await runAdversarialLoop(
+  const result = await runDrgAdversarialLoop(
     ctx,
     planSummary,
     diffScopeContext,
     {
-      maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds,
+      maxRounds,
       maxArgumentRoundsPerFinding: ctx.config.harden.maxArgumentRoundsPerFinding,
       mode: args?.mode ?? 'standard',
     },
@@ -283,9 +319,16 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
   )
 
   return formatHardenResult(result)
+  }
+
+  try {
+    return await _run()
+  } finally {
+    clearHardenSessions()
+  }
 }
 
-async function runAdversarialLoop(
+async function runDrgAdversarialLoop(
   ctx: OpenFlowContext,
   planSummary: string,
   diffScopeContext: DiffScopeContext,
@@ -295,54 +338,52 @@ async function runAdversarialLoop(
 ): Promise<FormattedHardenResult> {
   const rounds: HardenRoundResult[] = []
   const trace: FormattedHardenTraceEntry[] = []
-  const findingCounts = new Map<string, number>()
   let totalTokensConsumed = 0
   let priorFindings: HardenFinding[] = []
   let fixReport = ''
   let nonBlockingRounds = 0
   const reviewContext = compressInput(planSummary, 16000)
+  const dagManager = createHardenDagManager(ctx, sanitizedFeature)
+  let reviewerSessionID: string | undefined
+  let executorSessionID: string | undefined
+  let priorExecutorText = ''
 
-  for (let round = 1; round <= args.maxRounds; round++) {
-    logger.info('harden', 'starting harden round', { round, maxRounds: args.maxRounds })
+  try {
     const freshScopedDiff = readScopedReviewerDiff(diffScopeContext)
     const rollingDiff = compressInput(freshScopedDiff.reviewerDiff, 24000)
-    const reviewerPrompt = buildReviewerPrompt(reviewContext, rollingDiff, priorFindings, fixReport)
-    const reviewerSessionID = await createHardenSession(
-      ctx,
-      sanitizedFeature,
-      `Harden Round ${round}/${args.maxRounds} - Reviewer`,
-      coordinatorSessionID,
-      'reviewer',
-    )
-    const review = await runAgentTask(
-      ctx,
+    const initialReviewerPrompt = buildReviewerPrompt(reviewContext, rollingDiff, priorFindings, fixReport)
+    const review = await runDrgAgentTask(
+      dagManager,
+      0,
       reviewerSessionID,
-      'oracle',
+      'harden-reviewer',
       REVIEWER_SYSTEM_PROMPT,
-      reviewerPrompt,
+      initialReviewerPrompt,
       activeModels.reviewerModel,
+      { parentSessionID: coordinatorSessionID, feature: sanitizedFeature, title: `Harden Reviewer - ${sanitizedFeature}`, priorExecutorText, maxRounds: args.maxRounds },
     )
+    reviewerSessionID = review.sessionID ?? reviewerSessionID
     totalTokensConsumed += review.tokens
 
     const grouped = classifyFindings(review.text, [])
     logger.info('harden', 'reviewer completed', {
-      round,
+      round: 0,
       actionableCount: grouped.actionable.length,
       ambiguousCount: grouped.ambiguous.length,
       nonBlockingCount: grouped.nonBlocking.length,
     })
-    const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
-    trace.push(buildTraceEntry(round, 'oracle', review, inferReviewerStopReasonCandidate(grouped)))
+    let findings = review.findings ?? [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
+    trace.push(buildTraceEntry(0, 'harden-reviewer', review, review.reason ?? inferReviewerStopReasonCandidate(grouped)))
 
-    if (grouped.ambiguous.length > 0 && grouped.actionable.length === 0 && !containsExecutorReviewableLevel(review.text)) {
-      rounds.push({ round, findings })
-      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'review_inconclusive', totalTokensConsumed })
+    if (review.converged === true && (review.reason === 'review_inconclusive' || (grouped.ambiguous.length > 0 && grouped.actionable.length === 0 && !containsExecutorReviewableLevel(review.text)))) {
+      rounds.push({ round: 1, findings })
+      logger.info('harden', 'harden loop terminated', { round: 1, status: 'needs_human', stopReason: 'review_inconclusive', totalTokensConsumed })
       return {
         status: 'needs_human',
         rounds,
         budgetConsumed: totalTokensConsumed,
         totalTokensConsumed,
-        summary: `reviewer reported ${grouped.ambiguous.length} design ambiguity finding(s) in round ${round}.`,
+        summary: `reviewer reported ${grouped.ambiguous.length} design ambiguity finding(s) in round 1.`,
         stopReason: 'review_inconclusive',
         sessionID: coordinatorSessionID,
         coordinatorSessionId: coordinatorSessionID,
@@ -350,12 +391,12 @@ async function runAdversarialLoop(
       }
     }
 
-    if (grouped.actionable.length === 0 && grouped.ambiguous.length === 0 && grouped.nonBlocking.length === 0) {
-      rounds.push({ round, findings: [] })
+    if (review.converged === true && (review.reason === 'no_findings' || (grouped.actionable.length === 0 && grouped.ambiguous.length === 0 && grouped.nonBlocking.length === 0))) {
+      rounds.push({ round: 1, findings: [] })
       const finalStateGroups = groupFinalFindingStates(rounds)
       const hasUnresolvedFindings = finalStateGroups.unresolved_must_fix.length > 0 || finalStateGroups.unresolved_needs_decision.length > 0
       logger.info('harden', 'harden loop terminated', {
-        round,
+        round: 1,
         status: hasUnresolvedFindings ? 'needs_human' : 'pass',
         stopReason: hasUnresolvedFindings ? 'review_inconclusive' : 'no_findings',
         totalTokensConsumed,
@@ -366,8 +407,8 @@ async function runAdversarialLoop(
         budgetConsumed: totalTokensConsumed,
         totalTokensConsumed,
         summary: hasUnresolvedFindings
-          ? `reviewer found no new issues after ${round} round(s), but prior executor dispositions remain unresolved.`
-          : `reviewer found no actionable issues after ${round} round(s).`,
+          ? 'reviewer found no new issues after 1 round(s), but prior executor dispositions remain unresolved.'
+          : 'reviewer found no actionable issues after 1 round(s).',
         stopReason: hasUnresolvedFindings ? 'review_inconclusive' : 'no_findings',
         sessionID: coordinatorSessionID,
         coordinatorSessionId: coordinatorSessionID,
@@ -375,12 +416,12 @@ async function runAdversarialLoop(
       }
     }
 
-    if (grouped.actionable.length === 0 && !containsExecutorReviewableLevel(review.text)) {
+    if (review.converged === true && (review.reason === 'non_blocking_only' || (grouped.actionable.length === 0 && !containsExecutorReviewableLevel(review.text)))) {
       nonBlockingRounds += 1
-      rounds.push({ round, findings })
+      rounds.push({ round: 1, findings })
 
       if (nonBlockingRounds >= 2) {
-        logger.info('harden', 'harden loop terminated', { round, status: 'pass_with_risks', stopReason: 'non_blocking_only', totalTokensConsumed })
+        logger.info('harden', 'harden loop terminated', { round: 1, status: 'pass_with_risks', stopReason: 'non_blocking_only', totalTokensConsumed })
         return {
           status: 'pass_with_risks',
           rounds,
@@ -396,64 +437,35 @@ async function runAdversarialLoop(
 
       priorFindings = findings
       fixReport = 'No blocking fixes applied; reviewer reported only non-blocking issues.'
-      continue
+    } else {
+      nonBlockingRounds = 0
     }
 
-    nonBlockingRounds = 0
+  for (let round = 1; round <= args.maxRounds; round++) {
+    logger.info('harden', 'starting harden round', { round, maxRounds: args.maxRounds })
     const executorFindings = filterExecutorFindings(findings)
-    const currentFindingKeys = [...new Set(grouped.actionable.map(finding => normalizeFinding(finding)))]
-    for (const existingKey of [...findingCounts.keys()]) {
-      if (!currentFindingKeys.includes(existingKey)) {
-        findingCounts.delete(existingKey)
-      }
-    }
-
-    const repeatedKeys: string[] = []
-    for (const key of currentFindingKeys) {
-      findingCounts.set(key, (findingCounts.get(key) ?? 0) + 1)
-      if ((findingCounts.get(key) ?? 0) >= 2) {
-        repeatedKeys.push(key)
-      }
-    }
-
     const filePaths = collectScopedFilePaths(executorFindings, freshScopedDiff.diff)
     const beforeDiffSnapshot = readGitDiff(ctx.directory)
     const beforeHash = computeDiffHash(beforeDiffSnapshot)
     const beforeFiles = computeChangedFilesSet(beforeDiffSnapshot)
     const executorPrompt = buildExecutorPrompt(executorFindings, reviewContext, filePaths)
-    const executorSessionID = await createHardenSession(
-      ctx,
-      sanitizedFeature,
-      `Harden Round ${round}/${args.maxRounds} - Executor`,
-      coordinatorSessionID,
-      'executor',
-    )
-    const execution = await runAgentTask(
-      ctx,
+    const execution = await runDrgAgentTask(
+      dagManager,
+      round,
       executorSessionID,
-      'deep',
+      'harden-executor',
       EXECUTOR_SYSTEM_PROMPT,
       executorPrompt,
       activeModels.executorModel,
+      { parentSessionID: coordinatorSessionID, feature: sanitizedFeature, title: `Harden Executor - ${sanitizedFeature}` },
     )
+    executorSessionID = execution.sessionID ?? executorSessionID
     totalTokensConsumed += execution.tokens
-    trace.push(buildTraceEntry(round, 'deep', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'fix_applied'))
+    trace.push(buildTraceEntry(round, 'harden-executor', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'fix_applied'))
     const dispositions = parseExecutorDisposition(execution.text, executorFindings)
     applyExecutorDispositions(executorFindings, dispositions)
-    const rebuttalResult = await runRejectedFindingRebuttals(
-      ctx,
-      sanitizedFeature,
-      coordinatorSessionID,
-      round,
-      args.maxRounds,
-      args.maxArgumentRoundsPerFinding,
-      executorFindings,
-      dispositions,
-      reviewContext,
-      trace,
-    )
-    totalTokensConsumed += rebuttalResult.tokens
-    const combinedFixReport = [execution.text, rebuttalResult.report].filter(part => part.trim()).join('\n\n')
+    const combinedFixReport = execution.fixReport ?? execution.text
+    priorExecutorText = execution.text
     const afterDiffSnapshot = readGitDiff(ctx.directory)
     const afterHash = computeDiffHash(afterDiffSnapshot)
     const afterFiles = computeChangedFilesSet(afterDiffSnapshot)
@@ -490,38 +502,54 @@ async function runAdversarialLoop(
       }
     }
 
-    if (repeatedKeys.length > 0 && !materialChange) {
-      rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
-      logger.info('harden', 'harden loop terminated', { round, status: 'review_inconclusive', stopReason: 'repeated_finding_no_material_fix', totalTokensConsumed })
+    const finalReview = await runDrgAgentTask(
+      dagManager,
+      round,
+      reviewerSessionID,
+      'harden-reviewer',
+      REVIEWER_SYSTEM_PROMPT,
+      buildReviewerPrompt(reviewContext, rollingDiff, findings, combinedFixReport),
+      activeModels.reviewerModel,
+      { parentSessionID: coordinatorSessionID, feature: sanitizedFeature, title: `Harden Final Reviewer - ${sanitizedFeature}`, priorExecutorText, maxRounds: args.maxRounds },
+    )
+    reviewerSessionID = finalReview.sessionID ?? reviewerSessionID
+    totalTokensConsumed += finalReview.tokens
+    const finalGrouped = classifyFindings(finalReview.text, [])
+    const finalFindings = finalReview.findings ?? [...finalGrouped.actionable, ...finalGrouped.ambiguous, ...finalGrouped.nonBlocking]
+    trace.push(buildTraceEntry(round, 'harden-reviewer', finalReview, finalReview.reason ?? inferReviewerStopReasonCandidate(finalGrouped)))
+
+    rounds.push({ round, findings: finalFindings.length > 0 ? finalFindings : findings, fixReport: combinedFixReport || execution.text })
+
+    if (finalReview.converged === true) {
+      const finalStateGroups = groupFinalFindingStates(rounds)
+      const hasUnresolvedFindings = finalStateGroups.unresolved_must_fix.length > 0 || finalStateGroups.unresolved_needs_decision.length > 0
+      const status = finalReview.reason === 'max_rounds_reached'
+        ? 'max_rounds_reached'
+        : finalReview.reason === 'review_inconclusive'
+          ? 'needs_human'
+          : finalReview.reason === 'non_blocking_only'
+            ? 'pass_with_risks'
+            : hasUnresolvedFindings
+              ? 'needs_human'
+              : 'pass'
+      logger.info('harden', 'harden loop terminated', { round, status, stopReason: finalReview.reason ?? 'reviewer_converged', totalTokensConsumed })
       return {
-        status: 'review_inconclusive',
+        status,
         rounds,
         budgetConsumed: totalTokensConsumed,
         totalTokensConsumed,
-        summary: `same finding repeated at least twice by round ${round} and executor produced no material change.`,
-        stopReason: 'repeated_finding_no_material_fix',
+        summary: finalReview.reason === 'max_rounds_reached'
+          ? `maximum rounds reached (${args.maxRounds}) without convergence.`
+          : summarizeReviewOutcome(finalFindings, finalGrouped.actionable.length, finalGrouped.ambiguous.length, finalGrouped.nonBlocking.length),
+        stopReason: finalReview.reason ?? 'reviewer_converged',
         sessionID: coordinatorSessionID,
         coordinatorSessionId: coordinatorSessionID,
         trace,
       }
     }
 
-    rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
-
-    if (rebuttalResult.needsHuman) {
-      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'review_inconclusive', totalTokensConsumed })
-      return {
-        status: 'needs_human',
-        rounds,
-        budgetConsumed: totalTokensConsumed,
-        totalTokensConsumed,
-        summary: `executor rejection remained unresolved after rebuttal in round ${round}.`,
-        stopReason: 'review_inconclusive',
-        sessionID: coordinatorSessionID,
-        coordinatorSessionId: coordinatorSessionID,
-        trace,
-      }
-    }
+    priorExecutorText = ''
+    findings = finalFindings.length > 0 ? finalFindings : findings
     priorFindings = findings
     fixReport = combinedFixReport || execution.text
   }
@@ -538,11 +566,8 @@ async function runAdversarialLoop(
     coordinatorSessionId: coordinatorSessionID,
     trace,
   }
-  }
-  try {
-    return await _run()
   } finally {
-    clearHardenSessions()
+    dagManager.archiveAndDestroy()
   }
 }
 
@@ -601,6 +626,7 @@ function buildReviewerPrompt(
     '## Required Output Format',
     'Repeat the following block once per finding:',
     'Level: <one of the finding levels above>',
+    'Confidence: <high | medium | low>',
     'Description: <concise finding>',
     'Evidence: <must include file paths and exact supporting detail>',
     'Files: <comma-separated file paths>',
@@ -625,6 +651,7 @@ function buildExecutorPrompt(
 
   const findingsBlock = actionableFindings.map((finding, index) => [
     `${index + 1}. Level: ${finding.level}`,
+    `Confidence: ${finding.confidence ?? 'medium'}`,
     `Description: ${finding.description}`,
     `Evidence: ${finding.evidence || 'No additional evidence provided.'}`,
     `Files: ${finding.files.join(', ') || 'Unspecified'}`,
@@ -660,6 +687,8 @@ export function filterExecutorFindings(findings: HardenFinding[]): HardenFinding
     if (metadata.executorAllowed === false) return false
     if (metadata.decision && metadata.decision !== 'fix_implementation') return false
     if (metadata.taxonomy === 'contract_divergence' || metadata.taxonomy === 'missing_evidence') return false
+    if (finding.level === 'contract_divergence' || finding.level === 'missing_evidence') return false
+    if (finding.confidence === 'high') return true
     return finding.disposition === 'must_fix'
   })
 }
@@ -798,6 +827,9 @@ async function runRejectedFindingRebuttals(
   dispositions: Map<string, ParsedExecutorDisposition>,
   planSummary: string,
   trace: FormattedHardenTraceEntry[],
+  dagManager: HardenDagManager,
+  reviewerSessionID: string | undefined,
+  executorSessionID: string | undefined,
 ): Promise<{ tokens: number; report: string; needsHuman: boolean }> {
   let tokens = 0
   let needsHuman = false
@@ -809,24 +841,22 @@ async function runRejectedFindingRebuttals(
     const disposition = dispositions.get(findingKey(finding))
     if (!disposition) continue
 
-    const reviewerRebuttalSessionID = await createHardenSession(
-      ctx,
-      sanitizedFeature,
-      `Harden Round ${round}/${maxRounds} - Reviewer Rebuttal`,
-      coordinatorSessionID,
-      'reviewer',
-    )
-    const reviewerRebuttal = await runAgentTask(
-      ctx,
-      reviewerRebuttalSessionID,
-      'oracle',
+    void ctx
+    void sanitizedFeature
+    void coordinatorSessionID
+    void maxRounds
+    const reviewerRebuttal = await runDrgAgentTask(
+      dagManager,
+      round,
+      reviewerSessionID,
+      'harden-reviewer',
       REVIEWER_SYSTEM_PROMPT,
       buildReviewerRebuttalPrompt(finding, disposition, planSummary),
       activeModels.reviewerModel,
     )
     tokens += reviewerRebuttal.tokens
-    trace.push(buildTraceEntry(round, 'oracle', reviewerRebuttal, 'reviewer_rebuttal'))
-    reportParts.push(`Reviewer rebuttal (${reviewerRebuttalSessionID}): ${reviewerRebuttal.text}`)
+    trace.push(buildTraceEntry(round, 'harden-reviewer', reviewerRebuttal, 'reviewer_rebuttal'))
+    reportParts.push(`Reviewer rebuttal (${reviewerSessionID}): ${reviewerRebuttal.text}`)
 
     const finalFinding = finding as HardenFindingFinalState
     const reviewerDecision = parseReviewerRebuttalDecision(reviewerRebuttal.text)
@@ -843,24 +873,18 @@ async function runRejectedFindingRebuttals(
       continue
     }
 
-    const executorRebuttalSessionID = await createHardenSession(
-      ctx,
-      sanitizedFeature,
-      `Harden Round ${round}/${maxRounds} - Executor Rebuttal`,
-      coordinatorSessionID,
-      'executor',
-    )
-    const executorRebuttal = await runAgentTask(
-      ctx,
-      executorRebuttalSessionID,
-      'deep',
+    const executorRebuttal = await runDrgAgentTask(
+      dagManager,
+      round,
+      executorSessionID,
+      'harden-executor',
       EXECUTOR_SYSTEM_PROMPT,
       buildExecutorRebuttalPrompt(finding, disposition, reviewerRebuttal.text, planSummary),
       activeModels.executorModel,
     )
     tokens += executorRebuttal.tokens
-    trace.push(buildTraceEntry(round, 'deep', executorRebuttal, 'executor_rebuttal'))
-    reportParts.push(`Executor rebuttal (${executorRebuttalSessionID}): ${executorRebuttal.text}`)
+    trace.push(buildTraceEntry(round, 'harden-executor', executorRebuttal, 'executor_rebuttal'))
+    reportParts.push(`Executor rebuttal (${executorSessionID}): ${executorRebuttal.text}`)
 
     const finalVerdict = parseExecutorFinalRebuttalVerdict(executorRebuttal.text)
     if (finalVerdict === 'accept') {
@@ -930,6 +954,7 @@ function buildExecutorRebuttalPrompt(
 function formatFindingForPrompt(finding: HardenFinding): string {
   return [
     `Level: ${finding.level}`,
+    `Confidence: ${finding.confidence ?? 'medium'}`,
     `Description: ${finding.description}`,
     `Evidence: ${finding.evidence || 'No additional evidence provided.'}`,
     `Files: ${finding.files.join(', ') || 'Unspecified'}`,
@@ -1178,82 +1203,12 @@ async function createHardenSession(
   }
 }
 
-async function runAgentTask(
-  ctx: OpenFlowContext,
-  sessionID: string,
-  agent: 'oracle' | 'deep',
-  systemPrompt: string,
-  userPrompt: string,
-  model?: string,
-): Promise<AgentRunResult> {
-  const client = getSessionClient(ctx)
-  const promptPayload = buildPromptPayload(sessionID, systemPrompt, userPrompt, agent, model, ctx.directory)
-  logger.debug('harden', 'running agent task', { sessionID, agent, model })
-  try {
-    const response = await client.session.prompt(promptPayload)
-    const result = {
-      text: extractText(response),
-      tokens: extractTokens(response),
-    }
-    logger.debug('harden', 'agent task completed', { sessionID, agent, textLength: result.text.length, tokens: result.tokens })
-    if (!result.text) {
-      logger.warn('harden', 'agent task returned empty text', { sessionID, agent })
-    }
-    return result
-  } catch (error) {
-    logger.error('harden', 'agent task failed', error instanceof Error ? error : new Error(String(error)), { sessionID, agent })
-    throw error
-  }
-}
-
 function getSessionClient(ctx: OpenFlowContext): Required<SessionClientLike> {
   const client = ctx.client as SessionClientLike
   if (!client.session?.create || !client.session.prompt) {
     throw new Error('OpenFlow harden requires ctx.client.session.create() and ctx.client.session.prompt().')
   }
   return { session: client.session }
-}
-
-function buildPromptPayload(
-  sessionID: string,
-  systemPrompt: string,
-  userPrompt: string,
-  agent: 'oracle' | 'deep',
-  model: string | undefined,
-  directory: string,
-): Record<string, unknown> {
-  const fullPrompt = `${systemPrompt}\n\n## Task\n${userPrompt}`
-  const body: Record<string, unknown> = {
-    agent,
-    parts: [{ type: 'text', text: fullPrompt }],
-  }
-
-  const parsedModel = parseModel(model)
-  if (parsedModel) {
-    body.model = parsedModel
-  }
-
-  return {
-    path: { id: sessionID },
-    query: { directory },
-    body,
-  }
-}
-
-function parseModel(model: string | undefined): { providerID: string; modelID: string } | null {
-  if (!model) return null
-  const trimmed = model.trim()
-  if (!trimmed) return null
-
-  const separatorIndex = trimmed.indexOf('/')
-  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
-    return null
-  }
-
-  return {
-    providerID: trimmed.slice(0, separatorIndex),
-    modelID: trimmed.slice(separatorIndex + 1),
-  }
 }
 
 function extractFeatureArg(args: HardenArgs | undefined): string | undefined {
@@ -1272,45 +1227,8 @@ function extractSessionID(response: unknown): string {
   throw new Error('Failed to create harden subtask session.')
 }
 
-function extractText(response: unknown): string {
-  const body = extractResponseBody(response)
-  const parts = Array.isArray(body.parts) ? body.parts : []
-  const text = parts
-    .map((part) => {
-      const record = asRecord(part)
-      return typeof record.text === 'string' ? record.text : ''
-    })
-    .filter(Boolean)
-    .join('\n')
-    .trim()
-
-  if (text) return text
-  return typeof body.output === 'string' ? body.output : ''
-}
-
-function extractTokens(response: unknown): number {
-  const body = extractResponseBody(response)
-  const info = asRecord(body.info)
-  const tokens = asRecord(info.tokens)
-  const input = toNumber(tokens.input)
-  const output = toNumber(tokens.output)
-  const reasoning = toNumber(tokens.reasoning)
-  const cache = asRecord(tokens.cache)
-
-  return input + output + reasoning + toNumber(cache.read) + toNumber(cache.write)
-}
-
-function extractResponseBody(response: unknown): Record<string, unknown> {
-  const object = asRecord(response)
-  return object.data ? asRecord(object.data) : object
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
-}
-
-function toNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 function collectScopedFilePaths(findings: HardenFinding[], diffStr: string): string[] {
@@ -1374,7 +1292,7 @@ function inferReviewerStopReasonCandidate(grouped: ReturnType<typeof classifyFin
 
 function buildTraceEntry(
   round: number,
-  agent: 'oracle' | 'deep',
+  agent: 'harden-reviewer' | 'harden-executor',
   result: AgentRunResult,
   stopReasonCandidate: string,
 ): FormattedHardenTraceEntry {
@@ -1385,6 +1303,49 @@ function buildTraceEntry(
     result: result.text,
     stopReasonCandidate,
     timestamp: new Date().toISOString(),
+  }
+}
+
+function createHardenDagManager(ctx: OpenFlowContext, feature: string): HardenDagManager {
+  const scheduler = ctx.schedulerLoop
+  if (scheduler === undefined) {
+    throw new Error('OpenFlow harden requires the global SchedulerLoop to be running.')
+  }
+  const manager = new HardenDagManager(scheduler)
+  manager.createHardenDag(feature)
+  return manager
+}
+
+async function runDrgAgentTask(
+  dagManager: HardenDagManager,
+  round: number,
+  sessionID: string | undefined,
+  agent: 'harden-reviewer' | 'harden-executor',
+  systemPrompt: string,
+  userPrompt: string,
+  model?: string,
+  extraPayload: Record<string, unknown> = {},
+): Promise<AgentRunResult> {
+  const payload = { ...extraPayload, round, sessionID, agent, systemPrompt, userPrompt, model }
+  const taskId = agent === 'harden-reviewer'
+    ? dagManager.submitReviewerTask(round, payload)
+    : dagManager.submitExecutorTask(round, payload)
+  const task = await dagManager.awaitTask(taskId)
+  if (task.status !== 'succeeded') {
+    throw new Error(`Harden ${agent} task ${taskId} ended with status ${task.status}`)
+  }
+  const result = task.result ?? {}
+  return {
+    text: typeof result.text === 'string' ? result.text : '',
+    tokens: typeof result.tokens === 'number' ? result.tokens : 0,
+    ...(typeof result.sessionID === 'string' ? { sessionID: result.sessionID } : {}),
+    ...(Array.isArray(result.findings) ? { findings: result.findings as HardenFinding[] } : {}),
+    ...(typeof result.converged === 'boolean' ? { converged: result.converged } : {}),
+    ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
+    ...(Object.keys(asRecord(result.rejectedCounts)).length > 0 ? { rejectedCounts: asRecord(result.rejectedCounts) as Record<string, number> } : {}),
+    ...(Array.isArray(result.dispositions) ? { dispositions: result.dispositions } : {}),
+    ...(typeof result.fixReport === 'string' ? { fixReport: result.fixReport } : {}),
+    ...(typeof result.codeChanges === 'string' ? { codeChanges: result.codeChanges } : {}),
   }
 }
 

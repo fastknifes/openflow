@@ -1,0 +1,14 @@
+ M .codenomad/worktreeMap.json
+ M docs/changes/2026-05-31-harden-drg-async/plan.md
+ M src/commands/harden.ts
+ M src/commands/quality-gate.ts
+ M src/commands/verify.ts
+ M src/index.ts
+ M src/orchestrator/scheduler-loop.ts
+ M src/types.ts
+ M src/utils/harden-utils.ts
+?? .codenomad/background_processes/
+?? docs/changes/2026-05-31-harden-drg-async/plan.state.json
+?? openflow.jsonc
+?? src/orchestrator/harden-dag-manager.ts
+?? src/orchestrator/harden-executors.ts
