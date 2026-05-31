@@ -1,0 +1,56 @@
+{
+  "feature": "brainstorm-context-packet",
+  "convergenceStatus": "final",
+  "assumptions": [],
+  "pendingConfirmations": [],
+  "constraints": [
+    {
+      "id": "d-0001",
+      "category": "scope",
+      "severity": "may",
+      "description": "Optimize workflow steps without introducing unnecessary product surface area",
+      "rationale": "Workflow changes should streamline execution rather than expand the feature set",
+      "verificationMethod": "Review the resulting flow to confirm the simplification stays bounded",
+      "sourceQuestionId": "scope"
+    },
+    {
+      "id": "d-0002",
+      "category": "compatibility",
+      "severity": "must",
+      "description": "Preserve compatibility guarantees with existing systems and interfaces",
+      "rationale": "The feature must not break current integrations or established behavior",
+      "verificationMethod": "Validate existing callers and integration tests continue to pass unchanged",
+      "sourceQuestionId": "constraints"
+    }
+  ],
+  "scopeBoundary": {
+    "inScope": [
+      "brainstorm-context-packet workflow",
+      "Address the stated problem: 修复痛点"
+    ],
+    "outOfScope": [
+      "Large product-surface expansion beyond workflow optimization"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "ac-0001",
+      "description": "brainstorm-context-packet addresses the stated problem: 修复痛点",
+      "category": "problem"
+    },
+    {
+      "id": "ac-0002",
+      "description": "brainstorm-context-packet respects the stated constraint: 兼容现有系统",
+      "category": "constraints"
+    }
+  ],
+  "goals": [
+    "Solve: 修复痛点"
+  ],
+  "nonGoals": [
+    "Unrelated product areas or workflows",
+    "Broad product expansion outside the workflow itself"
+  ],
+  "problemStatement": "修复痛点",
+  "testingStrategy": "Use targeted tests and review to verify: 兼容现有系统"
+}

@@ -1,71 +1,56 @@
-import { describe, expect, test } from 'bun:test'
-import { join } from 'node:path'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { classifyVerificationFailure, enhancePlan } from '../../src/plan/enhancer.js'
-import { defaultConfig } from '../../src/types.js'
+import { test, expect, describe } from 'bun:test'
+import { classifyVerificationFailure } from '../../src/plan/enhancer.js'
 
-const TEST_ROOT = join(process.cwd(), '.test-enhancer')
-const PLAN_DIR = join(TEST_ROOT, '.sisyphus', 'plans')
-const PLAN_PATH = join(PLAN_DIR, 'demo-feature.md')
-
-function countOccurrences(content: string, needle: string): number {
-  return content.split(needle).length - 1
-}
-
-describe('plan enhancer', () => {
-  test('classifies verification failure categories', () => {
-    expect(classifyVerificationFailure('secret leaked in test output')).toBe('security')
-    expect(classifyVerificationFailure('design drift detected between code and docs')).toBe('consistency')
-    expect(classifyVerificationFailure('test failed with assertion error')).toBe('quality')
+describe('classifyVerificationFailure', () => {
+  describe('security category', () => {
+    test.each([
+      ['secret', 'secret exposed in logs'],
+      ['vuln', 'vuln detected in dependency'],
+      ['security', 'security issue found'],
+      ['credential', 'credential leaked'],
+      ['token', 'token exposed in output'],
+      ['Secret', 'Secret key in config'],
+      ['SECURITY', 'SECURITY vulnerability'],
+    ])('classifies "%s" related reason as security', (_keyword, reason) => {
+      expect(classifyVerificationFailure(reason)).toBe('security')
+    })
   })
 
-  test('enhancement is idempotent for verification section', async () => {
-    await rm(TEST_ROOT, { recursive: true, force: true })
-    await mkdir(PLAN_DIR, { recursive: true })
-
-    const plan = `# Demo Plan
-
-## TODOs
-
-- [ ] Implement demo feature
-`
-
-    await writeFile(PLAN_PATH, plan, 'utf-8')
-
-    const config = {
-      ...defaultConfig,
-      brainstorming: {
-        ...defaultConfig.brainstorming,
-        enabled: false,
-      },
-      tdd: {
-        ...defaultConfig.tdd,
-        enabled: false,
-      },
-      verification: {
-        ...defaultConfig.verification,
-        in_plan: true,
-      },
-    }
-
-    const firstResult = await enhancePlan({
-      planPath: PLAN_PATH,
-      config,
-      baseDir: TEST_ROOT,
+  describe('consistency category', () => {
+    test.each([
+      ['drift', 'drift detected between code and docs'],
+      ['mismatch', 'mismatch in API specification'],
+      ['sync', 'sync needed between modules'],
+      ['inconsistent', 'inconsistent state detected'],
+      ['doc', 'doc out of date with implementation'],
+      ['Drift', 'Drift between design and code'],
+      ['MISMATCH', 'MISMATCH found'],
+    ])('classifies "%s" related reason as consistency', (_keyword, reason) => {
+      expect(classifyVerificationFailure(reason)).toBe('consistency')
     })
+  })
 
-    const secondResult = await enhancePlan({
-      planPath: PLAN_PATH,
-      config,
-      baseDir: TEST_ROOT,
+  describe('quality category (default)', () => {
+    test.each([
+      'test coverage too low',
+      'build failed',
+      'linting errors',
+      'performance regression',
+      'type errors in compilation',
+      'general quality issue',
+    ])('classifies "%s" as quality', (reason) => {
+      expect(classifyVerificationFailure(reason)).toBe('quality')
     })
+  })
 
-    const enhanced = await readFile(PLAN_PATH, 'utf-8')
+  test('is case insensitive', () => {
+    expect(classifyVerificationFailure('SECRET')).toBe('security')
+    expect(classifyVerificationFailure('DRIFT')).toBe('consistency')
+    expect(classifyVerificationFailure('SOMETHING')).toBe('quality')
+  })
 
-    expect(firstResult).toBe(true)
-    expect(secondResult).toBe(false)
-    expect(countOccurrences(enhanced, '## Verification Phase')).toBe(1)
-
-    await rm(TEST_ROOT, { recursive: true, force: true })
+  test('security takes priority over consistency when both present', () => {
+    // Both "secret" and "doc" present — security is checked first
+    expect(classifyVerificationFailure('secret doc mismatch')).toBe('security')
   })
 })

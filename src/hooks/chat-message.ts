@@ -1,169 +1,194 @@
 import type { Hooks } from '@opencode-ai/plugin'
 import type { OpenFlowContext } from '../types.js'
-import { handleBrainstorm } from '../commands/brainstorm.js'
-import { normalizeBrainstormSession, isAwaitingFormalAnswer } from '../phases/brainstorm/state-machine.js'
+import type { ImplementObserver } from '../commands/implement.js'
 import { createAcceptanceHook } from './acceptance.js'
 import {
-  appendGuardMessage,
-  clearRecentBrainstormCompletion,
-  detectClosureReady,
-  decideTrigger,
+  appendOpenFlowNotice,
   extractMessageText,
-  getActiveBrainstormFeature,
-  getRecentCompletedBrainstormFeature,
   getMessageRole,
-  hasDesignDoc,
-} from './brainstorm-workflow.js'
+} from './feature-workflow.js'
+import { getContractRuntime } from '../contracts/runtime.js'
+import { dispatchOpenFlowCommand } from './chat-command-dispatch.js'
+import { getImplementationState, isFreshReadiness } from '../utils/acceptance-state.js'
+import { tArray } from '../i18n/index.js'
+import { tryAutoSaveBrainstormPacket } from '../phases/feature/brainstorm-auto-save.js'
+import {
+  isBrainstormSessionFromMetadata,
+  fetchSessionMessages,
+  deriveFeatureHint,
+} from '../utils/brainstorm-session.js'
 
-const COMPLETION_PHRASES = ['完成了', '好了', '可以收尾', 'done', 'finished', 'ready to archive']
+const COMPLETION_PHRASES = tArray('signals.completion.phrases')
+const GUARD_BLOCK_TITLE = '## OpenFlow: Completion Blocked Until Quality Gate'
+const GUARD_VERIFY_TITLE = '## OpenFlow: Verification Suggested'
 
 function isCompletionMessage(message: string): boolean {
+  // Guard recursion: quality gate reports contain "completed" but are not task completions.
+  // Treating them as completions causes the hook to append a guard that re-invokes the gate.
+  if (message.includes('## Quality Gate') || message.includes('Quality gate completed at')) {
+    return false
+  }
   const lower = message.toLowerCase()
   return COMPLETION_PHRASES.some(phrase => lower.includes(phrase))
 }
 
-export function createChatMessageHook(ctx: OpenFlowContext) {
+export function createChatMessageHook(ctx: OpenFlowContext, observer?: ImplementObserver) {
   const acceptanceHook = createAcceptanceHook(ctx)
 
   const hook: NonNullable<Hooks['chat.message']> = async (input, output): Promise<void> => {
     const rawInput = input as Record<string, unknown>
     const rawOutput = output as unknown as Record<string, unknown>
     const role = getMessageRole(rawOutput)
-    if (role && role !== 'user') return
+    // System-role messages are never processed by the hook
+    if (role === 'system') return
 
     const message = extractMessageText(rawOutput)
     if (!message) return
+    if (looksLikeInternalMessage(message)) return
+    // Guard recursion: don't re-trigger on OpenFlow's own guard messages
+    if (message.includes(GUARD_BLOCK_TITLE) || message.includes(GUARD_VERIFY_TITLE)) return
 
-    await acceptanceHook({ sessionID: input.sessionID, message })
+    if (await dispatchOpenFlowCommand(ctx, input, output, message, observer)) return
 
-    if (!ctx.config.brainstorming.enabled) {
-      return
-    }
-
-    const activeFeature = await getActiveBrainstormFeature(ctx.directory, input.sessionID)
-    if (activeFeature && !(await hasDesignDoc(ctx, activeFeature))) {
-      if (looksLikeDirectCommand(message) || isCompletionMessage(message)) {
-        return
-      }
-
-      const activeSession = await loadActiveBrainstormSession(ctx.directory, activeFeature)
-      if (!activeSession || !isAwaitingFormalAnswer(activeSession)) {
-        return
-      }
-
-      if (looksLikeFeatureSwitch(message, activeFeature)) {
-        // Let new-feature detection continue below instead of hijacking the old brainstorm.
-      } else {
-        const continuation = await handleBrainstorm(ctx, undefined, message, input)
-        appendGuardMessage(output, continuation)
-        return
-      }
-    }
-
-    if (!ctx.config.brainstorming.auto_trigger) {
-      return
-    }
-
-    const recentCompletedFeature = await getRecentCompletedBrainstormFeature(ctx.directory, input.sessionID)
-    if (recentCompletedFeature) {
-      if (looksLikePostBrainstormAction(message, recentCompletedFeature)) {
-        return
-      }
-
-      if (!looksLikePostBrainstormAction(message, recentCompletedFeature)) {
-        await clearRecentBrainstormCompletion(ctx.directory, input.sessionID)
+    // ── Brainstorm auto-save (assistant-turn, fire-and-forget) ────────
+    if (role === 'assistant') {
+      const sessionID = typeof rawInput.sessionID === 'string' ? rawInput.sessionID : undefined
+      if (sessionID && isBrainstormSessionFromMetadata(rawOutput, rawInput)) {
+        void (async () => {
+          try {
+            const messages = await fetchSessionMessages(ctx.client, sessionID)
+            if (messages.length === 0) return
+            await tryAutoSaveBrainstormPacket({
+              projectDir: ctx.directory,
+              sourceSessionID: sessionID,
+              featureHint: deriveFeatureHint(messages),
+              messages,
+              trigger: 'assistant-turn',
+              isBrainstormSession: true,
+            })
+          } catch {
+            // Silently ignore per plan constraints
+          }
+        })()
       }
     }
 
+    // ── Guardian session events (before completion guard, non-blocking) ─
+    if (ctx.config.guardian?.enabled) {
+      try {
+        const runtime = getContractRuntime()
+        if (runtime.isStarted && isCompletionMessage(message)) {
+          await runtime.dispatchSessionEvent({ type: 'session_end', sessionId: input.sessionID })
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
+    // ── Completion Guard (runs for BOTH user and assistant) ───────────
     if (ctx.config.verification.completion_prompt && isCompletionMessage(message)) {
-      appendGuardMessage(output, `## OpenFlow: Verification Suggested
-
-The task appears to be in completion state.
-
-Recommended next action before archive:
-- View verification checklist
-- Run verification now
-- Skip for now (known risk)
-
-OpenFlow keeps this prompt non-blocking.`)
-      return
+      const guardAppended = await appendCompletionGuardIfNeeded(ctx, output, message)
+      if (guardAppended) return
     }
 
-    const closureDecision = detectClosureReady(ctx, message)
-    if (closureDecision.isClosureReady && ctx.config.brainstorming.closure.auto_transition) {
-      const decision = decideTrigger(ctx, rawInput, rawOutput, message)
-      const featureHint = decision.feature ?? '<feature-name>'
-
-		appendGuardMessage(output, `## OpenFlow: Brainstorm Closure Ready
-
-Detected ${closureDecision.level} closure signal(s): ${closureDecision.matchedSignals.map(s => `\`${s}\``).join(', ')}.
-
-Next step: continue the standalone brainstorm flow until design generation completes.
-
-Recommended entrypoint:
-
-\`\`\`text
-/openflow-brainstorm ${featureHint}
-\`\`\`
-
-Generation policy:
-- Design is generated automatically when the required answers are complete.
-- OpenFlow advances one question at a time through the brainstorm skill.`)
-      return
-    }
-
-    const decision = decideTrigger(ctx, rawInput, rawOutput, message)
-    if (!decision.shouldTrigger || !decision.feature) return
-
-    if (await hasDesignDoc(ctx, decision.feature)) return
-
-		appendGuardMessage(output, `## OpenFlow: Brainstorm Suggested
-
-Feature \`${decision.feature}\` does not have design docs yet.
-
-Recommended next step before implementation:
-
-\`\`\`
-/openflow-brainstorm ${decision.feature}
-\`\`\`
-
-OpenFlow only suggests this step. It does not block research, reading, or implementation tools.`)
+    // ── Acceptance detection ─
+    await acceptanceHook({ sessionID: input.sessionID, message })
   }
 
   return hook
 }
 
-function looksLikeDirectCommand(message: string): boolean {
-  const trimmed = message.trim()
-  return trimmed.startsWith('/openflow-') || trimmed.includes('skill(name="openflow-brainstorm"') || trimmed.includes("skill(name='openflow-brainstorm'")
-}
-
-function looksLikeFeatureSwitch(message: string, activeFeature: string): boolean {
-  const normalized = message.toLowerCase()
-  if (!/(我想实现|我要实现|新的功能|新功能|另一个功能|another feature|new feature)/i.test(message)) {
+/**
+ * Append a completion guard to the output when the message contains
+ * completion semantics and implementation state is dirty/stale/blocked.
+ *
+ * Returns true when a guard was appended (caller should return early).
+ * Returns false when no guard was needed (caller should continue).
+ *
+ * Guards are applied for BOTH user and assistant messages.
+ * OpenFlow's own guard messages are detected and skipped (recursion guard).
+ */
+async function appendCompletionGuardIfNeeded(
+  ctx: OpenFlowContext,
+  output: Record<string, unknown>,
+  message: string,
+): Promise<boolean> {
+  if (!ctx.config.verification.completion_prompt || !isCompletionMessage(message)) {
     return false
   }
 
-  return !normalized.includes(activeFeature.toLowerCase())
-}
+  // Don't append if output already has a guard (duplicate prevention)
+  if (hasNotice(output, GUARD_BLOCK_TITLE) || hasNotice(output, GUARD_VERIFY_TITLE)) {
+    return false
+  }
 
-function looksLikePostBrainstormAction(message: string, feature: string): boolean {
-  const normalized = message.toLowerCase()
-  if (normalized.includes(feature.toLowerCase())) {
+  const implementationState = await getImplementationState(ctx.directory)
+  const hasFreshReadiness = implementationState ? await isFreshReadiness(ctx.directory) : false
+
+  if (implementationState && !hasFreshReadiness && ['dirty', 'stale', 'blocked'].includes(implementationState.state)) {
+    const invocationCount = implementationState.qualityGateInvocationCount ?? 0
+    if (invocationCount >= 3) {
+      appendOpenFlowNotice(output, {
+        kind: 'verification-suggested',
+        text: `## OpenFlow: Quality Gate Retry Limit Reached
+
+The implementation state is \`${implementationState.state}\` and the quality gate has already been invoked ${invocationCount} time${invocationCount === 1 ? '' : 's'}.
+
+Required next action:
+- Report the blockers to the user and ask for guidance
+- Do NOT re-invoke the quality gate again`,
+        ephemeral: false,
+        placement: 'prepend',
+      })
+      return true
+    }
+
+    appendOpenFlowNotice(output, {
+      kind: 'completion-blocked',
+      text: `## OpenFlow: Completion Blocked Until Quality Gate
+
+The task appears to be in completion state during formal implementation, but the current implementation state is \`${implementationState.state}\`.
+
+Required next action before claiming completion:
+- Run Full Quality Gate: \`openflow-quality-gate\` (max 3 total invocations)
+- Resolve the reported readiness issues
+- Re-check completion after the quality gate is clean`,
+      ephemeral: false,
+      placement: 'prepend',
+    })
     return true
   }
 
-  return /(实现|开始做|开始开发|编码|落地|archive|归档|verify|验证|start-work|ulw-loop|implement|build|code)/i.test(message)
+  appendOpenFlowNotice(output, {
+    kind: 'verification-suggested',
+    text: `## OpenFlow: Verification Suggested
+
+The task appears to be in completion state.
+
+Recommended next action:
+- For formal implementation: run Full Quality Gate with \`openflow-quality-gate\`
+- For casual coding or low-risk edits: perform lightweight verification (diff review, relevant tests, typecheck, lint)
+- Skip for now (known risk)
+
+OpenFlow keeps this prompt non-blocking.`,
+    ephemeral: false,
+    placement: 'prepend',
+  })
+  return true
 }
 
-async function loadActiveBrainstormSession(directory: string, feature: string) {
-  try {
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
-    const filePath = path.join(directory, '.sisyphus', 'brainstorm', `${feature}.json`)
-    const content = await fs.readFile(filePath, 'utf-8')
-    return normalizeBrainstormSession(feature, JSON.parse(content) as unknown)
-  } catch {
-    return undefined
-  }
+function looksLikeInternalMessage(message: string): boolean {
+  return /<\/?(?:system-reminder|auto-slash-command|command-message|omo_internal_initiator)\b/i.test(message)
+    || /\[ALL BACKGROUND TASKS COMPLETE\]/i.test(message)
 }
+
+function hasNotice(output: Record<string, unknown>, noticeTitle: string): boolean {
+  const parts = Array.isArray(output.parts) ? output.parts : []
+  return parts.some((part) => {
+    const rawPart = part as Record<string, unknown>
+    return rawPart.type === 'text' && typeof rawPart.text === 'string' && rawPart.text.includes(noticeTitle)
+  })
+}
+
+
+

@@ -1,0 +1,80 @@
+{
+  "feature": "openflow-human-review-handoff-ai-openflow-worktree-review",
+  "featureTitle": "为 OpenFlow 实现期增加 human review handoff 状态。AI 写完代码后，OpenFlow 进入人工审核交接，输出 worktree 路径、分支、启动命令、测试命令，允许 review checkpoint commit（非最终提交），最终 archive 时才创建代表完成的正式 commit。",
+  "sourceIntent": "为 OpenFlow 实现期增加 human review handoff 状态。AI 写完代码后，OpenFlow 进入人工审核交接，输出 worktree 路径、分支、启动命令、测试命令，允许 review checkpoint commit（非最终提交），最终 archive 时才创建代表完成的正式 commit。",
+  "convergenceStatus": "final",
+  "assumptions": [],
+  "pendingConfirmations": [],
+  "constraints": [
+    {
+      "id": "d-0001",
+      "category": "scope",
+      "severity": "may",
+      "description": "Optimize workflow steps without introducing unnecessary product surface area",
+      "rationale": "Workflow changes should streamline execution rather than expand the feature set",
+      "verificationMethod": "Review the resulting flow to confirm the simplification stays bounded",
+      "sourceQuestionId": "scope"
+    },
+    {
+      "id": "d-0002",
+      "category": "maintainability",
+      "severity": "should",
+      "description": "Favor code clarity and maintainable structure in the implementation",
+      "rationale": "The feature should remain easy to understand and support over time",
+      "verificationMethod": "Use code review to confirm naming, structure, and responsibilities stay clear",
+      "sourceQuestionId": "priority"
+    },
+    {
+      "id": "d-0003",
+      "category": "compatibility",
+      "severity": "must",
+      "description": "Preserve compatibility guarantees with existing systems and interfaces",
+      "rationale": "The feature must not break current integrations or established behavior",
+      "verificationMethod": "Validate existing callers and integration tests continue to pass unchanged",
+      "sourceQuestionId": "constraints"
+    }
+  ],
+  "scopeBoundary": {
+    "inScope": [
+      "openflow-human-review-handoff-ai-openflow-worktree-review workflow",
+      "Address the stated problem: 改善体验"
+    ],
+    "outOfScope": [
+      "Large product-surface expansion beyond workflow optimization"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "ac-0001",
+      "description": "openflow-human-review-handoff-ai-openflow-worktree-review addresses the stated problem: 改善体验",
+      "category": "problem"
+    },
+    {
+      "id": "ac-0002",
+      "description": "openflow-human-review-handoff-ai-openflow-worktree-review works for the target users: 内部开发者",
+      "category": "target-users"
+    },
+    {
+      "id": "ac-0003",
+      "description": "openflow-human-review-handoff-ai-openflow-worktree-review implementation reflects the selected priority: 易维护",
+      "category": "priority"
+    },
+    {
+      "id": "ac-0004",
+      "description": "openflow-human-review-handoff-ai-openflow-worktree-review respects the stated constraint: 兼容现有系统",
+      "category": "constraints"
+    }
+  ],
+  "goals": [
+    "Solve: 改善体验",
+    "Serve target users: 内部开发者",
+    "Honor priority: 易维护"
+  ],
+  "nonGoals": [
+    "Unrelated product areas or workflows",
+    "Broad product expansion outside the workflow itself"
+  ],
+  "problemStatement": "改善体验",
+  "targetUsers": "内部开发者",
+  "testingStrategy": "Use targeted tests and review to verify: 易维护, 兼容现有系统"
+}

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="420" viewBox="0 0 1120 420" role="img" aria-labelledby="title desc">
+  <title id="title">归档工作原理</title><desc id="desc">归档读取 readiness、复制工作文档、提升 current 并生成 implementation-mapper。</desc>
+  <defs><style>.bg{fill:#f8fafc}.in{fill:#eef6ff;stroke:#2563eb;stroke-width:2;rx:16}.proc{fill:#fff7ed;stroke:#f97316;stroke-width:2;rx:16}.out{fill:#f0fdf4;stroke:#16a34a;stroke-width:2;rx:16}.t{font:600 20px system-ui,Segoe UI,sans-serif;fill:#0f172a}.s{font:14px system-ui,Segoe UI,sans-serif;fill:#475569}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker></defs>
+  <rect class="bg" width="1120" height="420" rx="24"/>
+  <text x="40" y="48" class="t">/openflow-archive：把完成状态固化为长期项目知识</text>
+  <rect class="in" x="55" y="80" width="220" height="92"/><text x="85" y="116" class="t">Quality readiness</text><text x="88" y="145" class="s">Ready / ReadyWithDocUpdates</text>
+  <rect class="in" x="55" y="220" width="220" height="92"/><text x="95" y="256" class="t">工作区文档</text><text x="88" y="285" class="s">design / behavior / plan / issue</text>
+  <rect class="proc" x="360" y="145" width="220" height="105"/><text x="412" y="184" class="t">Archive</text><text x="390" y="214" class="s">校验 readiness + 收集证据</text>
+  <rect class="out" x="665" y="55" width="220" height="90"/><text x="700" y="90" class="t">docs/archive</text><text x="695" y="119" class="s">冻结历史上下文</text>
+  <rect class="out" x="665" y="165" width="220" height="90"/><text x="700" y="200" class="t">docs/current</text><text x="690" y="229" class="s">提升已确认事实</text>
+  <rect class="out" x="665" y="275" width="220" height="90"/><text x="690" y="310" class="t">implementation-mapper</text><text x="695" y="339" class="s">需求 → 代码 → 证据</text>
+  <rect class="out" x="940" y="165" width="135" height="90"/><text x="977" y="200" class="t">完成</text><text x="958" y="229" class="s">可追溯工程状态</text>
+  <path class="arrow" d="M275 126C320 135 330 170 358 180"/><path class="arrow" d="M275 266C320 258 330 225 358 213"/><path class="arrow" d="M580 185C630 140 635 100 663 100"/><path class="arrow" d="M580 200H663"/><path class="arrow" d="M580 218C630 260 635 320 663 320"/><path class="arrow" d="M885 210H938"/>
+</svg>

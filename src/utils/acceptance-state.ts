@@ -1,8 +1,18 @@
-import * as fs from 'node:fs/promises'
+﻿import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { VerifyReadinessStatus, type AcceptanceState, type ArchiveDocUpdateConfirmationStatus, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult } from '../types.js'
+import { VerifyReadinessStatus, type AcceptanceState, type AcceptedKnownIssueSummary, type ArchiveDocUpdateConfirmationStatus, type EvidenceFreshnessMetadata, type HardenTerminalSummary, type PendingDocUpdate, type DevelopmentPhase, type VerificationFailureCategory, type CurrentPromotionSuggestion, type VerifyDecisionType, type VerifyResult, type IssueClassification, type GovernancePromotionStatus, type ImplementationState, type ImplementationStateMetadata, type QualityGateApplicabilityResult } from '../types.js'
 import { getAcceptanceStatePath } from '../config.js'
 import { logger } from './logger.js'
+
+export type {
+  HardenContractSource,
+  HardenFindingConfidence,
+  HardenFindingLevel,
+  HardenImplementationAlignment,
+  HardenIntentEvidenceReference,
+  HardenIntentInference,
+  HardenIntentInferenceDecision,
+} from '../types.js'
 
 const HEADER = `# OpenFlow Acceptance State
 
@@ -26,6 +36,7 @@ const FIELD_PREFIXES = {
   archiveUsedDocUpdateConfirmPath: 'archiveUsedDocUpdateConfirmPath:',
   archiveDocUpdateConfirmationStatus: 'archiveDocUpdateConfirmationStatus:',
   archiveDocUpdateConfirmedAt: 'archiveDocUpdateConfirmedAt:',
+  acceptedFailures: 'acceptedFailures:',
   promotionApplied: 'promotionApplied:',
   promotionDecidedAt: 'promotionDecidedAt:',
   promotionAppliedAt: 'promotionAppliedAt:',
@@ -35,6 +46,30 @@ const FIELD_PREFIXES = {
   readinessEvidenceSummary: 'readinessEvidenceSummary:',
   readinessConstraintsChecked: 'readinessConstraintsChecked:',
   readinessVerifiedAt: 'readinessVerifiedAt:',
+  hardenSummary: 'hardenSummary:',
+  mode: 'mode:',
+  issueSlug: 'issueSlug:',
+  rawIssue: 'rawIssue:',
+  primaryClassification: 'primaryClassification:',
+  classifications: 'classifications:',
+  governancePromotionStatus: 'governancePromotionStatus:',
+  issueClarificationPath: 'issueClarificationPath:',
+  promotionCandidatePath: 'promotionCandidatePath:',
+  implementationState: 'implementationState:',
+  implementationStateUpdatedAt: 'implementationStateUpdatedAt:',
+  implementationStateChangedFiles: 'implementationStateChangedFiles:',
+  implementationStateGitHead: 'implementationStateGitHead:',
+  implementationStateFromVerify: 'implementationStateFromVerify:',
+  qualityGateApplicability: 'qualityGateApplicability:',
+  postHocIssue: 'postHocIssue:',
+  evidenceFreshnessGitHead: 'evidenceFreshnessGitHead:',
+  evidenceFreshnessChangedFiles: 'evidenceFreshnessChangedFiles:',
+  evidenceFreshnessDiffHash: 'evidenceFreshnessDiffHash:',
+  evidenceFreshnessRecordedAt: 'evidenceFreshnessRecordedAt:',
+  evidenceFreshnessEvidenceChecks: 'evidenceFreshnessEvidenceChecks:',
+  evidenceFreshnessEvidenceSummary: 'evidenceFreshnessEvidenceSummary:',
+  archiveRunConfirmationStatus: 'archiveRunConfirmationStatus:',
+  archiveRunConfirmedAt: 'archiveRunConfirmedAt:',
 } as const
 
 const PROMOTION_SUGGESTIONS_HEADER = '## Current Promotion Suggestions'
@@ -54,6 +89,15 @@ function parseStateFile(content: string): AcceptanceState | null {
   let readinessConstraintsChecked: string[] = []
   let readinessVerifiedAt: string | undefined
   let hasReadinessField = false
+  const freshnessMeta: {
+    gitHead?: string
+    changedFiles?: string[]
+    diffHash?: string
+    recordedAt?: string
+    evidenceChecks?: string[]
+    evidenceSummary?: string
+  } = {}
+  const implementationState: Partial<ImplementationStateMetadata> = {}
   
   let inPendingUpdates = false
   
@@ -101,6 +145,10 @@ function parseStateFile(content: string): AcceptanceState | null {
     } else if (trimmed.startsWith(FIELD_PREFIXES.archiveDocUpdateConfirmedAt)) {
       result.archiveDocUpdateConfirmedAt = extractFieldValue(trimmed, FIELD_PREFIXES.archiveDocUpdateConfirmedAt)
       inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.acceptedFailures)) {
+      const value = extractFieldValue(trimmed, FIELD_PREFIXES.acceptedFailures)
+      result.acceptedFailures = value === 'true'
+      inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.promotionApplied)) {
       const value = extractFieldValue(trimmed, FIELD_PREFIXES.promotionApplied)
       result.promotionApplied = value === 'true'
@@ -134,6 +182,81 @@ function parseStateFile(content: string): AcceptanceState | null {
     } else if (trimmed.startsWith(FIELD_PREFIXES.readinessVerifiedAt)) {
       readinessVerifiedAt = extractFieldValue(trimmed, FIELD_PREFIXES.readinessVerifiedAt)
       hasReadinessField = true
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.hardenSummary)) {
+      result.hardenSummary = extractFieldValue(trimmed, FIELD_PREFIXES.hardenSummary)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.mode)) {
+      result.mode = extractFieldValue(trimmed, FIELD_PREFIXES.mode) as 'feature' | 'issue'
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.issueSlug)) {
+      result.issueSlug = extractFieldValue(trimmed, FIELD_PREFIXES.issueSlug)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.rawIssue)) {
+      result.rawIssue = extractFieldValue(trimmed, FIELD_PREFIXES.rawIssue)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.primaryClassification)) {
+      result.primaryClassification = extractFieldValue(trimmed, FIELD_PREFIXES.primaryClassification) as IssueClassification
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.classifications)) {
+      result.classifications = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.classifications)) as IssueClassification[]
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.governancePromotionStatus)) {
+      result.governancePromotionStatus = extractFieldValue(trimmed, FIELD_PREFIXES.governancePromotionStatus) as GovernancePromotionStatus
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.issueClarificationPath)) {
+      result.issueClarificationPath = extractFieldValue(trimmed, FIELD_PREFIXES.issueClarificationPath)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.promotionCandidatePath)) {
+      result.promotionCandidatePath = extractFieldValue(trimmed, FIELD_PREFIXES.promotionCandidatePath)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationState)) {
+      implementationState.state = extractFieldValue(trimmed, FIELD_PREFIXES.implementationState) as ImplementationState
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateUpdatedAt)) {
+      implementationState.updatedAt = extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateUpdatedAt)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateChangedFiles)) {
+      implementationState.changedFiles = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateChangedFiles))
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateGitHead)) {
+      implementationState.gitHead = extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateGitHead)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.implementationStateFromVerify)) {
+      implementationState.fromVerify = extractFieldValue(trimmed, FIELD_PREFIXES.implementationStateFromVerify) === 'true'
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.qualityGateApplicability)) {
+      try { result.qualityGateApplicability = JSON.parse(extractFieldValue(trimmed, FIELD_PREFIXES.qualityGateApplicability)) } catch { /* ignore */ }
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.postHocIssue)) {
+      result.postHocIssue = extractFieldValue(trimmed, FIELD_PREFIXES.postHocIssue) === 'true'
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessGitHead)) {
+      freshnessMeta.gitHead = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessGitHead)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessChangedFiles)) {
+      freshnessMeta.changedFiles = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessChangedFiles))
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessDiffHash)) {
+      freshnessMeta.diffHash = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessDiffHash)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessRecordedAt)) {
+      freshnessMeta.recordedAt = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessRecordedAt)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessEvidenceChecks)) {
+      freshnessMeta.evidenceChecks = parseCommaSeparatedField(extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessEvidenceChecks))
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessEvidenceSummary)) {
+      freshnessMeta.evidenceSummary = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessEvidenceSummary)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.archiveRunConfirmationStatus)) {
+      const value = extractFieldValue(trimmed, FIELD_PREFIXES.archiveRunConfirmationStatus)
+      if (value === 'confirmed' || value === 'awaiting') {
+        result.archiveRunConfirmationStatus = value
+      }
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.archiveRunConfirmedAt)) {
+      result.archiveRunConfirmedAt = extractFieldValue(trimmed, FIELD_PREFIXES.archiveRunConfirmedAt)
       inPendingUpdates = false
     } else if (trimmed === PENDING_UPDATES_HEADER) {
       inPendingUpdates = true
@@ -213,6 +336,9 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.archiveDocUpdateConfirmedAt) {
     state.archiveDocUpdateConfirmedAt = result.archiveDocUpdateConfirmedAt
   }
+  if (result.acceptedFailures !== undefined) {
+    state.acceptedFailures = result.acceptedFailures
+  }
   if (result.promotionSuggestions && result.promotionSuggestions.length > 0) {
     state.promotionSuggestions = result.promotionSuggestions
   }
@@ -228,6 +354,40 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.readiness) {
     state.readiness = result.readiness
   }
+  if (result.hardenSummary) {
+    state.hardenSummary = result.hardenSummary
+    try {
+      const parsed = JSON.parse(result.hardenSummary) as Partial<HardenTerminalSummary> & {
+        acceptedKnownIssues?: AcceptedKnownIssueSummary[]
+      }
+      if (Array.isArray(parsed.acceptedKnownIssues) && parsed.acceptedKnownIssues.length > 0) {
+        state.acceptedKnownIssues = parsed.acceptedKnownIssues
+      }
+      const status = parsed.status
+      const stopReason = parsed.stopReason
+      const unresolvedMustFixCount = parsed.unresolvedMustFixCount
+      const unresolvedNeedsDecisionCount = parsed.unresolvedNeedsDecisionCount
+      const acceptedKnownIssueCount = parsed.acceptedKnownIssueCount
+      if (typeof status === 'string'
+        && typeof stopReason === 'string'
+        && typeof unresolvedMustFixCount === 'number'
+        && typeof unresolvedNeedsDecisionCount === 'number'
+        && typeof acceptedKnownIssueCount === 'number') {
+        const terminalSummary: HardenTerminalSummary = {
+          status,
+          stopReason,
+          unresolvedMustFixCount,
+          unresolvedNeedsDecisionCount,
+          acceptedKnownIssueCount,
+        }
+        state.hardenTerminalSummary = {
+          ...terminalSummary,
+        }
+      }
+    } catch {
+      // ignore invalid stored summary to preserve backward compatibility
+    }
+  }
   if (hasReadinessField) {
     state.verifyResult = {
       readiness: result.readiness ?? state.readiness ?? VerifyReadinessStatus.NotReady,
@@ -241,9 +401,76 @@ function parseStateFile(content: string): AcceptanceState | null {
     }
   }
 
+  // Evidence freshness metadata (reconstructed via freshnessMeta by parsing block above)
+  if (freshnessMeta.gitHead && freshnessMeta.recordedAt) {
+    state.evidenceFreshness = {
+      gitHead: freshnessMeta.gitHead,
+      changedFiles: freshnessMeta.changedFiles ?? [],
+      diffHash: freshnessMeta.diffHash ?? '',
+      recordedAt: freshnessMeta.recordedAt,
+      evidenceChecks: freshnessMeta.evidenceChecks ?? [],
+      evidenceSummary: freshnessMeta.evidenceSummary ?? '',
+    }
+  }
+
   // Legacy compatibility: verification_failed implies not_ready
   if (state.phase === 'verification_failed' && !state.readiness) {
     state.readiness = VerifyReadinessStatus.NotReady
+  }
+
+  // Issue-mode fields (legacy files without mode default to 'feature')
+  state.mode = result.mode || 'feature'
+  if (result.issueSlug) {
+    state.issueSlug = result.issueSlug
+  }
+  if (result.rawIssue) {
+    state.rawIssue = result.rawIssue
+  }
+  if (result.primaryClassification) {
+    state.primaryClassification = result.primaryClassification
+  }
+  if (result.classifications && result.classifications.length > 0) {
+    state.classifications = result.classifications
+  }
+  if (result.governancePromotionStatus) {
+    state.governancePromotionStatus = result.governancePromotionStatus
+  }
+  if (result.issueClarificationPath) {
+    state.issueClarificationPath = result.issueClarificationPath
+  }
+  if (result.promotionCandidatePath) {
+    state.promotionCandidatePath = result.promotionCandidatePath
+  }
+
+  // Carry-over implementation state from flat fields
+  if (implementationState.state) {
+    state.implementationState = {
+      state: implementationState.state,
+      updatedAt: implementationState.updatedAt || state.phaseStartedAt,
+    }
+    if (implementationState.changedFiles && implementationState.changedFiles.length > 0) {
+      state.implementationState.changedFiles = implementationState.changedFiles
+    }
+    if (implementationState.gitHead) {
+      state.implementationState.gitHead = implementationState.gitHead
+    }
+    if (implementationState.fromVerify !== undefined) {
+      state.implementationState.fromVerify = implementationState.fromVerify
+    }
+  }
+
+  // Carry-over quality gate applicability
+  if (result.qualityGateApplicability) {
+    state.qualityGateApplicability = result.qualityGateApplicability as QualityGateApplicabilityResult
+  }
+  if (result.postHocIssue !== undefined) {
+    state.postHocIssue = result.postHocIssue
+  }
+  if (result.archiveRunConfirmationStatus) {
+    state.archiveRunConfirmationStatus = result.archiveRunConfirmationStatus
+  }
+  if (result.archiveRunConfirmedAt) {
+    state.archiveRunConfirmedAt = result.archiveRunConfirmedAt
   }
   
   return state
@@ -271,6 +498,9 @@ function serializeState(state: AcceptanceState): string {
   }
   pushOptionalLine(lines, FIELD_PREFIXES.archiveDocUpdateConfirmationStatus, state.archiveDocUpdateConfirmationStatus)
   pushOptionalLine(lines, FIELD_PREFIXES.archiveDocUpdateConfirmedAt, state.archiveDocUpdateConfirmedAt)
+  if (state.acceptedFailures !== undefined) {
+    lines.push(`${FIELD_PREFIXES.acceptedFailures} ${state.acceptedFailures}`)
+  }
   if (state.promotionApplied !== undefined) {
     lines.push(`${FIELD_PREFIXES.promotionApplied} ${state.promotionApplied}`)
   }
@@ -284,6 +514,60 @@ function serializeState(state: AcceptanceState): string {
     pushOptionalLine(lines, FIELD_PREFIXES.readinessConstraintsChecked, state.verifyResult.constraintsChecked.join(', '))
     pushOptionalLine(lines, FIELD_PREFIXES.readinessVerifiedAt, state.verifyResult.verifiedAt)
   }
+  if (state.hardenSummary) {
+    pushOptionalLine(lines, FIELD_PREFIXES.hardenSummary, state.hardenSummary)
+  } else {
+    if (state.hardenTerminalSummary || state.acceptedKnownIssues) {
+      const summaryPayload = {
+        ...(state.hardenTerminalSummary
+          ? state.hardenTerminalSummary
+          : {}),
+        ...(state.acceptedKnownIssues
+          ? { acceptedKnownIssues: state.acceptedKnownIssues }
+          : {}),
+      }
+      if (Object.keys(summaryPayload).length > 0) {
+        pushOptionalLine(lines, FIELD_PREFIXES.hardenSummary, JSON.stringify(summaryPayload))
+      }
+    }
+  }
+  if (state.evidenceFreshness) {
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessRecordedAt, state.evidenceFreshness.recordedAt)
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessGitHead, state.evidenceFreshness.gitHead)
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessChangedFiles, state.evidenceFreshness.changedFiles.join(', '))
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessDiffHash, state.evidenceFreshness.diffHash)
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessEvidenceChecks, state.evidenceFreshness.evidenceChecks.join(', '))
+    pushOptionalLine(lines, FIELD_PREFIXES.evidenceFreshnessEvidenceSummary, state.evidenceFreshness.evidenceSummary)
+  }
+  if (state.implementationState) {
+    pushOptionalLine(lines, FIELD_PREFIXES.implementationState, state.implementationState.state)
+    pushOptionalLine(lines, FIELD_PREFIXES.implementationStateUpdatedAt, state.implementationState.updatedAt)
+    if (state.implementationState.changedFiles && state.implementationState.changedFiles.length > 0) {
+      pushOptionalLine(lines, FIELD_PREFIXES.implementationStateChangedFiles, state.implementationState.changedFiles.join(', '))
+    }
+    pushOptionalLine(lines, FIELD_PREFIXES.implementationStateGitHead, state.implementationState.gitHead)
+    if (state.implementationState.fromVerify !== undefined) {
+      lines.push(`${FIELD_PREFIXES.implementationStateFromVerify} ${state.implementationState.fromVerify}`)
+    }
+  }
+  if (state.qualityGateApplicability) {
+    pushOptionalLine(lines, FIELD_PREFIXES.qualityGateApplicability, JSON.stringify(state.qualityGateApplicability))
+  }
+  if (state.postHocIssue !== undefined) {
+    lines.push(`${FIELD_PREFIXES.postHocIssue} ${state.postHocIssue}`)
+  }
+  pushOptionalLine(lines, FIELD_PREFIXES.archiveRunConfirmationStatus, state.archiveRunConfirmationStatus)
+  pushOptionalLine(lines, FIELD_PREFIXES.archiveRunConfirmedAt, state.archiveRunConfirmedAt)
+  pushOptionalLine(lines, FIELD_PREFIXES.mode, state.mode)
+  pushOptionalLine(lines, FIELD_PREFIXES.issueSlug, state.issueSlug)
+  pushOptionalLine(lines, FIELD_PREFIXES.rawIssue, state.rawIssue)
+  pushOptionalLine(lines, FIELD_PREFIXES.primaryClassification, state.primaryClassification)
+  if (state.classifications && state.classifications.length > 0) {
+    pushOptionalLine(lines, FIELD_PREFIXES.classifications, state.classifications.join(', '))
+  }
+  pushOptionalLine(lines, FIELD_PREFIXES.governancePromotionStatus, state.governancePromotionStatus)
+  pushOptionalLine(lines, FIELD_PREFIXES.issueClarificationPath, state.issueClarificationPath)
+  pushOptionalLine(lines, FIELD_PREFIXES.promotionCandidatePath, state.promotionCandidatePath)
   lines.push('')
   
   lines.push(PENDING_UPDATES_HEADER)
@@ -457,17 +741,353 @@ export async function markImplementationComplete(projectDir: string): Promise<vo
   }
 }
 
+// ──────────────────────────────────────────────
+// Implementation State Tracking
+// ──────────────────────────────────────────────
+
+type ImplementationStateTransitionOptions = {
+  changedFiles?: string[]
+  gitHead?: string
+  qualityGateInvocationCount?: number
+}
+
+function normalizeImplementationState(state: AcceptanceState): ImplementationStateMetadata {
+  if (state.implementationState) {
+    return state.implementationState
+  }
+  return {
+    state: 'clean',
+    updatedAt: state.phaseStartedAt,
+  }
+}
+
+function createImplementationStateMetadata(
+  state: ImplementationState,
+  opts?: ImplementationStateTransitionOptions,
+): ImplementationStateMetadata {
+  const metadata: ImplementationStateMetadata = {
+    state,
+    updatedAt: formatTimestamp(),
+  }
+  if (opts?.changedFiles) {
+    metadata.changedFiles = opts.changedFiles
+  }
+  if (opts?.gitHead) {
+    metadata.gitHead = opts.gitHead
+  }
+  if (opts?.qualityGateInvocationCount !== undefined) {
+    metadata.qualityGateInvocationCount = opts.qualityGateInvocationCount
+  }
+  return metadata
+}
+
+async function updateImplementationState(
+  projectDir: string,
+  metadata: ImplementationStateMetadata,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) return
+  state.implementationState = metadata
+  await saveAcceptanceState(projectDir, state)
+}
+
+export async function markImplementationDirty(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions,
+): Promise<void> {
+  const existing = await getImplementationState(projectDir)
+  const metadata = createImplementationStateMetadata('dirty', opts)
+  if (existing?.qualityGateInvocationCount !== undefined) {
+    metadata.qualityGateInvocationCount = existing.qualityGateInvocationCount
+  }
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function markImplementationVerified(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions,
+): Promise<void> {
+  const metadata = createImplementationStateMetadata('verified', opts)
+  metadata.fromVerify = true
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function markImplementationStale(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions,
+): Promise<void> {
+  const existing = await getImplementationState(projectDir)
+  const metadata = createImplementationStateMetadata('stale', opts)
+  if (existing?.qualityGateInvocationCount !== undefined) {
+    metadata.qualityGateInvocationCount = existing.qualityGateInvocationCount
+  }
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function markImplementationBlocked(
+  projectDir: string,
+  opts?: ImplementationStateTransitionOptions & { fromVerify?: boolean },
+): Promise<void> {
+  const metadata = createImplementationStateMetadata('blocked', opts)
+  if (opts?.fromVerify !== undefined) {
+    metadata.fromVerify = opts.fromVerify
+  }
+  await updateImplementationState(projectDir, metadata)
+}
+
+export async function clearImplementationState(projectDir: string): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) return
+  delete state.implementationState
+  await saveAcceptanceState(projectDir, state)
+}
+
+export async function getImplementationState(projectDir: string): Promise<ImplementationStateMetadata | null> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) return null
+  return normalizeImplementationState(state)
+}
+
+export async function isFreshReadiness(projectDir: string): Promise<boolean> {
+  const implState = await getImplementationState(projectDir)
+  if (!implState) return false
+  return implState.state === 'clean' || implState.state === 'verified'
+}
+
 export async function saveVerifyResult(
   projectDir: string,
-  verifyResult: VerifyResult
+  verifyResult: VerifyResult,
+  freshnessMetadata?: EvidenceFreshnessMetadata,
+  feature?: string,
 ): Promise<void> {
   const state = await loadAcceptanceState(projectDir)
   if (!state) {
     logger.warn('Cannot save verify result: no active acceptance state')
     return
   }
+  // Guard: if the loaded state belongs to a different feature, create a new
+  // acceptance state for the target feature instead of overwriting the stale one.
+  if (feature && state.feature !== feature) {
+    logger.warn('Acceptance state feature mismatch — creating target-feature state for verify result', {
+      expectedFeature: feature,
+      staleFeature: state.feature,
+    })
+    const targetState: AcceptanceState = {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: new Date().toISOString(),
+      pendingDocUpdates: [],
+    }
+    targetState.readiness = verifyResult.readiness
+    targetState.verifyResult = verifyResult
+    if (freshnessMetadata) {
+      targetState.evidenceFreshness = freshnessMetadata
+    }
+    await saveAcceptanceState(projectDir, targetState)
+    logger.info('Saved verify result to new acceptance state', { feature, readiness: verifyResult.readiness })
+    return
+  }
   state.readiness = verifyResult.readiness
   state.verifyResult = verifyResult
+  if (freshnessMetadata) {
+    state.evidenceFreshness = freshnessMetadata
+  }
   await saveAcceptanceState(projectDir, state)
   logger.info('Saved verify result', { feature: state.feature, readiness: verifyResult.readiness })
+}
+
+/**
+ * Record evidence freshness metadata against an existing acceptance state
+ * without overwriting the verify result. Use this to update freshness
+ * tracking when evidence is reused or supplemental checks are added.
+ */
+export async function recordEvidenceFreshness(
+  projectDir: string,
+  metadata: EvidenceFreshnessMetadata,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot record evidence freshness: no active acceptance state')
+    return
+  }
+  state.evidenceFreshness = metadata
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Recorded evidence freshness', { feature: state.feature, recordedAt: metadata.recordedAt })
+}
+
+export interface IssueClarificationState {
+  issueSlug: string
+  rawIssue: string
+  primaryClassification?: IssueClassification
+  classifications?: IssueClassification[]
+  governancePromotionStatus?: GovernancePromotionStatus
+  issueClarificationPath?: string
+  promotionCandidatePath?: string
+}
+
+export async function saveIssueClarificationState(
+  projectDir: string,
+  issueState: IssueClarificationState
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot save issue clarification state: no active acceptance state')
+    return
+  }
+  state.mode = 'issue'
+  state.issueSlug = issueState.issueSlug
+  state.rawIssue = issueState.rawIssue
+  if (issueState.primaryClassification) {
+    state.primaryClassification = issueState.primaryClassification
+  }
+  if (issueState.classifications) {
+    state.classifications = issueState.classifications
+  }
+  if (issueState.governancePromotionStatus) {
+    state.governancePromotionStatus = issueState.governancePromotionStatus
+  }
+  if (issueState.issueClarificationPath) {
+    state.issueClarificationPath = issueState.issueClarificationPath
+  }
+  if (issueState.promotionCandidatePath) {
+    state.promotionCandidatePath = issueState.promotionCandidatePath
+  }
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Saved issue clarification state', { feature: state.feature, issueSlug: issueState.issueSlug })
+}
+
+// ──────────────────────────────────────────────
+// Limited-Context State Management
+// ──────────────────────────────────────────────
+
+/**
+ * Create a limited-context acceptance state for implementation work
+ * that was detected outside of an active OpenFlow workflow session.
+ * This prevents AI from modifying code and claiming completion without
+ * going through a quality gate.
+ */
+export async function createLimitedContextState(
+  projectDir: string,
+  filePath: string,
+  sessionID?: string,
+): Promise<void> {
+  const feature = `limited-context-${Date.now()}`
+  const state: AcceptanceState = {
+    feature,
+    phase: 'acceptance',
+    phaseStartedAt: formatTimestamp(),
+    pendingDocUpdates: [],
+    ...(sessionID !== undefined && { sessionID }),
+    implementationState: createImplementationStateMetadata('dirty', {
+      changedFiles: [filePath],
+      ...(sessionID !== undefined && { gitHead: sessionID }),
+    }),
+    qualityGateApplicability: {
+      status: 'limited_context',
+      reasonCode: 'implementation_without_workflow_context',
+      reason: 'Implementation detected without active workflow context',
+      taskKind: 'implementation_done',
+      shouldRunVerify: true,
+      shouldRunHarden: false,
+      archiveReadinessEligible: false,
+      nextStep: 'Run quality gate',
+    },
+  }
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Created limited-context acceptance state', { feature, filePath })
+}
+
+/**
+ * Merge a changed file into an existing limited-context state,
+ * or create a new limited-context state if none exists.
+ * Only merges if the active state's feature name starts with 'limited-context-'.
+ */
+export async function mergeLimitedContextState(
+  projectDir: string,
+  filePath: string,
+  sessionID?: string,
+): Promise<void> {
+  const existingState = await loadAcceptanceState(projectDir)
+
+  if (existingState && existingState.feature.startsWith('limited-context-')) {
+    // Merge: add file to changedFiles without duplicates, mark dirty
+    const existing = existingState.implementationState?.changedFiles ?? []
+    const merged = [...new Set([...existing, filePath])].sort()
+    await markImplementationDirty(projectDir, { changedFiles: merged, ...(sessionID !== undefined && { gitHead: sessionID }) })
+    logger.info('Merged changed file into limited-context state', {
+      filePath,
+      feature: existingState.feature,
+    })
+  } else {
+    await createLimitedContextState(projectDir, filePath, sessionID)
+  }
+}
+
+// ──────────────────────────────────────────────
+// Archive Run Confirmation Helpers
+// ──────────────────────────────────────────────
+
+/**
+ * Returns a human-readable label for the archive readiness state.
+ * Used by archive command to distinguish the "Awaiting Archive Confirmation"
+ * state from other workflow states.
+ */
+export function getArchiveRunStatusLabel(
+  runStatus: string | undefined,
+  acceptanceState: AcceptanceState | null,
+): string {
+  if (runStatus === 'ready_for_archive') {
+    const confirmed = acceptanceState?.archiveRunConfirmationStatus === 'confirmed'
+      && Boolean(acceptanceState?.archiveRunConfirmedAt)
+    return confirmed ? 'Ready for Archive (Confirmed)' : 'Awaiting Archive Confirmation'
+  }
+  if (runStatus === 'archived') {
+    return 'Archived'
+  }
+  if (runStatus === 'running') {
+    return 'Implementation Running'
+  }
+  return runStatus ?? 'No Run'
+}
+
+/**
+ * Checks whether the archive run confirmation has been explicitly granted.
+ */
+export function isArchiveRunConfirmed(state: AcceptanceState | null): boolean {
+  return state?.archiveRunConfirmationStatus === 'confirmed'
+    && Boolean(state.archiveRunConfirmedAt)
+}
+
+/**
+ * Marks the acceptance state as awaiting explicit archive confirmation.
+ */
+export async function setArchiveRunAwaitingConfirmation(
+  projectDir: string,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot set archive run awaiting: no active acceptance state')
+    return
+  }
+  state.archiveRunConfirmationStatus = 'awaiting'
+  delete state.archiveRunConfirmedAt
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Set archive run awaiting confirmation', { feature: state.feature })
+}
+
+/**
+ * Marks the acceptance state as confirmed for archive run.
+ */
+export async function confirmArchiveRun(
+  projectDir: string,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot confirm archive run: no active acceptance state')
+    return
+  }
+  state.archiveRunConfirmationStatus = 'confirmed'
+  state.archiveRunConfirmedAt = formatTimestamp()
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Confirmed archive run', { feature: state.feature })
 }

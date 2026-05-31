@@ -1,7 +1,7 @@
 {
   "name": "@fastknife/openflow",
   "version": "0.1.0",
-  "description": "OpenFlow - DevFlow OpenCode Plugin for enhanced development workflow",
+  "description": "OpenFlow - document-as-constraint governance for AI-driven OpenCode development",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,8 +16,9 @@
     "build": "npm run clean && tsc",
     "dev": "tsc --watch",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "node scripts/run-tests.mjs",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
@@ -32,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:fastknifes/openflow.git"
+    "url": "git+https://github.com/fastknifes/openflow.git"
   },
   "dependencies": {
     "zod": "^3.22.0"
@@ -41,7 +42,7 @@
     "@opencode-ai/plugin": ">=1.0.0"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/plugin": "^1.15.10",
     "@types/node": "^25.4.0",
     "typescript": "^5.9.3"
   },

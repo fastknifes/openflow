@@ -7,9 +7,7 @@ import { logger } from '../utils/logger.js'
 import { getSkills } from './registry.js'
 
 function getRegisteredSkillName(name: string): string {
-  const segments = name.split('/').filter(Boolean)
-  const raw = segments[segments.length - 1] ?? name
-  return raw.replace(/^openflow-/, '')
+  return name.replace(/\//g, '-')
 }
 
 function buildFrontMatter(name: string, description: string): string {
@@ -28,25 +26,31 @@ function getGlobalSkillsDir(): string {
   return path.join(configHome, 'opencode', 'skills')
 }
 
+function getLegacyGlobalSkillPaths(root: string): string[] {
+  return [
+    path.join(root, 'openflow', 'writing-plan'),
+  ]
+}
+
 async function cleanupLegacyWorkspaceSkillArtifacts(projectDir: string | undefined): Promise<void> {
   if (!projectDir) return
 
   const legacyPaths = [
     path.join(projectDir, '.opencode', 'skills', 'archive.md'),
     path.join(projectDir, '.opencode', 'skills', 'verify.md'),
-    path.join(projectDir, '.opencode', 'skills', 'brainstorm.md'),
+    path.join(projectDir, '.opencode', 'skills', 'feature.md'),
     path.join(projectDir, '.opencode', 'skills', 'openflow'),
     path.join(projectDir, '.opencode', 'skills', 'archive'),
     path.join(projectDir, '.opencode', 'skills', 'verify'),
-    path.join(projectDir, '.opencode', 'skills', 'brainstorm'),
-    path.join(projectDir, '.opencode', 'commands', 'brainstorm.md'),
+    path.join(projectDir, '.opencode', 'skills', 'feature'),
+    path.join(projectDir, '.opencode', 'commands', 'feature.md'),
   ]
 
   await Promise.all(legacyPaths.map((target) => fs.rm(target, { recursive: true, force: true })))
 }
 
 export async function registerSkills(ctx: OpenFlowContext): Promise<boolean> {
-  const skills = getSkills()
+  const skills = getSkills(ctx.config)
   const projectDir = typeof ctx.directory === 'string' && ctx.directory.trim().length > 0
     ? ctx.directory
     : typeof ctx.worktree === 'string' && ctx.worktree.trim().length > 0
@@ -56,6 +60,9 @@ export async function registerSkills(ctx: OpenFlowContext): Promise<boolean> {
 
   try {
     await cleanupLegacyWorkspaceSkillArtifacts(projectDir)
+    await Promise.all(
+      [...targetRoots].flatMap((root) => getLegacyGlobalSkillPaths(root).map((target) => fs.rm(target, { recursive: true, force: true })))
+    )
 
     for (const skill of skills) {
       const frontMatter = buildFrontMatter(skill.name, skill.description)
@@ -93,6 +100,9 @@ export async function unregisterSkills(ctx: OpenFlowContext): Promise<void> {
     await Promise.all(getSkills().map(async (skill) => {
       await Promise.all([...targetRoots].map((root) => fs.rm(path.join(root, skill.name), { recursive: true, force: true })))
     }))
+    await Promise.all(
+      [...targetRoots].flatMap((root) => getLegacyGlobalSkillPaths(root).map((target) => fs.rm(target, { recursive: true, force: true })))
+    )
     await cleanupLegacyWorkspaceSkillArtifacts(projectDir)
     logger.info('Skills unregistered')
   } catch {

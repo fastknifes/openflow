@@ -1,11 +1,27 @@
 import type { Hooks } from '@opencode-ai/plugin'
-import type { OpenFlowContext, FileChangeRecord } from '../types.js'
+import * as fs from 'node:fs/promises'
+import * as nodePath from 'node:path'
+import type { AcceptanceState, OpenFlowContext, FileChangeRecord } from '../types.js'
+import { getChangePlansPath } from '../config.js'
 import { extractPlanName } from '../plan/parser.js'
 import { enhancePlan } from '../plan/enhancer.js'
+import { loadAcceptanceState, markImplementationDirty, markImplementationStale, mergeLimitedContextState } from '../utils/acceptance-state.js'
 import { trackFileChange } from '../utils/file-tracker.js'
-import { generateBuildId } from '../utils/security.js'
 import { logger } from '../utils/logger.js'
+import { getContractRuntime } from '../contracts/runtime.js'
 import { createAcceptancePromptHook } from './acceptance-prompt.js'
+import {
+  appendToolAfterPrompt,
+  extractFeatureFromDesignPath,
+  isImplementationLikeFile,
+  isDesignDoc,
+  isPlanFile,
+  normalizePath,
+  resolveBuildId,
+  shouldPromptForAcceptanceDocSync,
+  shouldTrackChange,
+  toProjectRelativePath,
+} from './tool-after-policy.js'
 import {
   evaluateDocumentBundle,
   ensureDecisionsDocument,
@@ -13,74 +29,11 @@ import {
   hasDecisionsDocument,
   hasPrdDocument,
   isPrdGenerationEnabled,
-} from '../phases/brainstorm/prd-generator.js'
-
-const sessionBuildIds = new Map<string, string>()
-
-function normalizePath(filePath: string): string {
-  return filePath.toLowerCase().replace(/\\/g, '/')
-}
-
-function isPlanFile(normalizedPath: string): boolean {
-  return normalizedPath.includes('.sisyphus/plans/') && normalizedPath.endsWith('.md')
-}
-
-function isDesignDoc(normalizedPath: string): boolean {
-  return /^(?:\d{8}-(proposal|design|decisions)|(proposal|design|decisions))\.md$/.test(normalizedPath.split('/').pop() || '')
-}
-
-function extractFeatureFromDesignPath(filePath: string): string | null {
-  const parts = filePath.split(/[/\\]/)
-  const changesIdx = parts.lastIndexOf('changes')
-  if (changesIdx !== -1) {
-    const featurePart = parts[changesIdx + 1]
-    if (featurePart && !/\.md$/i.test(featurePart)) {
-      return featurePart.replace(/^\d{4}-\d{2}-\d{2}-/, '')
-    }
-  }
-
-  const designIdx = parts.lastIndexOf('design')
-  if (designIdx === -1) return null
-  return parts[designIdx - 1] || null
-}
-
-function shouldTrackChange(normalizedPath: string): boolean {
-  return !normalizedPath.includes('node_modules/') && !normalizedPath.includes('.sisyphus/')
-}
-
-function resolveBuildId(sessionID?: string): string {
-  if (sessionID) {
-    const existingBuildId = sessionBuildIds.get(sessionID)
-    if (existingBuildId) {
-      return existingBuildId
-    }
-
-    const newBuildId = generateBuildId()
-    sessionBuildIds.set(sessionID, newBuildId)
-    return newBuildId
-  }
-
-  const buildId = generateBuildId()
-  logger.debug('Generated isolated build ID for no-session change tracking', { buildId })
-  return buildId
-}
-
-function shouldPromptForAcceptanceDocSync(normalizedPath: string): boolean {
-  return !normalizedPath.startsWith('docs/') && !normalizedPath.includes('/docs/')
-}
-
-function appendToolAfterPrompt(output: unknown, prompt: string): void {
-  if (!output || typeof output !== 'object') {
-    return
-  }
-
-  const rawOutput = output as Record<string, unknown>
-  const existingOutput = typeof rawOutput.output === 'string' ? rawOutput.output : ''
-  rawOutput.output = existingOutput ? `${existingOutput}\n\n${prompt}` : prompt
-}
+} from '../phases/feature/prd-generator.js'
 
 export function createToolAfterHook(ctx: OpenFlowContext) {
   const acceptancePromptHook = createAcceptancePromptHook(ctx)
+  const featureWorkflowConfig = (ctx.config as unknown as Record<string, { enabled: boolean }>)['feature']!
 
   const hook: NonNullable<Hooks['tool.execute.after']> = async (input, _output): Promise<void> => {
     if (input.tool !== 'write' && input.tool !== 'edit') return
@@ -91,15 +44,15 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
     const filePath = typeof args?.filePath === 'string' ? args.filePath : undefined
     if (!filePath) return
 
-    const normalizedPath = normalizePath(filePath)
+    const projectRelativePath = toProjectRelativePath(ctx.directory, filePath)
 
     // Check for design document writes to trigger PRD generation
-    if (isDesignDoc(normalizedPath) && isPrdGenerationEnabled(ctx.config)) {
+    if (isDesignDoc(projectRelativePath) && isPrdGenerationEnabled(ctx.config)) {
       const feature = extractFeatureFromDesignPath(filePath)
       
       if (feature) {
         // Only generate PRD when the primary design doc is written
-        if (normalizedPath.endsWith('/design.md') || normalizedPath.endsWith('-design.md')) {
+        if (projectRelativePath.endsWith('/design.md') || projectRelativePath.endsWith('-design.md')) {
           const bundle = await evaluateDocumentBundle(ctx.directory, feature, ctx.config)
 
           if (bundle.generatePrd) {
@@ -141,13 +94,13 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
       }
     }
 
-    if (isPlanFile(normalizedPath)) {
+    if (isPlanFile(projectRelativePath)) {
       const planName = extractPlanName(filePath)
 
       if (planName && !ctx.enhancedPlans.has(planName)) {
         logger.info('Plan file detected', { path: filePath })
 
-        if (ctx.config.tdd.enabled || ctx.config.verification.in_plan || ctx.config.brainstorming.enabled) {
+        if (ctx.config.tdd.enabled || ctx.config.verification.in_plan || featureWorkflowConfig.enabled) {
           const enhanced = await enhancePlan({
             planPath: filePath,
             config: ctx.config,
@@ -158,7 +111,47 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
           }
         }
       }
-    } else if (shouldTrackChange(normalizedPath)) {
+
+      // Bug 3: Sync sisyphus plan to canonical if hard link is broken
+      if (projectRelativePath.includes('.sisyphus/plans/') && projectRelativePath.endsWith('.md')) {
+        const featureSlug = nodePath.basename(projectRelativePath, '.md')
+        try {
+          const canonicalPlanPath = await getChangePlansPath(ctx.directory, featureSlug, ctx.config)
+          const sisyphusStat = await fs.stat(filePath)
+          let needCopy = false
+          try {
+            const canonicalStat = await fs.stat(canonicalPlanPath)
+            if (canonicalStat.ino !== sisyphusStat.ino) needCopy = true
+          } catch {
+            needCopy = true
+          }
+          if (needCopy) {
+            await fs.mkdir(nodePath.dirname(canonicalPlanPath), { recursive: true })
+            await fs.copyFile(filePath, canonicalPlanPath)
+            logger.info('Synced sisyphus plan to canonical path', {
+              from: projectRelativePath,
+              to: canonicalPlanPath,
+            })
+          }
+        } catch (syncError) {
+          logger.warn('Failed to sync sisyphus plan to canonical path', {
+            error: syncError instanceof Error ? syncError.message : String(syncError),
+          })
+        }
+      }
+
+      // Bug 4: Lightweight format validation
+      try {
+        const planContent = await fs.readFile(filePath, 'utf-8')
+        const requiredSections = ['## Overview', '## Design Context', '## Execution Strategy', '## Tasks']
+        const missing = requiredSections.filter(s => !planContent.includes(s))
+        if (missing.length > 0) {
+          appendToolAfterPrompt(output, `⚠️ Plan format warning: missing required sections: ${missing.join(', ')}. Please ensure the plan follows the 6-section template.`)
+        }
+      } catch {
+        // ignore read errors
+      }
+    } else if (shouldTrackChange(projectRelativePath)) {
       const buildId = resolveBuildId(input.sessionID)
 
       const change: FileChangeRecord = {
@@ -174,7 +167,29 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
         logger.error('Failed to track file change', error instanceof Error ? error : undefined)
       }
 
-      if (shouldPromptForAcceptanceDocSync(normalizedPath)) {
+      await updateImplementationStateForChange(ctx, projectRelativePath, input.sessionID)
+
+      // Dispatch file change event to ContractRuntime for Guardian
+      if (ctx.config.guardian?.enabled) {
+        try {
+          const runtime = getContractRuntime()
+          if (runtime.isStarted) {
+            await runtime.processFileChange({
+              type: 'file_changed',
+              filePath,
+              tool: input.tool as 'write' | 'edit',
+              timestamp: Date.now(),
+              sessionId: input.sessionID,
+            })
+          }
+        } catch (error) {
+          logger.debug('Guardian event dispatch failed', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      if (shouldPromptForAcceptanceDocSync(projectRelativePath)) {
         const acceptancePromptInput = args
           ? { tool: input.tool, args }
           : { tool: input.tool }
@@ -187,4 +202,90 @@ export function createToolAfterHook(ctx: OpenFlowContext) {
   }
 
   return hook
+}
+
+async function updateImplementationStateForChange(
+  ctx: OpenFlowContext,
+  normalizedPath: string,
+  sessionID?: string,
+): Promise<void> {
+  if (!isImplementationLikeFile(normalizedPath)) {
+    return
+  }
+
+  const acceptanceState = await loadAcceptanceState(ctx.directory)
+  if (!acceptanceState) {
+    // Issue 2: No acceptance state → create limited-context dirty state.
+    // This prevents AI from modifying code and claiming completion without
+    // going through a quality gate. Subsequent writes merge into this state.
+    await mergeLimitedContextState(ctx.directory, normalizedPath, sessionID)
+    return
+  }
+
+  if (!matchesActiveAcceptanceState(acceptanceState, normalizedPath, sessionID)) {
+    return
+  }
+
+  const changedFiles = mergeChangedFiles(acceptanceState, normalizedPath)
+  const shouldMarkStale = acceptanceState.implementationState?.state === 'verified'
+    || acceptanceState.implementationState?.state === 'stale'
+    || Boolean(acceptanceState.readiness || acceptanceState.verifyResult)
+
+  try {
+    if (shouldMarkStale) {
+      await markImplementationStale(ctx.directory, { changedFiles })
+      logger.info('Marked implementation state stale after implementation-like change', {
+        filePath: normalizedPath,
+        feature: acceptanceState.feature,
+        mode: acceptanceState.mode ?? 'feature',
+      })
+      return
+    }
+
+    await markImplementationDirty(ctx.directory, { changedFiles })
+    logger.info('Marked implementation state dirty after implementation-like change', {
+      filePath: normalizedPath,
+      feature: acceptanceState.feature,
+      mode: acceptanceState.mode ?? 'feature',
+    })
+  } catch (error) {
+    logger.error('Failed to update implementation state after file change', error instanceof Error ? error : undefined)
+  }
+}
+
+function matchesActiveAcceptanceState(
+  state: AcceptanceState,
+  normalizedPath: string,
+  sessionID?: string,
+): boolean {
+  if (state.sessionID && sessionID && state.sessionID === sessionID) {
+    return true
+  }
+
+  const workspaceSlug = extractWorkspaceSlug(normalizedPath)
+  if (!workspaceSlug) {
+    return true
+  }
+
+  const acceptedSlugs = new Set<string>([
+    state.feature,
+    state.issueSlug,
+    state.issueClarificationPath ? extractWorkspaceSlug(normalizePath(state.issueClarificationPath)) : null,
+  ].filter((value): value is string => Boolean(value)).map(value => value.toLowerCase()))
+
+  return acceptedSlugs.has(workspaceSlug)
+}
+
+function mergeChangedFiles(state: AcceptanceState, normalizedPath: string): string[] {
+  const existing = state.implementationState?.changedFiles ?? []
+  return [...new Set([...existing, normalizedPath])].sort()
+}
+
+function extractWorkspaceSlug(normalizedPath: string): string | null {
+  const match = normalizedPath.match(/(?:^|\/)docs\/changes\/([^/]+)(?:\/|$)/u)
+  if (!match?.[1]) {
+    return null
+  }
+
+  return match[1].replace(/^\d{4}-\d{2}-\d{2}-/u, '')
 }

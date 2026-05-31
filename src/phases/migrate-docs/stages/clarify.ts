@@ -13,21 +13,11 @@ import {
   removePendingQuestion,
   resolvePendingQuestion,
 } from '../state-machine.js'
-
-interface ClarifyQuestionInput {
-  question: string
-  header: string
-  options: QuestionOption[]
-  multiple?: boolean
-  custom?: boolean
-}
-
-type ClarifyQuestionAnswer = string[]
-
-export interface ClarifyInteractiveToolContext {
-  sessionID?: string
-  askQuestion(input: { questions: ClarifyQuestionInput[] }): Promise<ClarifyQuestionAnswer[]>
-}
+import {
+  askGuardedQuestion,
+  hasAskQuestion,
+  type QuestionToolContext,
+} from '../../../utils/question-guard.js'
 
 export interface ClarifyStageResult {
   state: MigrationState
@@ -128,21 +118,21 @@ export async function runClarifyStage(
 
 async function askSingleQuestion(
   question: PendingQuestion,
-  toolContext: ClarifyInteractiveToolContext
+  toolContext: QuestionToolContext
 ): Promise<string | undefined> {
-  const answers = await toolContext.askQuestion({
-    questions: [
-      {
-        question: question.question,
-        header: question.header,
-        options: getQuestionOptions(question),
-        multiple: false,
-        custom: true,
-      },
-    ],
-  })
+  const result = await askGuardedQuestion(
+    toolContext,
+    {
+      id: question.id,
+      header: question.header,
+      question: question.question,
+      options: getQuestionOptions(question),
+      multiple: false,
+      custom: true,
+    },
+  )
 
-  return normalizeInteractiveAnswer(answers[0])
+  return result.answer
 }
 
 function applyQuestionResolution(
@@ -302,23 +292,6 @@ function isAdrCandidateQuestion(question: PendingQuestion): boolean {
     question.header.toLowerCase().includes('adr') ||
     (question.classificationProposal ?? []).some((item) => item.targetType === 'decisions')
   )
-}
-
-function hasAskQuestion(value: unknown): value is ClarifyInteractiveToolContext {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  return 'askQuestion' in value && typeof value.askQuestion === 'function'
-}
-
-function normalizeInteractiveAnswer(answer: ClarifyQuestionAnswer | undefined): string | undefined {
-  const first = answer?.[0]?.trim()
-  if (!first) {
-    return undefined
-  }
-
-  return first.replace(/\s*\(Recommended\)$/u, '').trim()
 }
 
 function formatQuestionPrompt(state: MigrationState, question: PendingQuestion): string {

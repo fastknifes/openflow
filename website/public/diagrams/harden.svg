@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="430" viewBox="0 0 1120 430" role="img" aria-labelledby="title desc">
+  <title id="title">harden 对抗机制</title><desc id="desc">Coordinator、Reviewer、Executor 三角色对抗审查流程。</desc>
+  <defs><style>.bg{fill:#f8fafc}.coord{fill:#eef6ff;stroke:#2563eb;stroke-width:2;rx:16}.review{fill:#fff7ed;stroke:#f97316;stroke-width:2;rx:16}.exec{fill:#f0fdf4;stroke:#16a34a;stroke-width:2;rx:16}.stop{fill:#fef2f2;stroke:#ef4444;stroke-width:2;rx:16}.t{font:600 20px system-ui,Segoe UI,sans-serif;fill:#0f172a}.s{font:14px system-ui,Segoe UI,sans-serif;fill:#475569}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}.back{stroke:#64748b;stroke-width:2;fill:none;stroke-dasharray:7 6;marker-end:url(#arrow)}</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker></defs>
+  <rect class="bg" width="1120" height="430" rx="24"/>
+  <text x="40" y="48" class="t">harden：高风险变更的对抗性审查</text>
+  <rect class="coord" x="60" y="105" width="220" height="95"/><text x="105" y="142" class="t">Coordinator</text><text x="90" y="170" class="s">组织轮次 / 分发上下文</text>
+  <rect class="review" x="370" y="70" width="220" height="95"/><text x="420" y="107" class="t">Reviewer</text><text x="395" y="135" class="s">只读审查，提出 findings</text>
+  <rect class="exec" x="370" y="235" width="220" height="95"/><text x="420" y="272" class="t">Executor</text><text x="390" y="300" class="s">接受/拒绝/部分修复</text>
+  <rect class="coord" x="680" y="105" width="210" height="95"/><text x="720" y="142" class="t">Disposition</text><text x="708" y="170" class="s">过滤偏好，判断收敛</text>
+  <rect class="stop" x="950" y="70" width="130" height="80"/><text x="982" y="103" class="t">阻塞</text><text x="970" y="128" class="s">需决策/修复</text>
+  <rect class="exec" x="950" y="235" width="130" height="80"/><text x="990" y="268" class="t">通过</text><text x="970" y="293" class="s">进入 verify</text>
+  <path class="arrow" d="M280 145C320 120 330 118 368 118"/><path class="arrow" d="M480 165V233"/><path class="arrow" d="M590 282C640 250 650 170 678 154"/><path class="arrow" d="M890 140H948"/><path class="arrow" d="M890 170C925 205 925 275 948 275"/><path class="back" d="M690 195C620 390 230 390 170 205"/>
+  <text x="385" y="375" class="s">可多轮：只有 blocking_bug / spec_violation / 高置信 regression_risk 会驱动修复。</text>
+</svg>

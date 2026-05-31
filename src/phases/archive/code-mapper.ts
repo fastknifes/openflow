@@ -1,7 +1,6 @@
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
 import type { AcceptanceState, FileChangeRecord, PhasedChanges } from '../../types.js'
-import { logger } from '../../utils/logger.js'
 import type { TraceabilityItem } from './traceability.js'
 
 export interface CodeMappingEntry {
@@ -103,7 +102,7 @@ export async function generateCodeMappingTable(
       step: item.item,
       source: item.sourceLabel,
       filePath: relevantEvidence.map(entry => entry.filePath).join('; '),
-      symbol: relevantEvidence.flatMap(entry => entry.symbols).filter(Boolean).join(', ') || '-',
+      symbol: relevantEvidence.flatMap(entry => entry.symbols).filter(Boolean).join(', ') || 'file-level fallback',
       description: relevantEvidence.map(entry => entry.summary).join('; '),
       verificationEvidence,
     }
@@ -138,56 +137,7 @@ export function generateDependenciesTable(deps: Dependency[]): string {
   return [header, separator, ...rows].join('\n')
 }
 
-export async function generateCodeMappingMarkdown(
-  feature: string,
-  _archiveDir: string,
-  changes: FileChangeRecord[]
-): Promise<string> {
-  const date = new Date().toISOString().split('T')[0]
-  const mappings = await generateCodeMappingTable(feature, changes)
 
-  let symbolsContent = ''
-  for (const change of changes.slice(0, 10)) {
-    const symbols = await extractCodeSymbols(change.filePath)
-    if (symbols.length > 0) {
-      symbolsContent += `\n### ${change.filePath}\n\nSymbols: ${symbols.join(', ')}\n`
-    }
-  }
-
-  return `# ${feature} - Implementation Mapping Details
-
-**Generated**: ${date}
-
-## Feature to Code Mapping
-
-| Trace Source | Requirement / Proposal Item | File | Symbol | Verification |
-|--------------|-----------------------------|------|--------|--------------|
-${mappings.map(m => `| ${m.source} | ${m.step} | ${m.filePath} | ${m.symbol} | ${m.verificationEvidence || ''} |`).join('\n')}
-
-## Extracted Symbols
-${symbolsContent || '*No symbols extracted*'}
-
-## Modified Files Summary
-
-| File | Change Type |
-|------|-------------|
-${changes.map(c => `| ${c.filePath} | ${c.tool === 'write' ? 'created' : 'modified'} |`).join('\n')}
-`
-}
-
-export async function saveCodeMapping(
-  archiveDir: string,
-  feature: string,
-  changes: FileChangeRecord[]
-): Promise<void> {
-  const content = await generateCodeMappingMarkdown(feature, archiveDir, changes)
-  const mappingPath = path.join(archiveDir, 'implementation-mapper.code-details.md')
-
-  await fs.mkdir(path.dirname(mappingPath), { recursive: true })
-  await fs.writeFile(mappingPath, content, 'utf-8')
-
-  logger.info('Saved code mapping', { feature, fileCount: changes.length })
-}
 
 async function buildChangedFileEvidence(change: FileChangeRecord, projectDir?: string): Promise<ChangedFileEvidence> {
   const absolutePath = projectDir ? path.join(projectDir, change.filePath) : change.filePath
@@ -245,7 +195,7 @@ function formatVerificationEvidence(
     return `pending acceptance/doc updates recorded (${acceptanceState.pendingDocUpdates.length})`
   }
 
-  return 'archived file-change evidence recorded'
+  return 'no verification evidence recorded'
 }
 
 function normalizePath(filePath: string): string {

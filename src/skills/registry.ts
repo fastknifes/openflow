@@ -1,18 +1,31 @@
 import type { SkillInfo } from './types.js'
-import { getArchiveSkill } from './archive-skill.js'
+import { getWritingPlanSkill } from './writing-plan-skill.js'
 import { getBrainstormSkill } from './brainstorm-skill.js'
-import { getInitSkill } from './init-skill.js'
-import { getVerifySkill } from './verify-skill.js'
-import { getMigrateDocsSkill } from './migrate-docs-skill.js'
+import { getQualityGateSkill } from './quality-gate-skill.js'
+import { getAiReflectionSkill } from './ai-reflection-skill.js'
+import { getTddSkill } from './tdd-skill.js'
+import { getPyramidSkill } from './pyramid-skill.js'
+import { OPENFLOW_REGISTERED_SKILL_NAMES } from '../commands/manifest.js'
+import type { OpenFlowConfig } from '../types.js'
 
-export function getSkills(): SkillInfo[] {
-  return [
-    getBrainstormSkill(),
-    getInitSkill(),
-    getVerifySkill(),
-    getArchiveSkill(),
-    getMigrateDocsSkill(),
-  ]
+const SKILL_FACTORIES = {
+  'openflow-writing-plan': getWritingPlanSkill,
+  'openflow-brainstorm': getBrainstormSkill,
+  'openflow-quality-gate': getQualityGateSkill,
+  'openflow-ai-reflection': getAiReflectionSkill,
+  'openflow-tdd': getTddSkill,
+  'pyramid-principle-programming': getPyramidSkill,
+} as const satisfies Record<typeof OPENFLOW_REGISTERED_SKILL_NAMES[number], () => SkillInfo>
+
+export function getSkills(config?: OpenFlowConfig): SkillInfo[] {
+  return OPENFLOW_REGISTERED_SKILL_NAMES
+    .filter((name) => {
+      if (name === 'openflow-tdd') {
+        return config?.tdd.enabled ?? true
+      }
+      return true
+    })
+    .map((name) => SKILL_FACTORIES[name]())
 }
 
 export function findSkillByName(name: string): SkillInfo | undefined {

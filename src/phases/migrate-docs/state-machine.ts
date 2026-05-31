@@ -1,6 +1,6 @@
 /**
  * Migration state machine - pure functions for state transitions
- * Following brainstorm's pattern: no I/O, only state transformations
+ * Following feature workflow's pattern: no I/O, only state transformations
  */
 
 import {
@@ -14,7 +14,7 @@ import {
   type DisposalMode,
   VALID_STAGE_TRANSITIONS,
   STAGE_ORDER,
-} from './types'
+} from './types.js'
 
 // ============================================================================
 // State Creation

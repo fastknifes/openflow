@@ -38,6 +38,7 @@ export const OPENFLOW_DOCS_GUIDE_BLOCK = `<!-- OPENFLOW DOCS GUIDE:BEGIN -->
 - \`docs/decisions/\`：跨版本的架构与治理决策，只有在需要理解长期原则或取舍时才阅读。
 - \`docs/changes/\`：进行中的变更工作区，仅在处理某个具体 feature、需求或设计任务时阅读。
 - \`docs/archive/\`：已完成并冻结的历史归档，仅在追溯背景、对比演进或审计时阅读。
+- \`docs/current/workflow/ai-reflection/\`：AI 自我反思记录与纠正规则，当该目录存在相关内容时，按需阅读与当前任务相关的纠正规则或反思记录，避免重复犯错。
 
 阅读原则：先读当前、再读相关、最后才读历史；先看最小必要集合，再按需要扩展。
 <!-- OPENFLOW DOCS GUIDE:END -->` as const
@@ -51,8 +52,50 @@ export type InitResult = 'initialized' | 'refreshed' | 'appended' | 'safe_repair
  * User-facing messages for init result states.
  */
 export const INIT_RESULT_MESSAGES: Readonly<Record<InitResult, string>> = Object.freeze({
-  initialized: 'initialized AGENTS.md and added OpenFlow docs guide',
-  refreshed: 'refreshed OpenFlow docs guide',
-  appended: 'appended OpenFlow docs guide',
-  safe_repair: 'appended fresh OpenFlow docs guide as safe repair',
+  initialized: `## OpenFlow Init Complete
+
+initialized AGENTS.md and added OpenFlow docs guide
+
+### Next Step
+
+Start designing your first feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\`
+
+Or describe a problem in natural conversation to investigate an issue.`,
+  refreshed: `## OpenFlow Init Complete
+
+refreshed OpenFlow docs guide
+
+### Next Step
+
+Continue with your current workflow, or start a new feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\``,
+  appended: `## OpenFlow Init Complete
+
+appended OpenFlow docs guide
+
+### Next Step
+
+Continue with your current workflow, or start a new feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\``,
+  safe_repair: `## OpenFlow Init Complete
+
+appended fresh OpenFlow docs guide as safe repair
+
+### Next Step
+
+Continue with your current workflow, or start a new feature:
+
+\`\`\`
+/openflow-feature <feature-name>
+\`\`\``,
 })

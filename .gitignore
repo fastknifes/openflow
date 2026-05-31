@@ -29,6 +29,7 @@ coverage/
 .sisyphus/
 
 # Smoke test directories (auto-generated)
+.test-*/
 .pack-smoke/
 .pack-smoke-node/
 .test-tool-after/
@@ -38,9 +39,15 @@ coverage/
 # OpenCode (IDE managed)
 .opencode/
 
+# VitePress site build output & cache
+website/.vitepress/dist
+website/.vitepress/cache
+
 # Packaged tgz
 *.tgz
 .gitnexus
 .claude/
 log/
 logs/
+_tmp*
+.openflow/

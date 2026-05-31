@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **openflow** (822 symbols, 1789 relationships, 67 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **openflow** (5700 symbols, 10969 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -101,10 +101,34 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 <!-- gitnexus:end -->
 
 <!-- OPENFLOW DOCS GUIDE:BEGIN -->
-- OpenFlow docs 采用按需查阅原则，不要默认通读全部 `docs/`。
-- `docs/current/requirements`、`docs/current/design`、`docs/current/spec`、`docs/current/workflow` 用于当前有效事实与当前流程约定。
-- `docs/decisions/` 用于跨 feature 的正式全局决策。
-- `docs/changes/` 用于进行中的 feature/change 工作区，仅在处理当前变更或接手未完成工作时按需查看对应目录。
-- `docs/archive/` 仅用于历史追溯，不作为当前实现的首选依据。
-- 当信息看起来不一致时，按任务类型判断来源：当前事实看 `docs/current/*`，进行中变更看对应 `docs/changes/{YYYY-MM-DD-feature}/*`，全局规则看 `docs/decisions/*`，历史追溯才看 `docs/archive/*`。
+## 文档阅读指南
+
+以下目录均为按需阅读，不要求一次性通读；只在对应工作阶段或问题需要时再打开相关文件。
+
+- `docs/current/requirements/`：当前需求事实与验收要点，优先作为“要做什么”的依据。
+- `docs/current/design/`：当前设计事实、模块边界与实现约束，优先作为“怎么做”的依据。
+- `docs/current/spec/`：当前规格说明与可执行规范，优先用于校准行为细节与接口约定。
+- `docs/current/workflow/`：当前流程规则与协作步骤，优先用于确认文档与执行顺序。
+- `docs/decisions/`：跨版本的架构与治理决策，只有在需要理解长期原则或取舍时才阅读。
+- `docs/changes/`：进行中的变更工作区，仅在处理某个具体 feature、需求或设计任务时阅读。
+- `docs/archive/`：已完成并冻结的历史归档，仅在追溯背景、对比演进或审计时阅读。
+- `docs/current/workflow/ai-reflection/`：AI 自我反思记录与纠正规则，当该目录存在相关内容时，按需阅读与当前任务相关的纠正规则或反思记录，避免重复犯错。
+
+阅读原则：先读当前、再读相关、最后才读历史；先看最小必要集合，再按需要扩展。
 <!-- OPENFLOW DOCS GUIDE:END -->
+
+## Dependence
+本项目是opencode 的插件, 弱依赖于omo(oh-my-openagent), 如遇到与之相关的问题时，可搜索它们的源码。
+- omo `F:\ai-code\oh-my-openagent`
+- opencode `F:\ai-code\opencode`
+
+## 文档
+- 在阅读文档时以docs/*.md 文档为准
+- website/*.md 有一定的滞后，请忽略它。
+
+## lsp
+- *.md 文件不需要使用LSP 验证
+
+## 语言
+默认使用用户输入的语言进行回复，生成的文件也应使用相同语言。  
+如果用户使用中文，则所有回复以及生成的文件均使用中文；除非用户明确指定使用英文或其他语言。

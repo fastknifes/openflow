@@ -1,129 +1,554 @@
-import { describe, expect, test } from 'bun:test'
-import { parsePlanTasks, classifyTaskType, isImplementationTask, extractPlanName } from '../../src/plan/parser'
+import { test, expect, describe } from 'bun:test'
+import { parsePlanTasks, classifyTaskType, isImplementationTask, extractPlanName } from '../../src/plan/parser.js'
 
-describe('plan parser', () => {
-  describe('parsePlanTasks', () => {
-    test('should stop at Success Criteria section', () => {
-      const plan = `# Test Plan
+// ============================================================================
+// parsePlanTasks
+// ============================================================================
+describe('parsePlanTasks', () => {
+  test('returns empty array for empty content', () => {
+    expect(parsePlanTasks('')).toEqual([])
+  })
 
-## TODOs
+  test('returns empty array for content without task section', () => {
+    const content = `
+# My Plan
 
-- [ ] Task 1: Implement feature
-- [ ] Task 2: Add tests
+Some intro text.
 
-## Success Criteria
-
-- [ ] All tests pass
-- [ ] Code reviewed
+## Overview
+This is an overview.
 `
-      const tasks = parsePlanTasks(plan)
-      expect(tasks.length).toBe(2)
-      expect(tasks[0]?.title).toBe('Task 1: Implement feature')
-      expect(tasks[1]?.title).toBe('Task 2: Add tests')
-    })
+    expect(parsePlanTasks(content)).toEqual([])
+  })
 
-    test('should stop at Final Checklist section', () => {
-      const plan = `# Test Plan
-
-## TODOs
-
-- [ ] Task 1: Build feature
-
-## Final Checklist
-
-- [ ] Verified
-- [ ] Approved
+  test('parses - [ ] task format', () => {
+    const content = `
+## Tasks
+- [ ] Implement user service
 `
-      const tasks = parsePlanTasks(plan)
-      expect(tasks.length).toBe(1)
-      expect(tasks[0]?.title).toBe('Task 1: Build feature')
-    })
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].title).toBe('Implement user service')
+    expect(tasks[0].id).toBe(1)
+    expect(tasks[0].isImplementation).toBe(true)
+    expect(tasks[0].type).toBe('implementation')
+    expect(tasks[0].lineNumber).toBe(3)
+    expect(tasks[0].raw).toBe('- [ ] Implement user service')
+    expect(tasks[0].description).toBe('')
+    expect(tasks[0].dependencies).toEqual([])
+  })
 
-    test('should stop at --- separator', () => {
-      const plan = `# Test Plan
-
-## TODOs
-
-- [ ] Task 1: Implement
-
----
-
-## Other Section
-
-- [ ] This should not be parsed
+  test('parses - [x] checked task format', () => {
+    const content = `
+## Tasks
+- [x] Completed task
 `
-      const tasks = parsePlanTasks(plan)
-      expect(tasks.length).toBe(1)
-    })
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].title).toBe('Completed task')
+  })
 
-    test('should parse numbered tasks', () => {
-      const plan = `# Test Plan
-
-## TODOs
-
+  test('parses numbered format (1. task)', () => {
+    const content = `
+## Tasks
 1. First task
 2. Second task
 `
-      const tasks = parsePlanTasks(plan)
-      expect(tasks.length).toBe(2)
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(2)
+    expect(tasks[0].title).toBe('First task')
+    expect(tasks[0].id).toBe(1)
+    expect(tasks[1].title).toBe('Second task')
+    expect(tasks[1].id).toBe(2)
+  })
+
+  test('parses mixed formats in same section', () => {
+    const content = `
+## Tasks
+- [ ] Unordered task
+1. Numbered task
+- [x] Checked task
+2. Another numbered task
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(4)
+    expect(tasks[0].title).toBe('Unordered task')
+    expect(tasks[1].title).toBe('Numbered task')
+    expect(tasks[2].title).toBe('Checked task')
+    expect(tasks[3].title).toBe('Another numbered task')
+    // IDs are sequential regardless of format
+    expect(tasks.map(t => t.id)).toEqual([1, 2, 3, 4])
+  })
+
+  test('stops parsing at ## Success Criteria', () => {
+    const content = `
+## Tasks
+- [ ] Task before criteria
+
+## Success Criteria
+- [ ] This should not be parsed
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].title).toBe('Task before criteria')
+  })
+
+  test('stops parsing at --- horizontal rule', () => {
+    const content = `
+## Tasks
+- [ ] Task above rule
+
+---
+
+- [ ] This should not be parsed
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].title).toBe('Task above rule')
+  })
+
+  test('stops parsing at ## Final Checklist', () => {
+    const content = `
+## Tasks
+- [ ] Keep this
+
+## Final Checklist
+- [ ] Skip this
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('stops parsing at ## Verification', () => {
+    const content = `
+## Tasks
+- [ ] Keep this
+
+## Verification
+- [ ] Skip this
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('stops parsing at ## Commit Strategy', () => {
+    const content = `
+## Tasks
+- [ ] Keep this
+
+## Commit Strategy
+Do something.
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('stops parsing at ## Notes', () => {
+    const content = `
+## Tasks
+- [ ] Keep this
+
+## Notes
+Some notes here.
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('stops parsing at ## References', () => {
+    const content = `
+## Tasks
+- [ ] Keep this
+
+## References
+- ref 1
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('stops parsing at ## Appendix', () => {
+    const content = `
+## Tasks
+- [ ] Keep this
+
+## Appendix
+Extra info.
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('stops parsing at ## Execution', () => {
+    const content = `
+## Tasks
+- [ ] Keep this
+
+## Execution
+Execution details.
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('## Wave subsections stop parsing (SECTION_END_MARKERS catches them)', () => {
+    const content = `
+## Tasks
+- [ ] First wave task
+
+## Wave 1
+- [ ] Second wave task
+`
+    const tasks = parsePlanTasks(content)
+    // ## Wave matches /^##\s*[^T]/ in SECTION_END_MARKERS, so it stops
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('reports correct line numbers', () => {
+    const content = `line 1
+line 2
+## Tasks
+- [ ] Task on line 4
+- [ ] Task on line 5
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(2)
+    expect(tasks[0].lineNumber).toBe(4)
+    expect(tasks[1].lineNumber).toBe(5)
+  })
+
+  test('skips tasks with titles shorter than 2 characters', () => {
+    const content = `
+## Tasks
+- [ ] a
+- [ ] ok
+- [ ]
+- [ ] Ab
+`
+    const tasks = parsePlanTasks(content)
+    // "a" is < 2 chars, empty from "- [ ] " is < 2 chars
+    expect(tasks).toHaveLength(2)
+    expect(tasks[0].title).toBe('ok')
+    expect(tasks[1].title).toBe('Ab')
+  })
+
+  test('parses Chinese task names', () => {
+    const content = `
+## 任务
+- [ ] 实现用户服务
+- [ ] 配置数据库
+- [ ] 测试接口
+- [ ] 验证功能
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(4)
+    expect(tasks[0].title).toBe('实现用户服务')
+    expect(tasks[0].type).toBe('implementation')
+    expect(tasks[1].title).toBe('配置数据库')
+    expect(tasks[1].type).toBe('setup')
+    expect(tasks[2].title).toBe('测试接口')
+    expect(tasks[2].type).toBe('test')
+    expect(tasks[3].title).toBe('验证功能')
+    expect(tasks[3].type).toBe('verification')
+  })
+
+  test('recognizes "Task" header (singular)', () => {
+    const content = `
+## Task
+- [ ] Single task header
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('recognizes "TODO" header', () => {
+    const content = `
+## TODO
+- [ ] Todo item
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('recognizes "TODOs" header', () => {
+    const content = `
+## TODOs
+- [ ] Todos item
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('recognizes h1 # Tasks header', () => {
+    const content = `
+# Tasks
+- [ ] Task under h1
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('initializes dependencies as empty array', () => {
+    const content = `
+## Tasks
+- [ ] Task with deps
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks[0].dependencies).toEqual([])
+  })
+
+  test('assigns sequential IDs across mixed content', () => {
+    const content = `
+## Tasks
+- [ ] First
+some non-task line
+- [ ] Second
+1. Third
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks.map(t => t.id)).toEqual([1, 2, 3])
+  })
+
+  test('stops parsing at other ## headings (not Wave/Task/Step)', () => {
+    const content = `
+## Tasks
+- [ ] Keep
+
+## Deployment
+- [ ] Skip
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('continues parsing at ## Task subsection headings', () => {
+    const content = `
+## Tasks
+- [ ] First
+
+## Task Details
+- [ ] Second
+`
+    const tasks = parsePlanTasks(content)
+    expect(tasks).toHaveLength(2)
+  })
+
+  test('## Step subsection headings stop parsing (SECTION_END_MARKERS catches them)', () => {
+    const content = `
+## Tasks
+- [ ] First
+
+## Step 1
+- [ ] Second
+`
+    const tasks = parsePlanTasks(content)
+    // ## Step matches /^##\s*[^T]/ (S ≠ T), stops at SECTION_END_MARKERS
+    expect(tasks).toHaveLength(1)
+  })
+})
+
+// ============================================================================
+// classifyTaskType
+// ============================================================================
+describe('classifyTaskType', () => {
+  describe('test type', () => {
+    test('matches "test"', () => {
+      expect(classifyTaskType('Write unit test')).toBe('test')
+    })
+    test('matches "spec"', () => {
+      expect(classifyTaskType('Add spec for API')).toBe('test')
+    })
+    test('matches "测试" (Chinese)', () => {
+      expect(classifyTaskType('编写测试用例')).toBe('test')
+    })
+    test('is case insensitive', () => {
+      expect(classifyTaskType('TEST everything')).toBe('test')
     })
   })
 
-  describe('classifyTaskType', () => {
-    test('should classify test tasks', () => {
-      expect(classifyTaskType('Write unit tests')).toBe('test')
-      expect(classifyTaskType('Add spec for feature')).toBe('test')
-      expect(classifyTaskType('测试功能')).toBe('test')
+  describe('verification type', () => {
+    test('matches "verify"', () => {
+      expect(classifyTaskType('Verify the output')).toBe('verification')
     })
-
-    test('should classify verification tasks', () => {
-      expect(classifyTaskType('Verify implementation')).toBe('verification')
-      expect(classifyTaskType('Check code quality')).toBe('verification')
-      expect(classifyTaskType('验证功能')).toBe('verification')
+    test('matches "check"', () => {
+      expect(classifyTaskType('Check results')).toBe('verification')
     })
+    test('matches "review"', () => {
+      expect(classifyTaskType('Review the code')).toBe('verification')
+    })
+    test('matches "验证" (Chinese)', () => {
+      expect(classifyTaskType('验证功能正确性')).toBe('verification')
+    })
+    test('matches "检查" (Chinese)', () => {
+      expect(classifyTaskType('检查代码质量')).toBe('verification')
+    })
+  })
 
-    test('should classify setup tasks', () => {
-      expect(classifyTaskType('Setup project')).toBe('setup')
-      expect(classifyTaskType('Configure database')).toBe('setup')
+  describe('setup type', () => {
+    test('matches "setup"', () => {
+      expect(classifyTaskType('Setup environment')).toBe('setup')
+    })
+    test('matches "config"', () => {
+      expect(classifyTaskType('Config the database')).toBe('setup')
+    })
+    test('matches "init"', () => {
+      expect(classifyTaskType('Init project')).toBe('setup')
+    })
+    test('matches "配置" (Chinese)', () => {
+      expect(classifyTaskType('配置开发环境')).toBe('setup')
+    })
+    test('matches "初始化" (Chinese)', () => {
       expect(classifyTaskType('初始化项目')).toBe('setup')
     })
+  })
 
-    test('should classify implementation tasks', () => {
+  describe('implementation type', () => {
+    test('matches "implement"', () => {
       expect(classifyTaskType('Implement feature')).toBe('implementation')
-      expect(classifyTaskType('Create new component')).toBe('implementation')
-      expect(classifyTaskType('实现功能')).toBe('implementation')
     })
-
-    test('should return unknown for unclear tasks', () => {
-      expect(classifyTaskType('Do something')).toBe('unknown')
-      expect(classifyTaskType('Random task')).toBe('unknown')
+    test('matches "create"', () => {
+      expect(classifyTaskType('Create new module')).toBe('implementation')
+    })
+    test('matches "build"', () => {
+      expect(classifyTaskType('Build the service')).toBe('implementation')
+    })
+    test('matches "add"', () => {
+      expect(classifyTaskType('Add new endpoint')).toBe('implementation')
+    })
+    test('matches "实现" (Chinese)', () => {
+      expect(classifyTaskType('实现新功能')).toBe('implementation')
+    })
+    test('matches "创建" (Chinese)', () => {
+      expect(classifyTaskType('创建新模块')).toBe('implementation')
+    })
+    test('matches "开发" (Chinese)', () => {
+      expect(classifyTaskType('开发新功能')).toBe('implementation')
+    })
+    test('matches "添加" (Chinese)', () => {
+      expect(classifyTaskType('添加新接口')).toBe('implementation')
     })
   })
 
-  describe('isImplementationTask', () => {
-    test('should identify implementation tasks', () => {
-      expect(isImplementationTask('Implement user login')).toBe(true)
-      expect(isImplementationTask('Create API endpoint')).toBe(true)
-      expect(isImplementationTask('Add new feature')).toBe(true)
-      expect(isImplementationTask('实现登录功能')).toBe(true)
+  describe('unknown type', () => {
+    test('returns unknown for unrelated keywords', () => {
+      expect(classifyTaskType('Deploy to production')).toBe('unknown')
     })
-
-    test('should not identify non-implementation tasks', () => {
-      expect(isImplementationTask('Write tests')).toBe(false)
-      expect(isImplementationTask('Review code')).toBe(false)
-      expect(isImplementationTask('Setup project')).toBe(false)
+    test('returns unknown for generic words', () => {
+      expect(classifyTaskType('Fix something')).toBe('unknown')
+    })
+    test('returns unknown for empty-ish titles', () => {
+      expect(classifyTaskType('Do work')).toBe('unknown')
     })
   })
 
-  describe('extractPlanName', () => {
-    test('should extract plan name from path', () => {
-      expect(extractPlanName('/project/.sisyphus/plans/user-login.md')).toBe('user-login')
-      expect(extractPlanName('C:\\project\\.sisyphus\\plans\\feature.md')).toBe('feature')
+  describe('priority ordering', () => {
+    test('test takes priority over implementation keywords', () => {
+      // "test" is checked first in the function
+      expect(classifyTaskType('implement test')).toBe('test')
+    })
+    test('verification takes priority over implementation keywords', () => {
+      expect(classifyTaskType('verify implementation')).toBe('verification')
+    })
+    test('setup takes priority over implementation keywords', () => {
+      expect(classifyTaskType('setup config for create')).toBe('setup')
+    })
+  })
+})
+
+// ============================================================================
+// isImplementationTask
+// ============================================================================
+describe('isImplementationTask', () => {
+  test.each([
+    ['implement', 'Implement user auth'],
+    ['create', 'Create new service'],
+    ['build', 'Build the module'],
+    ['add', 'Add validation layer'],
+    ['develop', 'Develop feature X'],
+    ['实现', '实现认证模块'],
+    ['创建', '创建服务'],
+    ['开发', '开发新功能'],
+    ['添加', '添加日志'],
+    ['编写', '编写工具函数'],
+  ])('returns true for keyword "%s"', (_keyword, title) => {
+    expect(isImplementationTask(title)).toBe(true)
+  })
+
+  test.each([
+    'Verify the output',
+    'Check results',
+    'Setup environment',
+    'Config the DB',
+    'Write tests',
+    'Review code',
+    'Deploy to production',
+    'Update README',
+  ])('returns false for non-implementation title: %s', (title) => {
+    expect(isImplementationTask(title)).toBe(false)
+  })
+})
+
+// ============================================================================
+// extractPlanName
+// ============================================================================
+describe('extractPlanName', () => {
+  describe('.openflow/plans/ paths', () => {
+    test('extracts name from .openflow/plans/feature-name.md', () => {
+      expect(extractPlanName('.openflow/plans/my-feature.md')).toBe('my-feature')
     })
 
-    test('should return null for invalid paths', () => {
-      expect(extractPlanName('/some/other/path.md')).toBe(null)
-      expect(extractPlanName('random-string')).toBe(null)
+    test('extracts name with forward slashes', () => {
+      expect(extractPlanName('path/to/.openflow/plans/cool-feature.md')).toBe('cool-feature')
+    })
+
+    test('extracts name with backslashes', () => {
+      expect(extractPlanName('path\\to\\.openflow\\plans\\cool-feature.md')).toBe('cool-feature')
+    })
+
+    test('extracts simple name', () => {
+      expect(extractPlanName('.openflow/plans/auth.md')).toBe('auth')
+    })
+  })
+
+  describe('docs/changes/ paths with date prefix', () => {
+    test('extracts from docs/changes/YYYY-MM-DD-feature/plan.md', () => {
+      expect(extractPlanName('docs/changes/2026-01-01-my-feature/plan.md')).toBe('my-feature')
+    })
+
+    test('strips date prefix', () => {
+      expect(extractPlanName('docs/changes/2026-05-31-auth-system/plan.md')).toBe('auth-system')
+    })
+
+    test('works with backslashes', () => {
+      expect(extractPlanName('docs\\changes\\2026-01-01-feature\\plan.md')).toBe('feature')
+    })
+  })
+
+  describe('docs/changes/ paths without date prefix', () => {
+    test('extracts from docs/changes/feature/plan.md', () => {
+      expect(extractPlanName('docs/changes/my-feature/plan.md')).toBe('my-feature')
+    })
+
+    test('extracts simple name', () => {
+      expect(extractPlanName('docs/changes/auth/plan.md')).toBe('auth')
+    })
+  })
+
+  describe('invalid paths', () => {
+    test('returns null for random path', () => {
+      expect(extractPlanName('random/file.txt')).toBeNull()
+    })
+
+    test('returns null for empty string', () => {
+      expect(extractPlanName('')).toBeNull()
+    })
+
+    test('returns null for plan.md without changes/ or plans/ parent', () => {
+      expect(extractPlanName('some/dir/plan.md')).toBeNull()
+    })
+
+    test('returns null for .md file not named plan.md under changes/', () => {
+      expect(extractPlanName('docs/changes/feature/other.md')).toBeNull()
     })
   })
 })

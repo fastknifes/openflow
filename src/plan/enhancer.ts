@@ -1,9 +1,11 @@
 import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
 import type { OpenFlowConfig } from '../types.js'
 import type { ParsedTask } from './parser.js'
 import { parsePlanTasks, extractPlanName } from './parser.js'
 import { escapeMarkdown, findLatestDocument } from '../utils/index.js'
 import { getDesignCandidatePaths } from '../config.js'
+import { readDesignContextPacket } from '../commands/writing-plan.js'
 import { logger } from '../utils/logger.js'
 import { formatSecurityChecks, formatQualityChecks } from '../utils/verification-checks.js'
 import type { VerificationFailureCategory } from '../types.js'
@@ -15,8 +17,11 @@ interface DesignDocSummary {
 }
 
 const DESIGN_CONTEXT_HEADER = '## Design Context'
-const TDD_EXPANDED_HEADER = '## TDD Expanded Tasks'
 const VERIFICATION_HEADER = '## Verification Phase'
+const BUDGET_WARNING_HEADER = '## Plan Budget Warning'
+
+const MAX_SAME_WAVE_TASKS = 4
+const MAX_ESTIMATED_UNITS = 20
 
 export interface EnhancePlanOptions {
   planPath: string
@@ -37,6 +42,7 @@ export function classifyVerificationFailure(reason: string): VerificationFailure
 
 export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean> {
   const { planPath, config, baseDir } = options
+  const featureWorkflowConfig = (config as unknown as Record<string, { enabled: boolean }>)['feature']!
 
   try {
     const content = await fs.readFile(planPath, 'utf-8')
@@ -51,27 +57,14 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
     let enhancedContent = content
     let enhancementAdded = false
 
-    if (featureName && config.brainstorming.enabled) {
-      const designSummary = await readDesignDocuments(baseDir, featureName)
+    if (featureName && featureWorkflowConfig.enabled) {
+      const designSummary = await readDesignDocuments(baseDir, featureName, config)
       if (designSummary) {
         const withDesignContext = addDesignContextSection(enhancedContent, designSummary, featureName)
         if (withDesignContext !== enhancedContent) {
           enhancedContent = withDesignContext
           enhancementAdded = true
           logger.info('Added design context to plan', { feature: featureName })
-        }
-      }
-    }
-
-    if (config.tdd.enabled) {
-      const implementationTasks = tasks.filter((t) => t.isImplementation)
-
-      if (implementationTasks.length >= config.tdd.expand_threshold) {
-        const withTddExpansion = addTddExpansionComment(enhancedContent, implementationTasks)
-        if (withTddExpansion !== enhancedContent) {
-          enhancedContent = withTddExpansion
-          enhancementAdded = true
-          logger.info('Added TDD expansion hints', { count: implementationTasks.length })
         }
       }
     }
@@ -83,6 +76,14 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
         enhancementAdded = true
         logger.info('Added verification tasks section')
       }
+    }
+
+    // Budget warning: always evaluated, non-blocking
+    const withBudgetWarning = addBudgetWarning(enhancedContent, tasks)
+    if (withBudgetWarning !== enhancedContent) {
+      enhancedContent = withBudgetWarning
+      enhancementAdded = true
+      logger.info('Added plan budget warning', { tasks: tasks.length })
     }
 
     if (enhancementAdded) {
@@ -100,42 +101,47 @@ export async function enhancePlan(options: EnhancePlanOptions): Promise<boolean>
 
 async function readDesignDocuments(
   baseDir: string,
-  feature: string
+  feature: string,
+  config?: import('../types.js').OpenFlowConfig,
 ): Promise<DesignDocSummary | null> {
-  const candidatePaths = await getDesignCandidatePaths(baseDir, feature)
+  const candidatePaths = await getDesignCandidatePaths(baseDir, feature, config)
+  const workspacePaths = new Set<string>()
+  const designContext = await readDesignContextPacket(baseDir, feature, config)
+  const summary: DesignDocSummary = {}
+
+  if (designContext) {
+    summary.design = designContext
+  }
 
   for (const candidatePath of candidatePaths) {
-    const summary: DesignDocSummary = {}
-
     try {
       const stats = await fs.stat(candidatePath)
       if (stats.isFile()) {
-        summary.design = await extractKeySections(candidatePath)
-        return summary.design ? summary : null
+        workspacePaths.add(path.dirname(candidatePath))
+        continue
       }
-      if (!stats.isDirectory()) continue
+      if (stats.isDirectory()) {
+        workspacePaths.add(candidatePath)
+      }
     } catch {
       continue
     }
+  }
 
-    const proposalPath = await findLatestDocument(candidatePath, /^(?:proposal|\d{8}-proposal)\.md$/)
-    if (proposalPath) {
+  for (const workspacePath of workspacePaths) {
+    const proposalPath = await findLatestDocument(workspacePath, /^(?:proposal|\d{8}-proposal)\.md$/)
+    if (proposalPath && !summary.proposal) {
       summary.proposal = await extractKeySections(proposalPath)
     }
 
-    const designPath = await findLatestDocument(candidatePath, /^(?:design|\d{8}-design)\.md$/)
-    if (designPath) {
-      summary.design = await extractKeySections(designPath)
-    }
-
-    const decisionsPath = await findLatestDocument(candidatePath, /^(?:decisions|\d{8}-decisions)\.md$/)
-    if (decisionsPath) {
+    const decisionsPath = await findLatestDocument(workspacePath, /^(?:decisions|\d{8}-decisions)\.md$/)
+    if (decisionsPath && !summary.decisions) {
       summary.decisions = await extractKeySections(decisionsPath)
     }
+  }
 
-    if (summary.proposal || summary.design || summary.decisions) {
-      return summary
-    }
+  if (summary.proposal || summary.design || summary.decisions) {
+    return summary
   }
 
   return null
@@ -182,6 +188,37 @@ async function extractKeySections(filePath: string): Promise<string> {
   }
 }
 
+function addBudgetWarning(content: string, tasks: ParsedTask[]): string {
+  if (content.includes(BUDGET_WARNING_HEADER)) return content
+
+  const taskCount = tasks.length
+  const implementationCount = tasks.filter((t) => t.isImplementation).length
+  // Estimated units: implementation tasks ≈3 units (TDD cycle), others ≈1
+  const estimatedUnits = implementationCount * 3 + (taskCount - implementationCount) * 1
+
+  if (taskCount <= MAX_SAME_WAVE_TASKS && estimatedUnits <= MAX_ESTIMATED_UNITS) {
+    return content
+  }
+
+  const lines: string[] = [
+    '',
+    '---',
+    BUDGET_WARNING_HEADER,
+    '',
+    '> This plan exceeds recommended task density. The warning is non-blocking —',
+    '> implementation may proceed, but consider splitting into smaller waves.',
+    '',
+    `- **Same-wave tasks**: ${taskCount} (recommended max: ${MAX_SAME_WAVE_TASKS})`,
+    `- **Estimated execution units**: ${estimatedUnits} (recommended max: ${MAX_ESTIMATED_UNITS})`,
+    '',
+    '**Suggestion**: Split large waves across multiple `/openflow-implement` invocations',
+    'or reduce per-wave task count to keep execution feedback loops short.',
+    '',
+  ]
+
+  return content + lines.join('\n')
+}
+
 function addDesignContextSection(content: string, summary: DesignDocSummary, feature: string): string {
   if (content.includes(DESIGN_CONTEXT_HEADER)) return content
 
@@ -212,66 +249,6 @@ ${sections.join('\n\n')}
   return insertAfterTopTitle(content, designSection)
 }
 
-function addTddExpansionComment(content: string, tasks: ParsedTask[]): string {
-  if (content.includes(TDD_EXPANDED_HEADER)) return content
-
-  const tddExpandedTasks: string[] = []
-  
-  for (const task of tasks) {
-    tddExpandedTasks.push(`
-### Task ${task.id}: ${escapeMarkdown(task.title)} (TDD)
-
-**Files:**
-- Test: \`tests/unit/path/to/test.ts\`
-- Implementation: \`src/path/to/file.ts\`
-
-- [ ] **Step 1: RED - Write failing test**
-\`\`\`typescript
-// Write test for ${task.title}
-describe('${task.title}', () => {
-  it('should work correctly', () => {
-    // Arrange
-    // Act
-    // Assert
-  })
-})
-\`\`\`
-
-- [ ] **Step 2: Run test to verify it fails**
-Run: \`bun test tests/unit/path/to/test.ts\`
-Expected: FAIL
-
-- [ ] **Step 3: GREEN - Implement minimal code**
-\`\`\`typescript
-// Minimal implementation to pass
-\`\`\`
-
-- [ ] **Step 4: Run test to verify it passes**
-Run: \`bun test tests/unit/path/to/test.ts\`
-Expected: PASS
-
-- [ ] **Step 5: REFACTOR - Clean up while keeping tests green**
-
-- [ ] **Step 6: Commit**
-\`\`\`bash
-git add tests/ src/
-git commit -m "feat: ${task.title}"
-\`\`\`
-`)
-  }
-
-  const tddSection = `
----
-${TDD_EXPANDED_HEADER}
-
-> Auto-expanded by OpenFlow. Each implementation task follows Red-Green-Refactor cycle.
-
-${tddExpandedTasks.join('\n')}
-
-`
-  return insertAfterTopTitle(content, tddSection)
-}
-
 function addVerificationSection(content: string, verification: OpenFlowConfig['verification']): string {
   if (content.includes(VERIFICATION_HEADER)) return content
 
@@ -289,12 +266,23 @@ ${securityChecks}
 ### Quality Checks
 ${qualityChecks}
 
+### Final Verification Authority
+
+**After all implementation tasks are complete, invoke \`openflow-quality-gate\` as the final readiness authority.**
+
+The quality gate performs:
+- Adversarial hardening assessment (risk-based)
+- Evidence collection and verification
+- Readiness classification (\`Ready\`, \`ReadyWithDocUpdates\`, \`NotReady\`, \`NeedsDecision\`)
+
+Do not claim completion until \`openflow-quality-gate\` returns \`Ready\` or \`ReadyWithDocUpdates\`.
+
 ### Failure Handling
 - Quality failure: fix implementation and rerun verification.
 - Security failure: block archive until fixed.
 - Consistency failure: sync docs and implementation, then rerun verification.
 
-> Auto-generated by OpenFlow. Complete all verification tasks before archiving.
+> Auto-generated by OpenFlow. \`openflow-quality-gate\` is the final verification authority.
 `
 
   return content + verificationSection

@@ -42,3 +42,28 @@ export {
   type CleanBuildOptions,
   type CleanAllBuildsOptions,
 } from './build-cleaner.js'
+export { gradeComplexity, gradeComplexityFromDiff, classifyFindings, compressInput } from './harden-utils.js'
+export {
+  assessChangeRisk,
+  isHighRisk,
+  decideQualityGateRisk,
+  RISK_REASON_CODES,
+  type QualityGateRiskInput,
+  type QualityGateRiskResult,
+  type RiskReasonCode,
+} from './risk-assessment.js'
+export {
+  classifyEvidenceFreshness,
+  createEvidenceFreshnessMetadata,
+  computeSimpleDiffHash,
+  captureCurrentWorkspaceState,
+} from './evidence-freshness.js'
+export {
+  ISSUE_CLARIFICATION_FILENAME,
+  PROMOTION_CANDIDATE_FILENAME,
+  ISSUE_RESOLUTION_FILENAME,
+  issueSlug,
+  resolveIssueWorkspace,
+  detectMode,
+  type IssueMode,
+} from './issue-utils.js'

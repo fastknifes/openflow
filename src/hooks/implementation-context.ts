@@ -8,7 +8,7 @@ import {
 import { fileExists } from './file-utils.js'
 
 const FEATURE_PATTERNS = [
-  /\.sisyphus[\\/]plans[\\/]([^\\/\s]+)\.md/i,
+  /\.openflow[\\/]plans[\\/]([^\\/\s]+)\.md/i,
   /docs[\\/]current[\\/]design[\\/]([^\\/\s]+)/i,
   /docs[\\/]current[\\/]requirements[\\/]([^\\/\s]+)/i,
   /docs[\\/]changes[\\/]([^\\/\s]+)[\\/](?:design|proposal|decisions|prd|plan)\.md/i,
@@ -38,10 +38,11 @@ export async function buildImplementationContextPrompt(
 ${sources.join('\n')}
 
 ### Hard Constraints
+- **MUST call \`/openflow-implement${featureHint}\` BEFORE starting any code changes.** This creates an isolated git worktree and an ImplementationRun. Do not edit files in the main worktree directly.
 - Read every existing source above before writing code.
 - Use the active plan and current/change docs as the source of truth.
 - Follow TDD when tests are applicable: RED -> GREEN -> REFACTOR.
-- Before any completion claim, call \`skill(name="openflow-verify"${featureHint})\` and use fresh evidence.
+- Before any completion claim, call \`skill(name="openflow-quality-gate"${featureHint})\` and use fresh evidence.
 - If implementation drifts from design or requirements, update the docs or surface the drift before archive.
 
 ---

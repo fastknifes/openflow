@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="420" viewBox="0 0 1120 420" role="img" aria-labelledby="title desc">
+  <title id="title">质量门执行原理</title><desc id="desc">质量门构建上下文、评估风险、决定 harden、验证证据并输出 readiness。</desc>
+  <defs><style>.bg{fill:#f8fafc}.box{fill:#fff;stroke:#2563eb;stroke-width:2;rx:16}.gate{fill:#fff7ed;stroke:#f97316;stroke-width:2;rx:16}.ok{fill:#f0fdf4;stroke:#16a34a;stroke-width:2;rx:16}.bad{fill:#fef2f2;stroke:#ef4444;stroke-width:2;rx:16}.t{font:600 20px system-ui,Segoe UI,sans-serif;fill:#0f172a}.s{font:14px system-ui,Segoe UI,sans-serif;fill:#475569}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}</style><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker></defs>
+  <rect class="bg" width="1120" height="420" rx="24"/>
+  <text x="40" y="48" class="t">openflow-quality-gate：统一 harden 与 evidence-aware verify</text>
+  <rect class="box" x="45" y="100" width="170" height="90"/><text x="72" y="136" class="t">实现完成</text><text x="68" y="165" class="s">代码 / bug fix</text>
+  <rect class="box" x="260" y="100" width="180" height="90"/><text x="302" y="136" class="t">上下文包</text><text x="280" y="165" class="s">design / issue / plan / diff</text>
+  <rect class="gate" x="485" y="100" width="180" height="90"/><text x="526" y="136" class="t">风险评估</text><text x="512" y="165" class="s">是否需要 harden？</text>
+  <rect class="gate" x="710" y="60" width="170" height="90"/><text x="762" y="96" class="t">harden</text><text x="735" y="125" class="s">复杂/高风险才运行</text>
+  <rect class="box" x="710" y="220" width="170" height="90"/><text x="742" y="256" class="t">verify</text><text x="730" y="285" class="s">证据新鲜度与覆盖</text>
+  <rect class="ok" x="930" y="80" width="150" height="70"/><text x="968" y="110" class="t">Ready</text><text x="950" y="134" class="s">允许归档</text>
+  <rect class="bad" x="930" y="230" width="150" height="70"/><text x="960" y="260" class="t">NotReady</text><text x="950" y="284" class="s">修复后重跑</text>
+  <path class="arrow" d="M215 145H258"/><path class="arrow" d="M440 145H483"/><path class="arrow" d="M665 130C690 110 692 105 708 105"/><path class="arrow" d="M795 150V218"/><path class="arrow" d="M665 165C690 210 695 265 708 265"/><path class="arrow" d="M880 250C910 220 918 140 928 120"/><path class="arrow" d="M880 270H928"/>
+  <text x="710" y="360" class="s">旧的 /openflow-harden 和 /openflow-verify 已不再作为正常手动流程入口。</text>
+</svg>

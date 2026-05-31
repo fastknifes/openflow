@@ -52,7 +52,7 @@ function isWriteOrEditTool(tool: string): tool is FileChangeRecord['tool'] {
 }
 
 function shouldSkipFilePath(filePath: string): boolean {
-  return filePath.includes('.sisyphus/') || filePath.includes('node_modules/')
+  return filePath.includes('.openflow/') || filePath.includes('node_modules/')
 }
 
 function parseTimestampValue(value: unknown): number | undefined {
