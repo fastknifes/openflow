@@ -4,6 +4,7 @@ import type { OpenFlowContext } from '../types.js'
 import { createSafePath, sanitizeFeatureName } from './security.js'
 import { tArray, tPatterns } from '../i18n/index.js'
 import { loadAcceptanceState } from './acceptance-state.js'
+import { getChangePlansPath } from '../config.js'
 
 export interface DerivedFeatureIdentity {
   slug: string
@@ -23,7 +24,7 @@ export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | 
   // Strategy 1: Check acceptance state for active feature with matching plan
   const acceptanceState = await loadAcceptanceState(ctx.directory)
   if (acceptanceState?.feature) {
-    const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${acceptanceState.feature}.md`)
+    const planPath = await getChangePlansPath(ctx.directory, acceptanceState.feature, ctx.config)
     try {
       await fs.access(planPath)
       return acceptanceState.feature
@@ -32,44 +33,47 @@ export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | 
     }
   }
 
-  // Strategy 2: Find the most recently modified plan file
-  const plansDir = createSafePath(ctx.directory, ctx.config.paths.plans)
+  // Strategy 2: Scan docs/changes/*/plan.md for the most recently modified plan
+  const changesDir = createSafePath(ctx.directory, 'docs', 'changes')
   try {
-    const files = await fs.readdir(plansDir)
-    const mdFiles = files.filter(file => file.endsWith('.md'))
-    if (mdFiles.length === 0) return null
-
-    let latestFeature: { name: string; mtime: number } | null = null
-    for (const file of mdFiles) {
-      const filePath = createSafePath(ctx.directory, ctx.config.paths.plans, file)
-      const stat = await fs.stat(filePath)
-      if (!latestFeature || stat.mtimeMs > latestFeature.mtime) {
-        latestFeature = {
-          name: file.replace(/\.md$/u, ''),
-          mtime: stat.mtimeMs,
-        }
+    const entries = await fs.readdir(changesDir, { withFileTypes: true })
+    const planCandidates: Array<{ feature: string; mtime: number }> = []
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const planFile = path.join(changesDir, entry.name, 'plan.md')
+      try {
+        const stat = await fs.stat(planFile)
+        // Extract feature slug from directory name: "YYYY-MM-DD-slug" → "slug"
+        const slug = entry.name.replace(/^\d{4}-\d{2}-\d{2}-/u, '')
+        planCandidates.push({ feature: slug, mtime: stat.mtimeMs })
+      } catch {
+        // No plan.md in this directory, skip
       }
     }
-    return latestFeature?.name ?? null
+    if (planCandidates.length === 0) return null
+    planCandidates.sort((a, b) => b.mtime - a.mtime)
+    return planCandidates[0]!.feature
   } catch {
     return null
   }
 }
 
 export async function featureHasArtifacts(ctx: OpenFlowContext, feature: string): Promise<boolean> {
-  const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${feature}.md`)
+  // Check docs/changes/*/plan.md first (canonical plan location)
+  const planPath = await getChangePlansPath(ctx.directory, feature, ctx.config)
   try {
     await fs.access(planPath)
     return true
   } catch {
-    // No plan file; also check docs/changes workspace
-    const changeDir = createSafePath(ctx.directory, 'docs', 'changes')
-    try {
-      const entries = await fs.readdir(changeDir)
-      return entries.some(entry => entry.endsWith(`-${feature}`) || entry === feature)
-    } catch {
-      return false
-    }
+    // No plan file; also check docs/changes workspace directory existence
+  }
+
+  const changesDir = createSafePath(ctx.directory, 'docs', 'changes')
+  try {
+    const entries = await fs.readdir(changesDir)
+    return entries.some(entry => entry.endsWith(`-${feature}`) || entry === feature)
+  } catch {
+    return false
   }
 }
 

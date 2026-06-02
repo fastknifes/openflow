@@ -106,21 +106,27 @@ function isImplementationLikeAction(tool: string | undefined, taskArgs: Record<s
 }
 
 async function findPlanWithoutRun(ctx: OpenFlowContext, sessionID?: string): Promise<string | undefined> {
-  const plansDir = path.join(ctx.directory, ctx.config.paths.plans)
+  const changesDir = path.join(ctx.directory, 'docs', 'changes')
 
   try {
-    const entries = await fs.readdir(plansDir)
-    const planFiles = entries.filter(e => e.endsWith('.md'))
-
-    for (const planFile of planFiles) {
-      const feature = planFile.replace(/\.md$/, '')
-      const activeRun = await implementationRunStore.getActiveRun(ctx, feature, sessionID)
-      if (!activeRun) {
-        return feature
+    const entries = await fs.readdir(changesDir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const planFile = path.join(changesDir, entry.name, 'plan.md')
+      try {
+        await fs.access(planFile)
+        // Extract feature slug from directory name: "YYYY-MM-DD-slug" → "slug"
+        const feature = entry.name.replace(/^\d{4}-\d{2}-\d{2}-/u, '')
+        const activeRun = await implementationRunStore.getActiveRun(ctx, feature, sessionID)
+        if (!activeRun) {
+          return feature
+        }
+      } catch {
+        // No plan.md in this directory, skip
       }
     }
   } catch {
-    // Plans directory doesn't exist — no guard needed
+    // Changes directory doesn't exist — no guard needed
   }
 
   return undefined

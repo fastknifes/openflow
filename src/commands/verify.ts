@@ -32,6 +32,7 @@ import { resolveChangeUnitDir } from '../utils/change-units.js'
 import { loadAcceptanceState, saveAcceptanceState, saveVerifyResult } from '../utils/acceptance-state.js'
 import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { featureHasArtifacts, findActiveFeature } from '../utils/feature-resolver.js'
+import { getChangePlansPath } from '../config.js'
 import { getActiveFeatureSession } from '../hooks/feature-workflow.js'
 import { loadExecutionPolicy } from '../utils/execution-policy.js'
 import { runCompilationProbe } from '../utils/compilation-probe.js'
@@ -233,7 +234,7 @@ async function collectEvidence(
   acceptanceState?: AcceptanceState | null,
 ): Promise<VerifyEvidencePacket> {
   const changeDir = await resolveChangeUnitDir(ctx.directory, feature)
-  const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${feature}.md`)
+  const planPath = await getChangePlansPath(ctx.directory, feature, ctx.config)
   const changesPath = createSafePath(ctx.directory, 'docs', 'changes', changeDir)
   const currentPath = createSafePath(ctx.directory, 'docs', 'current')
   const decisionsPath = createSafePath(ctx.directory, 'docs', 'decisions')

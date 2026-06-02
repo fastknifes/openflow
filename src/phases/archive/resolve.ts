@@ -67,8 +67,7 @@ export async function resolveArchiveContext(ctx: OpenFlowContext, feature?: stri
   const implementationRun = await resolveArchiveImplementationRun(ctx, sanitizedFeature)
   const issueMode = await detectMode(ctx, sanitizedFeature)
 
-  const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${sanitizedFeature}.md`)
-  const sourceChangePlanPath = await getChangePlansPath(ctx.directory, sanitizedFeature)
+  const sourceChangePlanPath = await getChangePlansPath(ctx.directory, sanitizedFeature, ctx.config)
   const sourceDesignPath = await resolveDocumentArtifact(
     await getDesignCandidatePaths(ctx.directory, sanitizedFeature, ctx.config),
     /^(?:design|\d{8}-design)\.md$/i,
@@ -89,8 +88,7 @@ export async function resolveArchiveContext(ctx: OpenFlowContext, feature?: stri
 
   const designExists = Boolean(sourceDesignPath)
   const changePlanExists = await fileExists(sourceChangePlanPath)
-  const fallbackPlanExists = await fileExists(planPath)
-  const planExists = changePlanExists || fallbackPlanExists
+  const planExists = changePlanExists
   const requirementsExists = Boolean(sourceRequirementsPath)
 
   const issueClarificationSourcePath = await resolvePreferredExistingPath(ctx.directory, [
@@ -119,7 +117,7 @@ export async function resolveArchiveContext(ctx: OpenFlowContext, feature?: stri
     readiness === VerifyReadinessStatus.ReadyWithDocUpdates
   )
 
-  if (acceptanceStateRaw !== null && matchingAcceptanceState === null && fallbackPlanExists && !designExists && hasCodeChanges) {
+  if (acceptanceStateRaw !== null && matchingAcceptanceState === null && changePlanExists && !designExists && hasCodeChanges) {
     postHocIssueReady = true
   }
 
@@ -135,7 +133,7 @@ export async function resolveArchiveContext(ctx: OpenFlowContext, feature?: stri
     issueMode,
     sourcePaths: {
       design: sourceDesignPath,
-      plan: changePlanExists ? sourceChangePlanPath : fallbackPlanExists ? planPath : null,
+      plan: changePlanExists ? sourceChangePlanPath : null,
       prd: sourceRequirementsPath,
       behavior: sourceBehaviorPath,
       changeWorkspace: sourceChangeWorkspacePath,
@@ -145,7 +143,7 @@ export async function resolveArchiveContext(ctx: OpenFlowContext, feature?: stri
       issueResolution: issueResolutionSourcePath,
       artifactRoot: sourceArtifactRoot,
     },
-    planPath,
+    planPath: sourceChangePlanPath,
     archiveDir: finalArchiveDir,
     archiveRoot,
     stagingDir,

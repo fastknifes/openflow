@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { execSync } from 'node:child_process'
-import { getDesignCandidatePaths, getPlanPath } from '../config.js'
+import { getDesignCandidatePaths, getChangePlansPath } from '../config.js'
 import { fileExists } from '../hooks/file-utils.js'
 import type {
   HardenFinding,
@@ -139,7 +139,7 @@ Summary: no feature was provided and no active plan was found.`
   }
 
   const sanitizedFeature = sanitizeFeatureName(resolvedFeature)
-  const planPath = getPlanPath(ctx.directory, sanitizedFeature)
+  const planPath = await getChangePlansPath(ctx.directory, sanitizedFeature, ctx.config)
   const planExists = await fileExists(planPath)
   logger.info('harden', 'plan file check', { planPath, exists: planExists })
 

@@ -6,7 +6,7 @@ import type { CurrentWorkspaceState, HardenFinding, HardenResult, HardenStatus, 
 import { VerifyReadinessStatus } from '../types.js'
 import type { EvidenceFreshnessResult, VerifyResult } from '../types.js'
 import { handleFinalVerify } from './final-verify.js'
-import { getPlanPath, getChangeBehaviorPath, getChangeWorkspacePath } from '../config.js'
+import { getPlanPath, getChangeBehaviorPath, getChangePlansPath, getChangeWorkspacePath } from '../config.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { implementationRunStore, isTerminalStatus } from '../utils/implementation-run.js'
 import { generateBehaviorCodeMapper, saveImplementationMapperDocument } from '../phases/archive/index.js'
@@ -1203,9 +1203,10 @@ async function resolveContextKind(
   if (designExists) return 'feature'
   if (issueExists) return 'issue'
 
-  // Check for plan file — project-root safe
+  // Check for plan file in docs/changes workspace
   try {
-    await fs.access(join(projectDir, ctx.config.paths.plans, `${feature}.md`))
+    const changePlanPath = await getChangePlansPath(projectDir, feature, ctx.config)
+    await fs.access(changePlanPath)
     return 'plan'
   } catch { /* not found */ }
 
