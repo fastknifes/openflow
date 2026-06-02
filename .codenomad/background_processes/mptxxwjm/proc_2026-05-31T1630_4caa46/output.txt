@@ -1,0 +1,6 @@
+
+> @fastknife/openflow@0.1.0 typecheck
+> tsc --noEmit
+
+src/orchestrator/harden-executors.ts(41,54): error TS2345: Argument of type '{ actionable: HardenFinding[]; ambiguous: HardenFinding[]; nonBlocking: HardenFinding[]; }' is not assignable to parameter of type '{ actionable: HardenFinding[]; ambiguous: HardenFinding[]; nonBlocking: HardenFinding[]; style: HardenFinding[]; }'.
+  Property 'style' is missing in type '{ actionable: HardenFinding[]; ambiguous: HardenFinding[]; nonBlocking: HardenFinding[]; }' but required in type '{ actionable: HardenFinding[]; ambiguous: HardenFinding[]; nonBlocking: HardenFinding[]; style: HardenFinding[]; }'.

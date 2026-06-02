@@ -5,6 +5,8 @@ import { getVerifySkill } from '../skills/verify-skill.js'
 import { logger } from '../utils/logger.js'
 import { formatSecurityChecks, formatQualityChecks } from '../utils/verification-checks.js'
 import { buildImplementationContextPrompt } from './implementation-context.js'
+import { checkImplementationGuard } from './implementation-guard.js'
+import { checkConstraintGuard } from './constraint-guard.js'
 import { isImplementationTask, isVerificationTask } from './task-classification.js'
 
 function buildVerificationPrompt(ctx: OpenFlowContext, currentPrompt: string): string | undefined {
@@ -59,6 +61,40 @@ ${currentPrompt}`
 
 export function createToolBeforeHook(ctx: OpenFlowContext) {
   const hook: NonNullable<Hooks['tool.execute.before']> = async (input, output): Promise<void> => {
+    // Plan→implement guard: block implementation-like actions when plan exists but no run
+    const guardOptions = {
+      ctx,
+      ...(typeof input.tool === 'string' ? { tool: input.tool } : {}),
+      ...(output.args ? { taskArgs: output.args as Record<string, unknown> } : {}),
+      ...(typeof input.sessionID === 'string' ? { sessionID: input.sessionID } : {}),
+    }
+    const guardResult = await checkImplementationGuard(guardOptions)
+    if (guardResult.blocked) {
+      output.args = { ...(output.args as Record<string, unknown>), prompt: guardResult.message }
+      logger.info('implementation guard blocked action', { feature: guardResult.feature, tool: input.tool })
+      return
+    }
+
+    // Constraint advisory guard (advisory only, never blocks)
+    try {
+      const constraintResult = await checkConstraintGuard(guardOptions)
+      if (constraintResult.advisory && constraintResult.message) {
+        // For task tool: inject into prompt
+        if (input.tool === 'task') {
+          const taskArgs = output.args as Record<string, unknown> | undefined
+          if (taskArgs && typeof taskArgs.prompt === 'string') {
+            output.args = { ...taskArgs, prompt: constraintResult.message + '\n\n' + taskArgs.prompt }
+            logger.debug('orchestrator', 'injected constraint advisory into task prompt', { sessionID: input.sessionID })
+          }
+        }
+        // For write/edit: we can't inject into prompt, so just log
+        // The advisory is informational — agents will see it if they read observations
+        logger.debug('orchestrator', 'constraint advisory for file operation', { tool: input.tool })
+      }
+    } catch {
+      // Silent failure — never block
+    }
+
     if (input.tool !== 'task') return
 
     const args = output.args as Record<string, unknown> | undefined

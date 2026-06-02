@@ -1,0 +1,6 @@
+
+> @fastknife/openflow@0.1.0 typecheck
+> tsc --noEmit
+
+src/orchestrator/harden-executors.ts(28,46): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.

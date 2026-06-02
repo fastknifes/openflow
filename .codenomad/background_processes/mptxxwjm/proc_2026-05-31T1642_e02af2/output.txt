@@ -1,0 +1,11 @@
+
+  GitNexus Analyzer
+
+
+  Repository indexed successfully (7.1s)
+
+  6,787 nodes | 11,929 edges | 241 clusters | 300 flows
+  LadybugDB 2.6s | FTS 2.6s | Embeddings off (use --embeddings to enable)
+  F:\ai-code\openflow
+  Context: AGENTS.md (updated), CLAUDE.md (updated), .claude/skills/gitnexus/ (6 skills)
+

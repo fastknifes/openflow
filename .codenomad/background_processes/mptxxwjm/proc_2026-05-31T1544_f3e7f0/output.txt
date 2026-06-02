@@ -1,0 +1,8 @@
+src/orchestrator/harden-dag-manager.ts(69,46): error TS2379: Argument of type '{ type: string; payload: { dagId: string; round: number; }; dependsOn: string[] | undefined; idPrefix: string; }' is not assignable to parameter of type 'SubmitTaskInput' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'dependsOn' are incompatible.
+    Type 'string[] | undefined' is not assignable to type 'string[]'.
+      Type 'undefined' is not assignable to type 'string[]'.
+src/utils/harden-utils.ts(320,3): error TS2375: Type '{ level: HardenFindingLevel; confidence: HardenFindingConfidence | undefined; description: string; evidence: string; files: string[]; }' is not assignable to type 'ParsedFinding' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'confidence' are incompatible.
+    Type 'HardenFindingConfidence | undefined' is not assignable to type 'HardenFindingConfidence'.
+      Type 'undefined' is not assignable to type 'HardenFindingConfidence'.

@@ -1,6 +1,6 @@
 /**
  * Migration session persistence - file I/O operations
- * Saves/loads migration sessions to/from .sisyphus/docs-migration/
+ * Saves/loads migration sessions to/from .openflow/docs-migration/
  */
 
 import * as path from 'node:path'
@@ -102,7 +102,7 @@ export async function deleteMigrationSession(
  * List all migration sessions for a project
  */
 export async function listMigrationSessions(projectDir: string): Promise<string[]> {
-  const migrationDir = createSafePath(projectDir, '.sisyphus', MIGRATION_DIR)
+  const migrationDir = createSafePath(projectDir, '.openflow', MIGRATION_DIR)
 
   try {
     const entries = await fs.readdir(migrationDir, { withFileTypes: true })
@@ -125,7 +125,7 @@ function getMigrationSessionPath(projectDir: string, migrationId: string): strin
   if (!isValidMigrationId(migrationId)) {
     throw new SecurityError(`Invalid migration ID: ${migrationId}`)
   }
-  return createSafePath(projectDir, '.sisyphus', MIGRATION_DIR, `${migrationId}.json`)
+  return createSafePath(projectDir, '.openflow', MIGRATION_DIR, `${migrationId}.json`)
 }
 
 function isValidMigrationId(id: string): boolean {
@@ -212,7 +212,7 @@ export async function removeFromMigrationSessionIndex(
 }
 
 function getIndexPath(projectDir: string): string {
-  return createSafePath(projectDir, '.sisyphus', MIGRATION_DIR, INDEX_FILE)
+  return createSafePath(projectDir, '.openflow', MIGRATION_DIR, INDEX_FILE)
 }
 
 function normalizeSessionIndex(parsed: Partial<MigrationSessionIndex>): MigrationSessionIndex {

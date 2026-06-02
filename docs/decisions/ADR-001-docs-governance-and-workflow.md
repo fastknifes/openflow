@@ -135,18 +135,20 @@ docs/
 │   └── workflow/              # lifecycle-stable current workflow area
 ├── changes/
 │   └── {YYYY-MM-DD-feature}/  # dated workspace per feature
-│       ├── design.md          # stable primary design document
-│       ├── proposal.md        # conditional: created when problem framing is needed
-│       ├── decisions.md       # conditional: created when trade-off logging is needed
-│       ├── prd.md             # conditional: created when a real PRD exists
-│       └── plan.md            # conditional: workspace mirror of the active execution plan
+│       ├── state.md           # AI-managed working state / Feature Brief
+│       ├── requirements.md    # conditional: engineering requirements and acceptance criteria
+│       ├── prd.md             # conditional: product goals, users, scenarios, success metrics
+│       ├── design.md          # mandatory design constraints and structure
+│       ├── behavior.md        # mandatory observable behavior contract
+│       └── decisions.md       # conditional: created when trade-off logging is needed
 ├── archive/
 │   └── {YYYY-MM-DD-feature}/  # dated snapshot per feature
 │       ├── implementation-mapper.md   # mandatory
 │       ├── design.md          # conditional: copied if source exists
-│       ├── proposal.md        # conditional: copied if source exists
+│       ├── requirements.md    # conditional: copied if source exists
 │       ├── decisions.md       # conditional: copied if source exists
 │       ├── prd.md             # conditional: copied if source exists
+│       ├── behavior.md        # conditional: copied if source exists
 │       └── plan.md            # conditional: copied if source exists
 ├── decisions/
 │   └── ADR-*.md
@@ -165,13 +167,16 @@ docs/
 - `docs/changes/`
   - 进行中的变更工作区
   - 用于承接某个 feature/change 的需求、设计与计划演进
-  - `design.md` 是稳定的 brainstorm 主文档
-  - `proposal.md`、`decisions.md`、`prd.md`、`plan.md` 是按需出现的工作区文件，仅在存在真实内容时出现
+  - `state.md` 是 AI 管理的工作状态和 Feature Brief，不是正式设计文档
+  - `design.md` 与 `behavior.md` 是 `/openflow-feature` 的强制文档，分别承载设计约束和可观察行为契约
+  - `requirements.md`、`prd.md`、`decisions.md` 是按需出现的工作区文件，仅在存在真实内容时出现
+  - `proposal.md` 不属于当前默认 OpenFlow 流程
+  - `plan.md` 属于 planning 阶段，不由 `/openflow-feature` 生成
 - `docs/archive/`
   - 已归档的历史快照
   - 冻结，不作为日常编辑对象
   - `implementation-mapper.md` 是强制生成的实现映射与追溯主文档
-  - `design.md`、`proposal.md`、`decisions.md`、`prd.md`、`plan.md` 是条件性归档文件，仅在源文件存在时复制归档
+  - `requirements.md`、`design.md`、`behavior.md`、`decisions.md`、`prd.md`、`plan.md` 是条件性归档文件，仅在源文件存在时复制归档
 - `docs/decisions/`
   - 跨 feature 的正式全局决策
   - 必须经过用户确认
@@ -183,8 +188,10 @@ docs/
 
 `changes/` 是进行中的工作区，应该主要放会持续演化的文档：
 
-- `design.md`（稳定的 brainstorm 主文档）
-- `proposal.md`、`decisions.md`、`prd.md`、`plan.md`（按需出现）
+- `state.md`（AI 管理的 Feature Brief / 工作状态）
+- `design.md`（强制设计约束文档）
+- `behavior.md`（强制行为契约文档）
+- `requirements.md`、`prd.md`、`decisions.md`（按需出现）
 
 不建议在 `changes/` 中放 `SRS` 或 `implementation-mapper`，原因是：
 
@@ -222,9 +229,11 @@ docs/
 
 | 文档类型 | 建议位置 | 文档性质 | AI职责 | 用户职责 | 主触发流程 |
 |---|---|---|---|---|---|
-| 原始需求输入 | `docs/changes/{YYYY-MM-DD-feature}/prd.md` (conditional) | 工作态事实类 | 摘录原始输入、保留来源 | 提供上下文、纠正遗漏 | `brainstorm` |
-| 需求整理文档 | `docs/changes/{YYYY-MM-DD-feature}/prd.md` (conditional) | 工作态事实类 | 提炼目标、范围、约束、验收条件 | 确认意图 | `brainstorm` |
-| 当前轮设计文档 | `docs/changes/{YYYY-MM-DD-feature}/design.md` | 工作态事实类 | 起草、同步设计演进 | 确认关键 trade-off | `brainstorm`、`design` |
+| Feature Brief / 工作状态 | `docs/changes/{YYYY-MM-DD-feature}/state.md` | AI 管理工作态 | 每次澄清后更新槽位、置信度、来源和开放问题 | 不需要手动维护 | `openflow-feature` |
+| 工程需求整理文档 | `docs/changes/{YYYY-MM-DD-feature}/requirements.md` (conditional) | 工作态事实类 | 提炼功能需求、非功能需求、约束、验收标准 | 确认意图 | `openflow-feature` |
+| 产品需求文档 | `docs/changes/{YYYY-MM-DD-feature}/prd.md` (conditional) | 工作态事实类 | 提炼目标用户、问题、场景、成功指标 | 确认意图 | `openflow-feature` |
+| 当前轮设计文档 | `docs/changes/{YYYY-MM-DD-feature}/design.md` (mandatory) | 工作态事实类 | 起草、同步设计约束、结构和风险 | 确认关键 trade-off | `openflow-feature`、`design` |
+| 当前轮行为文档 | `docs/changes/{YYYY-MM-DD-feature}/behavior.md` (mandatory) | 工作态事实类 | 起草、同步可观察行为、交互流程和边界响应 | 确认关键行为承诺 | `openflow-feature`、`design` |
 | 当前系统规格 | `docs/current/spec/` | 事实类 | 根据 Verify readiness 与 Archive 结果同步更新 | 审阅重大偏差 | `design`、`archive` |
 | 当前工作流规则 | `docs/current/workflow/` | 规则类 | 提议、代写、检查一致性 | 决策与批准 | `brainstorm`、`archive` |
 | 全局决策 | `docs/decisions/` | 规则类 | 识别候选、提问、起草 | 批准后生效 | `brainstorm` 主、`archive` 补 |
@@ -280,6 +289,25 @@ docs/
 - 先把全局决策嵌入 `brainstorm` 和 `archive` 主流程
 - 等触发规则稳定后，再考虑抽象为内部治理 skill
 
+### 7.4 Feature 决策与全局提升
+
+`openflow-feature` 阶段的决策先写入当前 feature 的 `decisions.md`。
+
+`decisions.md` 可以使用：
+
+```text
+Scope: Local | Candidate Global
+```
+
+规则：
+
+- `Scope: Local` 仅适用于当前 feature。
+- `Scope: Candidate Global` 表示该决策会在归档阶段被提升到全局制度文档。
+- `openflow-feature` 完成输出必须告知用户 Candidate Global 决策及提升目标。
+- `/openflow-archive` 归档时自动提升 Candidate Global 决策，不再二次确认。
+- 如果 `Promotion note: target TBD`，归档输出 warning，不阻塞归档，但不自动提升。
+- 如果提升内容与现有 ADR 冲突，归档应输出冲突报告，不静默覆盖。
+
 ## 8. 工作流设计
 
 ### 8.1 当前工作流定位
@@ -309,7 +337,12 @@ OpenFlow 当前已经形成以下骨架：
 ### 8.3 OpenFlow 在各阶段的职责
 
 - `brainstorm`
-  - 前置设计、需求整理、在 `changes` 工作区沉淀文档，并默认以 `design.md` 作为主入口
+  - 前置讨论、需求探索、生成 context packet，为 `/openflow-feature` 提供辅助输入
+- `openflow-feature`
+  - 澄清 feature 需求，维护 `state.md` Feature Brief
+  - 强制生成 `design.md` 与 `behavior.md`
+  - 按需生成 `requirements.md`、`prd.md`、`decisions.md`
+  - 执行文档级 Cross-Validation
 - `plan enhancement`
   - 注入 TDD、验证和质量要求
 - `verify`

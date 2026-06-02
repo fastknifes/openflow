@@ -19,7 +19,7 @@ export function createAcceptancePromptHook(ctx: OpenFlowContext) {
     const filePath = input.args?.filePath as string | undefined
     if (!filePath) return
     
-    if (filePath.includes('.sisyphus/') || filePath.includes('node_modules/')) return
+    if (filePath.includes('.openflow/') || filePath.includes('node_modules/')) return
     
     await addPendingDocUpdate(ctx.directory, {
       file: filePath,

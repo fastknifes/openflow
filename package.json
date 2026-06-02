@@ -42,7 +42,7 @@
     "@opencode-ai/plugin": ">=1.0.0"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/plugin": "^1.15.10",
     "@types/node": "^25.4.0",
     "typescript": "^5.9.3"
   },

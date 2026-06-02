@@ -11,7 +11,7 @@ function containsAcceptanceTrigger(message: string, triggersZh: string[], trigge
 }
 
 async function findActiveFeature(ctx: OpenFlowContext): Promise<string | null> {
-  const plansDir = createSafePath(ctx.directory, '.sisyphus', 'plans')
+  const plansDir = createSafePath(ctx.directory, '.openflow', 'plans')
   
   try {
     const files = await fs.readdir(plansDir)
@@ -22,7 +22,7 @@ async function findActiveFeature(ctx: OpenFlowContext): Promise<string | null> {
     let latestFeature: { name: string; mtime: number } | null = null
 
     for (const file of mdFiles) {
-      const filePath = createSafePath(ctx.directory, '.sisyphus', 'plans', file)
+      const filePath = createSafePath(ctx.directory, '.openflow', 'plans', file)
       const stat = await fs.stat(filePath)
 
       if (!latestFeature || stat.mtimeMs > latestFeature.mtime) {
@@ -54,7 +54,7 @@ async function shouldEnterAcceptancePhase(ctx: OpenFlowContext, message: string)
     return null
   }
 
-  const planPath = createSafePath(ctx.directory, '.sisyphus', 'plans', `${activeFeature}.md`)
+  const planPath = createSafePath(ctx.directory, '.openflow', 'plans', `${activeFeature}.md`)
   const planExists = await fileExists(planPath)
   return planExists ? activeFeature : null
 }

@@ -29,7 +29,7 @@ Find current source documents:
 - Optional companions: \`proposal.md\`, \`decisions.md\`, \`prd.md\`, \`plan.md\` in the same feature directory
 - Fallback: promoted docs under \`docs/current/design/{feature}/\` and \`docs/current/requirements/{feature}/\`
 - Legacy: older nested or legacy layouts remain readable for backward compatibility
-- Execution plan: \`.sisyphus/plans/{feature}.md\`
+- Execution plan: \`.openflow/plans/{feature}.md\`
 
 ### 2.5 Maintain Current Docs During Archive
 - Default behavior promotes current docs automatically (\`auto_promote_current: true\`)

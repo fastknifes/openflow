@@ -1,0 +1,761 @@
+
+> @fastknife/openflow@0.1.0 test
+> node scripts/run-tests.mjs
+
+bun test v1.3.6 (d530ed99)
+
+tests\config.test.ts:
+(pass) config > loadConfig > no config returns defaultConfig [16.00ms]
+(pass) config > loadConfig > no openflow key in opencodeConfig returns defaultConfig
+(pass) config > loadConfig > valid config merges with defaults
+[OpenFlow] Invalid configuration detected, using defaults
+(pass) config > loadConfig > invalid config warns and returns defaultConfig
+(pass) config > loadConfig > deep merge preserves defaults for unspecified nested fields
+(pass) config > loadConfig > locale setting triggers setLocale
+(pass) config > loadConfig > locale zh-CN setting triggers setLocale
+(pass) config > loadConfig > paths override merges correctly
+(pass) config > getBuildsPath > uses default path when config not provided
+(pass) config > getBuildsPath > uses config path when provided
+(pass) config > getBuildPath > uses default path when config not provided
+(pass) config > getBuildPath > uses config path when provided
+(pass) config > getAcceptanceStatePath > uses default path when config not provided
+(pass) config > getAcceptanceStatePath > uses config path when provided
+(pass) config > getPlanPath > uses default path when config not provided
+(pass) config > getPlanPath > uses config path when provided
+
+tests\contracts\constraint-scanner.test.ts:
+(pass) extractTargetPaths > extracts backtick-enclosed src/ path
+(pass) extractTargetPaths > extracts backtick-enclosed tests/ path
+(pass) extractTargetPaths > extracts backtick-enclosed docs/ path
+(pass) extractTargetPaths > extracts plain (non-backtick) path
+(pass) extractTargetPaths > returns empty array when no matching paths
+(pass) extractTargetPaths > extracts multiple paths from one line
+(pass) extractTargetPaths > prefers backtick-enclosed paths over plain
+(pass) extractTargetPaths > does not match paths outside known prefixes
+(pass) extractTargetPaths > handles nested paths
+(pass) detectConstraintLine > returns "blocking" for "locked"
+(pass) detectConstraintLine > returns "blocking" for "@stable"
+(pass) detectConstraintLine > returns "blocking" for "@public"
+(pass) detectConstraintLine > returns "blocking" for "must not change"
+(pass) detectConstraintLine > returns "warning" for "forbidden dependency"
+(pass) detectConstraintLine > returns false for normal line
+(pass) detectConstraintLine > case insensitive for locked
+(pass) detectConstraintLine > case insensitive for must not change
+(pass) detectConstraintLine > case insensitive for forbidden dependency
+(pass) detectConstraintLine > returns blocking for i18n keyword "禁止修改" (zh-CN default)
+(pass) detectConstraintLine > returns warning for i18n keyword "禁止依赖" (zh-CN default)
+(pass) walkMarkdownFiles > returns empty array for empty directory
+(pass) walkMarkdownFiles > returns full paths for .md files in directory [15.00ms]
+(pass) walkMarkdownFiles > recursively finds .md files in nested directories
+(pass) walkMarkdownFiles > excludes non-.md files
+(pass) walkMarkdownFiles > returns empty array for non-existent directory
+
+tests\drift\diff-engine.test.ts:
+(pass) normalizePath > converts backslashes to forward slashes
+(pass) normalizePath > leaves already-normalized paths unchanged
+(pass) normalizePath > handles mixed separators
+(pass) normalizePath > handles empty string
+(pass) extractCodeKeywords > extracts export function names
+(pass) extractCodeKeywords > extracts export class names
+(pass) extractCodeKeywords > extracts export const names
+(pass) extractCodeKeywords > extracts mixed exports
+(pass) extractCodeKeywords > excludes non-export functions
+(pass) extractCodeKeywords > returns empty array for empty content
+(pass) extractCodeKeywords > extracts async function names
+(pass) extractCodeKeywords > does not duplicate names from same keyword
+(pass) checkSymbolDrift > returns "Symbol matches expected" when keyword is in expectedSymbols
+(pass) checkSymbolDrift > reports "not in contract" for unexpected symbols
+(pass) checkSymbolDrift > returns empty array when no keywords extracted
+(pass) checkSymbolDrift > returns empty array when no matching alignment items
+(pass) checkSymbolDrift > matches symbols case-insensitively
+(pass) checkSymbolDrift > handles multiple symbols in one file
+(pass) classifyDrift > symbol match → no_drift
+(pass) classifyDrift > file matches alignment → no_drift
+(pass) classifyDrift > file not referenced → ambiguous_needs_confirmation
+(pass) classifyDrift > file not referenced with suggestedFix → auto_repaired
+(pass) classifyDrift > symbol not in contract → ambiguous_needs_confirmation
+
+tests\hooks\task-classification.test.ts:
+(pass) isVerificationTask > returns false for undefined
+(pass) isVerificationTask > returns true for category "test"
+(pass) isVerificationTask > returns true for category "verification"
+(pass) isVerificationTask > returns true for category "quality"
+(pass) isVerificationTask > returns true for category "review"
+(pass) isVerificationTask > returns false for category "implementation"
+(pass) isVerificationTask > returns true for oracle subagent with verification prompt
+(pass) isVerificationTask > returns true for momus subagent with verification prompt
+(pass) isVerificationTask > returns false for oracle subagent with unrelated prompt
+(pass) isVerificationTask > returns true for prompt with keyword + context: "run tests after implementation"
+(pass) isVerificationTask > returns false for "just a test plan" (no verification context)
+(pass) isVerificationTask > returns false for "implement feature"
+(pass) isVerificationTask > returns true for "verify that the build passes"
+(pass) isVerificationTask > returns true for "check that the lint rules are satisfied"
+(pass) isVerificationTask > returns true for "run build before completion"
+(pass) isVerificationTask > returns false when prompt has keyword but no context
+(pass) isImplementationTask > returns false for undefined
+(pass) isImplementationTask > returns true for "implement login feature"
+(pass) isImplementationTask > returns true for "add new module"
+(pass) isImplementationTask > returns true for "fix the bug"
+(pass) isImplementationTask > returns false for "verify the code" (verification takes priority)
+(pass) isImplementationTask > returns true for category "quick" with "build the api endpoint"
+(pass) isImplementationTask > returns true for category "quick" with no prompt
+(pass) isImplementationTask > returns true for category "deep" with no prompt
+(pass) isImplementationTask > Chinese: "实现功能" returns true
+(pass) isImplementationTask > Chinese: "开发新的模块" returns true
+(pass) isImplementationTask > Chinese: "修复缺陷" returns true
+(pass) isImplementationTask > returns true for "create a new page component"
+(pass) isImplementationTask > returns true for "refactor the service logic"
+(pass) isImplementationTask > returns true for "update the api endpoint"
+(pass) isImplementationTask > returns false for category alone without recognized prompt or implementation category
+(pass) isImplementationTask > returns false for empty args
+
+tests\hooks\tool-after-policy.test.ts:
+(pass) normalizePath > lowercases the path
+(pass) normalizePath > converts backslashes to forward slashes
+(pass) normalizePath > handles mixed slashes and casing
+(pass) normalizePath > already normalized path stays the same
+(pass) isPlanFile > .sisyphus/plans/*.md returns true
+(pass) isPlanFile > .openflow/plans/*.md returns true
+(pass) isPlanFile > .opencode/plans/*.md returns true
+(pass) isPlanFile > docs/changes/*/plan.md returns true
+(pass) isPlanFile > nested docs/changes/*/plan.md returns true
+(pass) isPlanFile > random .md file returns false
+(pass) isPlanFile > src file returns false
+(pass) isPlanFile > plan without .md extension returns false
+(pass) isDesignDoc > proposal.md returns true
+(pass) isDesignDoc > design.md returns true
+(pass) isDesignDoc > decisions.md returns true
+(pass) isDesignDoc > dated variant 20240101-proposal.md returns true
+(pass) isDesignDoc > dated variant 20240101-design.md returns true
+(pass) isDesignDoc > dated variant 20240101-decisions.md returns true
+(pass) isDesignDoc > other .md returns false
+(pass) isDesignDoc > plan.md returns false
+(pass) shouldTrackChange > node_modules/ returns false
+(pass) shouldTrackChange > .sisyphus/ returns false
+(pass) shouldTrackChange > .openflow/ returns false
+(pass) shouldTrackChange > src/foo.ts returns true
+(pass) shouldTrackChange > docs/guide.md returns true
+(pass) isTestFile > tests/foo.test.ts returns true
+(pass) isTestFile > __tests__/bar.ts returns true
+(pass) isTestFile > test/ subdirectory returns true
+(pass) isTestFile > foo.spec.ts returns true
+(pass) isTestFile > src/foo.ts returns false
+(pass) isTestFile > readme.md returns false
+(pass) isRuntimeCodeFile > src/foo.ts returns true
+(pass) isRuntimeCodeFile > src/foo.tsx returns true
+(pass) isRuntimeCodeFile > src/bar.js returns true
+(pass) isRuntimeCodeFile > tests/foo.test.ts returns false
+(pass) isRuntimeCodeFile > src/foo.md returns false
+(pass) isRuntimeCodeFile > lib/foo.ts (no src/ prefix) returns false
+(pass) isDesignOnlyFile > docs/changes/xxx/design.md returns true
+(pass) isDesignOnlyFile > docs/changes/xxx/proposal.md returns true
+(pass) isDesignOnlyFile > docs/changes/xxx/behavior.md returns true
+(pass) isDesignOnlyFile > docs/changes/xxx/prd.md returns true
+(pass) isDesignOnlyFile > src/foo.ts returns false
+(pass) isDesignOnlyFile > docs/changes/xxx/plan.md returns false
+(pass) isPlanningOnlyFile > .sisyphus/plans/xxx.md returns true
+(pass) isPlanningOnlyFile > docs/changes/xxx/plan.md returns true
+(pass) isPlanningOnlyFile > .sisyphus/state.json returns false
+(pass) isPlanningOnlyFile > src/foo.ts returns false
+(pass) isPlanningOnlyFile > nested plan in .sisyphus returns false
+(pass) isMetadataOnlyFile > .sisyphus/* returns true
+(pass) isMetadataOnlyFile > package-lock returns true
+(pass) isMetadataOnlyFile > .gitnexus/* returns true
+(pass) isMetadataOnlyFile > bun.lockb returns true
+(pass) isMetadataOnlyFile > pnpm-lock returns true
+(pass) isMetadataOnlyFile > yarn.lock returns true
+(pass) isMetadataOnlyFile > src/foo.ts returns false
+(pass) isDocsOnlyFile > docs/guide.md returns true
+(pass) isDocsOnlyFile > docs/deep/nested.md returns true
+(pass) isDocsOnlyFile > README.md returns true
+(pass) isDocsOnlyFile > README_en.md returns true
+(pass) isDocsOnlyFile > src/foo.ts returns false
+(pass) isDocsOnlyFile > docs/guide.ts returns false (not .md)
+(pass) isDocsOnlyFile > notes.md in root returns false (not docs/ or readme)
+(pass) isImplementationLikeFile > src/foo.ts returns true
+(pass) isImplementationLikeFile > tests/foo.test.ts returns true
+(pass) isImplementationLikeFile > docs/x.md returns false
+(pass) isImplementationLikeFile > .sisyphus/* returns false
+(pass) isImplementationLikeFile > docs/changes/feature/design.md returns false
+(pass) isImplementationLikeFile > docs/changes/feature/plan.md returns false
+(pass) isImplementationLikeFile > package-lock.json returns false
+(pass) shouldPromptForAcceptanceDocSync > src/foo.ts returns true
+(pass) shouldPromptForAcceptanceDocSync > docs/x.md returns false
+(pass) shouldPromptForAcceptanceDocSync > path containing /docs/ returns false
+(pass) shouldPromptForAcceptanceDocSync > tests/foo.test.ts returns true
+(pass) appendToolAfterPrompt > appends prompt to output string
+(pass) appendToolAfterPrompt > sets prompt as output when no existing output
+(pass) appendToolAfterPrompt > does nothing for null output
+(pass) appendToolAfterPrompt > does nothing for undefined output
+(pass) appendToolAfterPrompt > does nothing for non-object output
+(pass) appendToolAfterPrompt > handles object with non-string output field
+(pass) appendToolAfterPrompt > handles object with no output field
+
+tests\i18n\index.test.ts:
+(pass) i18n/index > setLocale / getLocale > default locale is zh-CN
+(pass) i18n/index > setLocale / getLocale > switch to en and back
+(pass) i18n/index > setLocale / getLocale > getLocale() reflects setLocale()
+(pass) i18n/index > detectLocaleFromText > Chinese text with >10% CJK chars returns zh-CN
+(pass) i18n/index > detectLocaleFromText > English text returns en
+(pass) i18n/index > detectLocaleFromText > empty string returns current locale
+(pass) i18n/index > detectLocaleFromText > mixed text with <10% Chinese returns en
+(pass) i18n/index > detectLocaleFromText > mixed text with >10% Chinese returns zh-CN
+(pass) i18n/index > t > returns zh-CN string by default
+(pass) i18n/index > t > returns en string after setLocale("en")
+(pass) i18n/index > t > interpolates {key} placeholders
+(pass) i18n/index > t > returns string value for known key
+(pass) i18n/index > t > unknown key behavior - TypeScript prevents this at compile time
+(pass) i18n/index > tArray > returns string arrays
+(pass) i18n/index > tArray > returns different arrays for different locales
+(pass) i18n/index > tArray > throws TypeError for non-array keys
+
+tests\orchestrator\dag-engine.test.ts:
+(pass) DagEngine — submitTask > submits a simple task and stores it
+(pass) DagEngine — addDependency > adds a valid dependency
+(pass) DagEngine — addDependency > throws for self-dependency
+(pass) DagEngine — addDependency > throws for missing dependency
+(pass) DagEngine — addDependency > throws for cycle detection (A→B→C→A)
+(pass) DagEngine — transitionTask > valid transition: pending → ready
+(pass) DagEngine — transitionTask > valid transition: ready → running
+(pass) DagEngine — transitionTask > valid transition: running → succeeded
+(pass) DagEngine — transitionTask > valid transition: failed → pending
+(pass) DagEngine — transitionTask > throws for invalid transition: succeeded → running
+(pass) DagEngine — transitionTask > throws for invalid transition: cancelled → pending
+(pass) DagEngine — retryTask > retries from failed → pending and increments attemptCount
+(pass) DagEngine — getReadyTasks > returns ready tasks sorted by createdAt
+(pass) DagEngine — getReadyTasks > respects dependencies — only tasks with all deps succeeded become ready
+(pass) DagEngine — blockDownstream > failed task blocks downstream dependents
+(pass) DagEngine — blockDownstream > cancelled task blocks downstream dependents
+(pass) DagEngine — runAfter > task is not ready before runAfter timestamp
+(pass) DagEngine — runAfter > task becomes ready after runAfter timestamp
+(pass) DagEngine — getTask > returns a cloned task (mutations do not affect stored version)
+(pass) DagEngine — listTasks > returns all tasks
+
+tests\orchestrator\executor-registry.test.ts:
+(pass) ExecutorRegistry > registers and retrieves an executor
+(pass) ExecutorRegistry > hasExecutor returns true for registered type
+(pass) ExecutorRegistry > hasExecutor returns false for unknown type
+(pass) ExecutorRegistry > registering duplicate type throws SchedulerError with code DUPLICATE_EXECUTOR
+(pass) ExecutorRegistry > getExecutor returns undefined for unknown type
+
+tests\plan\enhancer.test.ts:
+(pass) classifyVerificationFailure > security category > classifies "secret" related reason as security
+(pass) classifyVerificationFailure > security category > classifies "vuln" related reason as security
+(pass) classifyVerificationFailure > security category > classifies "security" related reason as security
+(pass) classifyVerificationFailure > security category > classifies "credential" related reason as security
+(pass) classifyVerificationFailure > security category > classifies "token" related reason as security
+(pass) classifyVerificationFailure > security category > classifies "Secret" related reason as security
+(pass) classifyVerificationFailure > security category > classifies "SECURITY" related reason as security
+(pass) classifyVerificationFailure > consistency category > classifies "drift" related reason as consistency
+(pass) classifyVerificationFailure > consistency category > classifies "mismatch" related reason as consistency
+(pass) classifyVerificationFailure > consistency category > classifies "sync" related reason as consistency
+(pass) classifyVerificationFailure > consistency category > classifies "inconsistent" related reason as consistency
+(pass) classifyVerificationFailure > consistency category > classifies "doc" related reason as consistency
+(pass) classifyVerificationFailure > consistency category > classifies "Drift" related reason as consistency
+(pass) classifyVerificationFailure > consistency category > classifies "MISMATCH" related reason as consistency
+(pass) classifyVerificationFailure > quality category (default) > classifies "test coverage too low" as quality
+(pass) classifyVerificationFailure > quality category (default) > classifies "build failed" as quality
+(pass) classifyVerificationFailure > quality category (default) > classifies "linting errors" as quality
+(pass) classifyVerificationFailure > quality category (default) > classifies "performance regression" as quality
+(pass) classifyVerificationFailure > quality category (default) > classifies "type errors in compilation" as quality
+(pass) classifyVerificationFailure > quality category (default) > classifies "general quality issue" as quality
+(pass) classifyVerificationFailure > is case insensitive
+(pass) classifyVerificationFailure > security takes priority over consistency when both present
+
+tests\plan\parser.test.ts:
+(pass) parsePlanTasks > returns empty array for empty content
+(pass) parsePlanTasks > returns empty array for content without task section
+(pass) parsePlanTasks > parses - [ ] task format
+(pass) parsePlanTasks > parses - [x] checked task format
+(pass) parsePlanTasks > parses numbered format (1. task)
+(pass) parsePlanTasks > parses mixed formats in same section
+(pass) parsePlanTasks > stops parsing at ## Success Criteria
+(pass) parsePlanTasks > stops parsing at --- horizontal rule
+(pass) parsePlanTasks > stops parsing at ## Final Checklist
+(pass) parsePlanTasks > stops parsing at ## Verification
+(pass) parsePlanTasks > stops parsing at ## Commit Strategy
+(pass) parsePlanTasks > stops parsing at ## Notes
+(pass) parsePlanTasks > stops parsing at ## References
+(pass) parsePlanTasks > stops parsing at ## Appendix
+(pass) parsePlanTasks > stops parsing at ## Execution
+(pass) parsePlanTasks > ## Wave subsections stop parsing (SECTION_END_MARKERS catches them)
+(pass) parsePlanTasks > reports correct line numbers
+(pass) parsePlanTasks > skips tasks with titles shorter than 2 characters
+(pass) parsePlanTasks > parses Chinese task names
+(pass) parsePlanTasks > recognizes "Task" header (singular)
+(pass) parsePlanTasks > recognizes "TODO" header
+(pass) parsePlanTasks > recognizes "TODOs" header
+(pass) parsePlanTasks > recognizes h1 # Tasks header
+(pass) parsePlanTasks > initializes dependencies as empty array
+(pass) parsePlanTasks > assigns sequential IDs across mixed content
+(pass) parsePlanTasks > stops parsing at other ## headings (not Wave/Task/Step)
+(pass) parsePlanTasks > continues parsing at ## Task subsection headings
+(pass) parsePlanTasks > ## Step subsection headings stop parsing (SECTION_END_MARKERS catches them)
+(pass) classifyTaskType > test type > matches "test"
+(pass) classifyTaskType > test type > matches "spec"
+(pass) classifyTaskType > test type > matches "测试" (Chinese)
+(pass) classifyTaskType > test type > is case insensitive
+(pass) classifyTaskType > verification type > matches "verify"
+(pass) classifyTaskType > verification type > matches "check"
+(pass) classifyTaskType > verification type > matches "review"
+(pass) classifyTaskType > verification type > matches "验证" (Chinese)
+(pass) classifyTaskType > verification type > matches "检查" (Chinese)
+(pass) classifyTaskType > setup type > matches "setup"
+(pass) classifyTaskType > setup type > matches "config"
+(pass) classifyTaskType > setup type > matches "init"
+(pass) classifyTaskType > setup type > matches "配置" (Chinese)
+(pass) classifyTaskType > setup type > matches "初始化" (Chinese)
+(pass) classifyTaskType > implementation type > matches "implement"
+(pass) classifyTaskType > implementation type > matches "create"
+(pass) classifyTaskType > implementation type > matches "build"
+(pass) classifyTaskType > implementation type > matches "add"
+(pass) classifyTaskType > implementation type > matches "实现" (Chinese)
+(pass) classifyTaskType > implementation type > matches "创建" (Chinese)
+(pass) classifyTaskType > implementation type > matches "开发" (Chinese)
+(pass) classifyTaskType > implementation type > matches "添加" (Chinese)
+(pass) classifyTaskType > unknown type > returns unknown for unrelated keywords
+(pass) classifyTaskType > unknown type > returns unknown for generic words
+(pass) classifyTaskType > unknown type > returns unknown for empty-ish titles
+(pass) classifyTaskType > priority ordering > test takes priority over implementation keywords
+(pass) classifyTaskType > priority ordering > verification takes priority over implementation keywords
+(pass) classifyTaskType > priority ordering > setup takes priority over implementation keywords
+(pass) isImplementationTask > returns true for keyword "implement"
+(pass) isImplementationTask > returns true for keyword "create"
+(pass) isImplementationTask > returns true for keyword "build"
+(pass) isImplementationTask > returns true for keyword "add"
+(pass) isImplementationTask > returns true for keyword "develop"
+(pass) isImplementationTask > returns true for keyword "实现"
+(pass) isImplementationTask > returns true for keyword "创建"
+(pass) isImplementationTask > returns true for keyword "开发"
+(pass) isImplementationTask > returns true for keyword "添加"
+(pass) isImplementationTask > returns true for keyword "编写"
+(pass) isImplementationTask > returns false for non-implementation title: Verify the output
+(pass) isImplementationTask > returns false for non-implementation title: Check results
+(pass) isImplementationTask > returns false for non-implementation title: Setup environment
+(pass) isImplementationTask > returns false for non-implementation title: Config the DB
+(pass) isImplementationTask > returns false for non-implementation title: Write tests
+(pass) isImplementationTask > returns false for non-implementation title: Review code
+(pass) isImplementationTask > returns false for non-implementation title: Deploy to production
+(pass) isImplementationTask > returns false for non-implementation title: Update README
+(pass) extractPlanName > .openflow/plans/ paths > extracts name from .openflow/plans/feature-name.md
+(pass) extractPlanName > .openflow/plans/ paths > extracts name with forward slashes
+(pass) extractPlanName > .openflow/plans/ paths > extracts name with backslashes
+(pass) extractPlanName > .openflow/plans/ paths > extracts simple name
+(pass) extractPlanName > docs/changes/ paths with date prefix > extracts from docs/changes/YYYY-MM-DD-feature/plan.md
+(pass) extractPlanName > docs/changes/ paths with date prefix > strips date prefix
+(pass) extractPlanName > docs/changes/ paths with date prefix > works with backslashes
+(pass) extractPlanName > docs/changes/ paths without date prefix > extracts from docs/changes/feature/plan.md
+(pass) extractPlanName > docs/changes/ paths without date prefix > extracts simple name
+(pass) extractPlanName > invalid paths > returns null for random path
+(pass) extractPlanName > invalid paths > returns null for empty string
+(pass) extractPlanName > invalid paths > returns null for plan.md without changes/ or plans/ parent
+(pass) extractPlanName > invalid paths > returns null for .md file not named plan.md under changes/
+
+tests\utils\change-units.test.ts:
+(pass) ensureChangeUnitDir > creates change-units.json if not exists [15.00ms]
+(pass) ensureChangeUnitDir > returns date-prefixed dir name (YYYY-MM-DD-feature) [16.00ms]
+(pass) ensureChangeUnitDir > same feature called twice returns same dir name
+(pass) ensureChangeUnitDir > different features return different dir names
+(pass) resolveChangeUnitDir > returns mapped dir when index has mapping and directory exists on disk [31.00ms]
+(pass) resolveChangeUnitDir > returns sanitized feature name when no mapping and no directory on disk
+(pass) resolveChangeUnitDir > feature name is sanitized (lowercase, hyphens)
+(pass) resolveChangeUnitDir > discovers existing dated directory on disk
+(pass) ensureArchiveUnitDir > creates archive dir mapping in index [16.00ms]
+(pass) ensureArchiveUnitDir > reuses existing archive dir on second call [16.00ms]
+(pass) ensureArchiveUnitDir > defaults to changeDir if no archive dir set [15.00ms]
+(pass) resolveArchiveUnitDir > returns archiveDir if set [16.00ms]
+(pass) resolveArchiveUnitDir > falls back to changeDir when no archiveDir
+(pass) resolveArchiveUnitDir > falls back to sanitized feature name when no entry exists [15.00ms]
+
+tests\utils\config-loader.test.ts:
+(pass) stripJsoncComments > no comments — returns unchanged
+(pass) stripJsoncComments > line comments (//) are removed
+(pass) stripJsoncComments > block comments (/* */) are removed
+(pass) stripJsoncComments > multi-line block comments are removed
+(pass) stripJsoncComments > comments inside strings are preserved
+(pass) stripJsoncComments > string with comment-like content is preserved
+(pass) stripJsoncComments > multiple comment types mixed
+(pass) stripJsoncComments > line comment at end of input (no trailing newline) is removed
+(pass) stripJsoncComments > unclosed block comment — strips to end
+(pass) discoverConfig > no files, no opencodeConfig → null
+(pass) discoverConfig > valid openflow.json → { openflow: {...} }
+(pass) discoverConfig > valid openflow.jsonc → { openflow: {...} }
+(pass) discoverConfig > JSONC with comments → correctly parsed [16.00ms]
+(pass) discoverConfig > openflow.json takes priority over openflow.jsonc
+(pass) discoverConfig > invalid JSON in openflow.json → warns, returns null
+(pass) discoverConfig > invalid JSON in openflow.json does NOT fall through to jsonc [16.00ms]
+(pass) discoverConfig > falls back to opencodeConfig.openflow when no files exist
+(pass) discoverConfig > does NOT fall back to opencodeConfig when openflow.json exists
+(pass) discoverConfig > opencodeConfig without openflow field → null
+
+tests\utils\evidence-freshness.test.ts:
+(pass) classifyEvidenceFreshness > null acceptanceState → missing
+(pass) classifyEvidenceFreshness > acceptanceState without verifyResult/readiness → missing
+(pass) classifyEvidenceFreshness > has verify result but no freshness metadata → stale
+(pass) classifyEvidenceFreshness > incomplete metadata (no gitHead or recordedAt) → stale
+(pass) classifyEvidenceFreshness > current state without gitHead → stale
+(pass) classifyEvidenceFreshness > git HEAD mismatch → stale with git HEAD changed detail
+(pass) classifyEvidenceFreshness > changed files mismatch → stale with working tree changed detail
+(pass) classifyEvidenceFreshness > diff hash mismatch → stale with diff hash mismatch detail
+(pass) classifyEvidenceFreshness > all match → fresh
+(pass) classifyEvidenceFreshness > timestamp: workspace change after evidence → stale
+(pass) classifyEvidenceFreshness > readiness without verifyResult still classifies
+(pass) createEvidenceFreshnessMetadata > creates metadata with sorted changedFiles
+(pass) createEvidenceFreshnessMetadata > uses provided diffHash when given
+(pass) createEvidenceFreshnessMetadata > computes diffHash when not provided
+(pass) createEvidenceFreshnessMetadata > sets recordedAt to ISO string
+(pass) createEvidenceFreshnessMetadata > preserves evidenceChecks and evidenceSummary
+(pass) computeSimpleDiffHash > same state produces same hash
+(pass) computeSimpleDiffHash > different gitHead produces different hash
+(pass) computeSimpleDiffHash > different changedFiles produces different hash
+(pass) computeSimpleDiffHash > hash is an 8-char hex string
+(pass) classifyScenarioEvidenceFreshness > no timestamp and no gitHead → unknown
+(pass) classifyScenarioEvidenceFreshness > gitHead mismatch → stale
+(pass) classifyScenarioEvidenceFreshness > invalid timestamp → stale
+(pass) classifyScenarioEvidenceFreshness > all match → fresh
+(pass) classifyScenarioEvidenceFreshness > no current gitHead → unknown
+(pass) classifyScenarioEvidenceFreshness > returns missingFields array
+(pass) classifyScenarioEvidenceFreshness > workspace modified after evidence timestamp → stale
+(pass) classifyScenarioEvidenceFreshness > timestamp only (no gitHead) is not unknown
+(pass) parseScenarioEvidenceMetadata > parses scenarioId
+(pass) parseScenarioEvidenceMetadata > parses evidenceType
+(pass) parseScenarioEvidenceMetadata > parses testFileOrMethod
+(pass) parseScenarioEvidenceMetadata > parses commandOrSteps
+(pass) parseScenarioEvidenceMetadata > parses result
+(pass) parseScenarioEvidenceMetadata > parses timestamp
+(pass) parseScenarioEvidenceMetadata > parses recorded at as timestamp
+(pass) parseScenarioEvidenceMetadata > parses gitHead
+(pass) parseScenarioEvidenceMetadata > parses coverageRationale
+(pass) parseScenarioEvidenceMetadata > parses coreCodeMapping
+(pass) parseScenarioEvidenceMetadata > parses multiple fields from markdown-like content
+(pass) parseScenarioEvidenceMetadata > returns empty object for unrecognized content
+(pass) parseScenarioEvidenceMetadata > parses bullet-point format fields
+(pass) parseScenarioEvidenceMetadata > gitHead only matches hex strings of 7-40 chars
+(pass) parseScenarioEvidenceMetadata > parses Steps field as commandOrSteps
+(pass) parseScenarioEvidenceMetadata > parses Step field as commandOrSteps
+(pass) parseScenarioEvidenceMetadata > parses Head field as gitHead
+(pass) parseScenarioEvidenceMetadata > parses Commit field as gitHead
+(pass) parseScenarioEvidenceMetadata > parses Rationale field as coverageRationale
+(pass) parseScenarioEvidenceMetadata > parses Code Mapping field as coreCodeMapping
+(pass) parseScenarioEvidenceMetadata > parses Test Method field as testFileOrMethod
+(pass) parseScenarioEvidenceMetadata > parses Core Code field as coreCodeMapping
+
+tests\utils\harden-diff.test.ts:
+(pass) computeDiffHash > empty string returns consistent hash
+(pass) computeDiffHash > same input produces same hash
+(pass) computeDiffHash > different inputs produce different hashes
+(pass) computeDiffHash > returns 8-char hex string
+(pass) computeDiffHash > empty string also returns 8-char hex string
+(pass) computeChangedFilesSet > empty string returns empty set
+(pass) computeChangedFilesSet > extracts files from diff --git a/X b/Y lines
+(pass) computeChangedFilesSet > extracts different files from a/X and b/Y
+(pass) computeChangedFilesSet > extracts files from --- a/X and +++ b/Y lines
+(pass) computeChangedFilesSet > deduplicates files from diff --git and ---/+++ lines
+(pass) computeChangedFilesSet > normalizes backslashes in file paths
+(pass) computeChangedFilesSet > strips leading ./ from file paths
+(pass) computeChangedFilesSet > handles multiple diff sections
+(pass) hasMaterialChange > same hash + same files → false
+(pass) hasMaterialChange > same hash + same files (empty) → false
+(pass) hasMaterialChange > different hash → true
+(pass) hasMaterialChange > same hash but different file count → true
+(pass) hasMaterialChange > same hash, same count but different files → true
+
+tests\utils\harden-ledger.test.ts:
+(pass) normalizeFinding > returns deterministic string for the same finding
+(pass) normalizeFinding > different descriptions produce different keys
+(pass) normalizeFinding > normalizes numbers to #
+(pass) normalizeFinding > normalizes articles a/an/the
+(pass) normalizeFinding > normalizes whitespace
+(pass) normalizeFinding > normalizes file paths (backslashes to forward slashes)
+(pass) normalizeFinding > includes level in signature
+(pass) normalizeFinding > includes files in signature
+(pass) normalizeFinding > includes text (description + evidence) in signature
+(pass) normalizeFinding > blocking_bug is normalized to behavior_violation in level signature
+(pass) incrementRepeatCount > sets normalizedKey if missing
+(pass) incrementRepeatCount > preserves existing normalizedKey
+(pass) incrementRepeatCount > increments repeatCount from 0 to 1
+(pass) incrementRepeatCount > increments repeatCount from 1 to 2
+(pass) incrementRepeatCount > increments repeatCount from 5 to 6
+(pass) updateDisposition > false_positive → status dismissed
+(pass) updateDisposition > superseded → status dismissed
+(pass) updateDisposition > accepted_known_issue → status confirmed
+(pass) updateDisposition > needs_decision → status needs_decision (when not already resolved)
+(pass) updateDisposition > must_fix → status confirmed
+(pass) updateDisposition > preserves fixed status when disposition is needs_decision
+(pass) updateDisposition > preserves verified status when disposition is needs_decision
+(pass) updateDisposition > preserves dismissed status when disposition is needs_decision
+(pass) updateDisposition > preserves fixed status when disposition is must_fix
+(pass) updateDisposition > preserves verified status when disposition is accepted_known_issue
+(pass) updateDisposition > sets normalizedKey if missing
+(pass) buildTraceEntry > returns object with round, agent, tokens, result, timestamp
+(pass) buildTraceEntry > timestamp is a valid ISO string
+(pass) buildMinimalSummary > returns JSON string with status and stopReason
+(pass) buildMinimalSummary > defaults stopReason to unknown when missing
+(pass) buildMinimalSummary > counts unresolved must_fix findings
+(pass) buildMinimalSummary > excludes resolved must_fix from count
+(pass) buildMinimalSummary > counts needs_decision findings
+(pass) buildMinimalSummary > counts accepted_known_issue findings
+(pass) buildMinimalSummary > zero counts for empty rounds
+(pass) buildMinimalSummary > later round overrides earlier finding with same key
+
+tests\utils\issue-utils.test.ts:
+(pass) constants > ISSUE_CLARIFICATION_FILENAME
+(pass) constants > PROMOTION_CANDIDATE_FILENAME
+(pass) constants > ISSUE_RESOLUTION_FILENAME
+(pass) issueSlug > slugifies normal text to lowercase with hyphens
+(pass) issueSlug > slugifies text with special characters
+(pass) issueSlug > collapses consecutive hyphens
+(pass) issueSlug > trims leading/trailing hyphens
+(pass) issueSlug > slugifies Chinese text — non-alpha become hyphens
+(pass) issueSlug > throws on empty string [16.00ms]
+(pass) issueSlug > throws on whitespace only
+(pass) issueSlug > throws on non-string input
+(pass) issueSlug > throws when slugified result is too short (< 2 chars)
+(pass) issueSlug > returns a valid slug for typical bug description
+(pass) resolveIssueWorkspace > returns { slug, workspacePath }
+(pass) resolveIssueWorkspace > workspacePath includes date prefix (YYYY-MM-DD-slug)
+(pass) resolveIssueWorkspace > uses default changesDir (docs/changes)
+(pass) resolveIssueWorkspace > supports custom changesDir
+(pass) resolveIssueWorkspace > handles directory with trailing slash
+(pass) buildIssuePacket > minimal input (slug + symptom) produces full packet with defaults
+(pass) buildIssuePacket > classification defaults to cannot_determine
+(pass) buildIssuePacket > confidence is low when classification is cannot_determine
+(pass) buildIssuePacket > confidence is medium when classification is known
+(pass) buildIssuePacket > hypotheses differ based on classification
+(pass) buildIssuePacket > recommendedAction differs based on classification
+(pass) buildIssuePacket > sessionID is optional — omitted when not provided
+(pass) buildIssuePacket > sessionID is included when provided
+(pass) buildIssuePacket > now timestamp can be overridden
+(pass) buildIssuePacket > symptom defaults to slug when empty
+(pass) buildIssueResolution > required fields produce valid markdown
+(pass) buildIssueResolution > optional fields default to placeholder text when omitted
+(pass) buildIssueResolution > filesInvolved rendered as markdown list
+(pass) buildIssueResolution > empty filesInvolved falls back to placeholder
+(pass) buildIssueResolution > verification evidence uses provided value
+(pass) buildIssueResolution > recurrence signature uses provided value
+(pass) buildIssueResolution > future AI guidance uses provided value
+(pass) buildIssueResolution > markdown headings in content are demoted to bold
+(pass) buildIssueResolution > excessive newlines are collapsed
+
+tests\utils\risk-assessment.test.ts:
+(pass) assessChangeRisk > 3 or more files → high
+(pass) assessChangeRisk > exactly 3 files → high
+(pass) assessChangeRisk > 50 or more diff lines → high
+(pass) assessChangeRisk > 49 diff lines → not high (unless other trigger)
+(pass) assessChangeRisk > hasNewExports → high
+(pass) assessChangeRisk > sensitive path /hooks/ → high
+(pass) assessChangeRisk > sensitive path /commands/ → high
+(pass) assessChangeRisk > sensitive path /config/ → high
+(pass) assessChangeRisk > sensitive path /verify/ → high
+(pass) assessChangeRisk > sensitive path /archive/ → high
+(pass) assessChangeRisk > sensitive path /harden/ → high
+(pass) assessChangeRisk > sensitive path /security/ → high
+(pass) assessChangeRisk > sensitive path /auth/ → high
+(pass) assessChangeRisk > sensitive path /permission/ → high
+(pass) assessChangeRisk > sensitive path /payment/ → high
+(pass) assessChangeRisk > src/types.ts → high
+(pass) assessChangeRisk > src/index.ts → high
+(pass) assessChangeRisk > 2 files with no other triggers → medium
+(pass) assessChangeRisk > 1 file with small diff → low
+(pass) assessChangeRisk > empty files with no diff → low
+(pass) isHighRisk > 'high' → true
+(pass) isHighRisk > 'medium' → false
+(pass) isHighRisk > 'low' → false
+(pass) decideQualityGateRisk > low trivial change → low risk, no harden, LOW_TRIVIAL_CHANGE reason
+(pass) decideQualityGateRisk > 3 files → high risk, shouldHarden
+(pass) decideQualityGateRisk > 50+ diff lines → high risk
+(pass) decideQualityGateRisk > hasNewExports → high risk
+(pass) decideQualityGateRisk > stateful logic → high risk
+(pass) decideQualityGateRisk > production data loss risk → high risk
+(pass) decideQualityGateRisk > sensitive path → high risk with path label
+(pass) decideQualityGateRisk > src/types.ts → high risk
+(pass) decideQualityGateRisk > 2 files with no other triggers → medium risk
+(pass) decideQualityGateRisk > complex diff but no other triggers → medium risk, shouldHarden true
+(pass) decideQualityGateRisk > complex diff combined with stateful logic → high risk
+
+tests\utils\security.test.ts:
+(pass) SecurityError > is an instance of Error
+(pass) SecurityError > is an instance of SecurityError
+(pass) SecurityError > has correct name property
+(pass) SecurityError > preserves message
+(pass) sanitizeFeatureName > returns lowercase slug for a simple name
+(pass) sanitizeFeatureName > lowercases input
+(pass) sanitizeFeatureName > replaces special characters with hyphens
+(pass) sanitizeFeatureName > collapses consecutive hyphens
+(pass) sanitizeFeatureName > strips leading and trailing hyphens
+(pass) sanitizeFeatureName > allows alphanumeric and hyphens
+(pass) sanitizeFeatureName > throws on empty string
+(pass) sanitizeFeatureName > throws on whitespace-only string
+(pass) sanitizeFeatureName > throws on name exceeding max length
+(pass) sanitizeFeatureName > accepts name at exactly max length
+(pass) sanitizeFeatureName > throws when sanitized result is too short (< 2 chars)
+(pass) sanitizeFeatureName > throws on non-string input (number)
+(pass) sanitizeFeatureName > throws on non-string input (null)
+(pass) sanitizeFeatureName > throws on non-string input (undefined)
+(pass) sanitizeFeatureName > trims whitespace before validation
+(pass) sanitizeFeatureName > handles unicode by replacing non-ascii chars
+(pass) validateBuildId > accepts valid build ID format
+(pass) validateBuildId > accepts valid build ID with mixed case
+(pass) validateBuildId > throws on invalid format (missing prefix)
+(pass) validateBuildId > throws on invalid format (spaces)
+(pass) validateBuildId > throws on empty string
+(pass) validateBuildId > throws on build ID exceeding max length
+(pass) validateBuildId > throws on non-string input
+(pass) validateBuildId > throws on build ID with special characters
+(pass) validateBuildId > accepts numeric-only segments
+(pass) validateConfigPath > returns normalized path for valid relative path
+(pass) validateConfigPath > throws on path traversal with ..
+(pass) validateConfigPath > throws on embedded .. in path
+(pass) validateConfigPath > throws on null byte
+(pass) validateConfigPath > throws on empty string
+(pass) validateConfigPath > throws on path exceeding max depth
+(pass) validateConfigPath > accepts path at exactly max depth
+(pass) validateConfigPath > throws on non-string input
+(pass) validateConfigPath > normalizes path separators
+(pass) validateConfigPath > rejects paths with null bytes
+(pass) validateConfigPath > normalizes path separators on Windows
+(pass) createSafePath > creates safe path within base dir
+(pass) createSafePath > creates safe path for single segment
+(pass) createSafePath > throws on path traversal attempt with ..
+(pass) createSafePath > throws on path traversal with absolute path escape
+(pass) createSafePath > handles empty segments
+(pass) escapeMarkdown > escapes backslash
+(pass) escapeMarkdown > escapes backtick
+(pass) escapeMarkdown > escapes dollar sign
+(pass) escapeMarkdown > escapes square brackets
+(pass) escapeMarkdown > escapes parentheses
+(pass) escapeMarkdown > escapes hash
+(pass) escapeMarkdown > escapes asterisk
+(pass) escapeMarkdown > escapes exclamation mark
+(pass) escapeMarkdown > escapes angle brackets
+(pass) escapeMarkdown > returns empty string unchanged
+(pass) escapeMarkdown > leaves plain text unchanged
+(pass) escapeMarkdown > escapes all special characters in complex string
+(pass) generateBuildId > returns string starting with "build-"
+(pass) generateBuildId > has three segments separated by hyphens
+(pass) generateBuildId > contains only valid characters in segments [16.00ms]
+(pass) generateBuildId > generates unique IDs on successive calls
+(pass) getDatePrefix > returns string in YYYYMMDD format
+(pass) getDatePrefix > returns current date
+(pass) addDatePrefix > prepends date to filename
+(pass) addDatePrefix > prepends date to filename without extension
+(pass) ErrorCode > has all expected enum values
+(pass) ErrorCode > has exactly 8 enum values
+(pass) OpenFlowError > is an instance of Error
+(pass) OpenFlowError > is an instance of OpenFlowError
+(pass) OpenFlowError > has correct name property
+(pass) OpenFlowError > stores code and message
+(pass) OpenFlowError > stores optional cause
+(pass) OpenFlowError > cause is undefined when not provided
+(pass) OpenFlowError > toUserMessage() > INVALID_INPUT
+(pass) OpenFlowError > toUserMessage() > SECURITY_VIOLATION
+(pass) OpenFlowError > toUserMessage() > FILE_NOT_FOUND
+(pass) OpenFlowError > toUserMessage() > PERMISSION_DENIED
+(pass) OpenFlowError > toUserMessage() > OPERATION_FAILED
+(pass) OpenFlowError > toUserMessage() > CONFIG_ERROR
+(pass) OpenFlowError > toUserMessage() > ARCHIVE_FAILED
+(pass) OpenFlowError > toUserMessage() > MIGRATION_FAILED
+(pass) isError > returns true for Error instance
+(pass) isError > returns true for OpenFlowError instance
+(pass) isError > returns true for SecurityError instance
+(pass) isError > returns false for string
+(pass) isError > returns false for number
+(pass) isError > returns false for null
+(pass) isError > returns false for undefined
+(pass) isError > returns false for plain object
+(pass) isError > narrows type correctly
+(pass) wrapError > wraps a plain Error into OpenFlowError
+(pass) wrapError > passes through existing OpenFlowError unchanged
+(pass) wrapError > wraps a non-Error value
+(pass) wrapError > wraps a number error value
+(pass) extractErrorMessage > extracts message from Error
+(pass) extractErrorMessage > extracts message from OpenFlowError
+(pass) extractErrorMessage > converts string to string
+(pass) extractErrorMessage > converts number to string
+(pass) extractErrorMessage > converts null to string
+(pass) extractErrorMessage > converts undefined to string
+(pass) formatToolError > formats error without context
+(pass) formatToolError > formats error with context
+(pass) formatToolError > omits context when empty string
+(pass) formatToolError > omits context when whitespace-only string
+(pass) catchAndLog > returns result on success
+[test] Operation failed: boom
+(pass) catchAndLog > returns undefined on error
+(pass) catchAndLog > calls logger.error on failure when logger provided
+(pass) catchAndLog > logs to console.error when no logger provided
+[test] Operation failed: string error
+(pass) catchAndLog > returns undefined for non-Error thrown values
+(pass) catchAndLogAsync > returns result on success
+[test] Operation failed: async boom
+(pass) catchAndLogAsync > returns undefined on error
+(pass) catchAndLogAsync > calls logger.error on failure when logger provided
+(pass) catchAndLogAsync > logs to console.error when no logger provided
+[test] Operation failed: string error
+(pass) catchAndLogAsync > returns undefined for non-Error thrown values
+(pass) catchAndLogAsync > awaits the async function result [15.00ms]
+(pass) normalizeWhitespace > trims leading and trailing whitespace
+(pass) normalizeWhitespace > replaces multiple spaces with single space
+(pass) normalizeWhitespace > replaces newlines with spaces
+(pass) normalizeWhitespace > replaces CRLF newlines with spaces
+(pass) normalizeWhitespace > replaces multiple newlines with single space
+(pass) normalizeWhitespace > replaces mixed whitespace with single space
+(pass) normalizeWhitespace > returns empty string for whitespace-only input
+(pass) normalizeWhitespace > returns empty string unchanged
+(pass) escapeInline > escapes backslash
+(pass) escapeInline > escapes backtick
+(pass) escapeInline > escapes asterisk
+(pass) escapeInline > escapes underscore
+(pass) escapeInline > escapes curly braces
+(pass) escapeInline > escapes square brackets
+(pass) escapeInline > escapes parentheses
+(pass) escapeInline > escapes hash
+(pass) escapeInline > escapes plus
+(pass) escapeInline > escapes pipe
+(pass) escapeInline > escapes greater than
+(pass) escapeInline > normalizes whitespace before escaping
+(pass) escapeInline > leaves plain text unchanged
+(pass) escapeInline > handles empty string
+(pass) escapeInline > escapes complex string with all special characters
+
+tests\utils\verification-checks.test.ts:
+(pass) formatSecurityChecks > formats secret check in task mode
+(pass) formatSecurityChecks > formats vuln check in task mode (includes npm audit)
+(pass) formatSecurityChecks > formats vuln check in plan mode (no npm audit)
+(pass) formatSecurityChecks > formats dependency check
+(pass) formatSecurityChecks > formats multiple checks joined with newline
+(pass) formatSecurityChecks > returns empty string for empty array
+(pass) formatSecurityChecks > formats dependency check in plan mode
+(pass) formatQualityChecks > formats lint check in task mode
+(pass) formatQualityChecks > formats lint check in plan mode
+(pass) formatQualityChecks > formats typecheck in task mode (includes tsc --noEmit)
+(pass) formatQualityChecks > formats typecheck in plan mode (no tsc)
+(pass) formatQualityChecks > formats test check in task mode
+(pass) formatQualityChecks > formats test check in plan mode
+(pass) formatQualityChecks > formats format check
+(pass) formatQualityChecks > formats multiple quality checks joined with newline
+(pass) formatQualityChecks > returns empty string for empty array
+
+tests\phases\feature\design-sufficiency-review.test.ts:
+(pass) evaluateDesignSufficiency > marks structurally incomplete models as not ready
+(pass) evaluateDesignSufficiency > detects structurally complete but implementation-insufficient harden design
+(pass) evaluateDesignSufficiency > allows planning when constraints have behavior, contract, failure, boundary, and automated verification coverage
+
+tests\phases\feature\generation-design-review.test.ts:
+Requirement quality blocked: No goals defined; No risks documented
+(pass) generateDesignDocument — design sufficiency review integration > writes Design Sufficiency Review summary to generated documents [31.00ms]
+
+tests\phases\feature\synthesizer-v2.test.ts:
+(pass) RuleBasedSynthesizer — empty evidence > does not fabricate when evidence is empty
+(pass) RuleBasedSynthesizer — empty evidence > does not inject harden DRG architecture from unrelated quality-gate format evidence
+(pass) RuleBasedSynthesizer — empty evidence > does not generate reviewer/executor harden flow without reviewer and executor evidence
+(pass) RuleBasedSynthesizer — harden DRG evidence > derives goals covering adversarial flow, DAG isolation, quality-gate guard, and compatibility
+(pass) RuleBasedSynthesizer — harden DRG evidence > success criteria contain quality-gate trigger and format compatibility
+(pass) RuleBasedSynthesizer — harden DRG evidence > behavior scenarios have all four expected titles
+(pass) RuleBasedSynthesizer — harden DRG evidence > testing strategy exists
+(pass) RuleBasedSynthesizer — harden DRG evidence > architecture describes harden DRG components and boundaries only when full context exists
+(pass) RuleBasedSynthesizer — harden DRG evidence > completeness is complete
+
+ 701 pass
+ 0 fail
+ 1008 expect() calls
+Ran 701 tests across 22 files. [434.00ms]
