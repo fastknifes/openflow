@@ -30,3 +30,21 @@ export {
   type ApplyPromotionSuggestionsOptions,
   type PromotionResult,
 } from './current-promotion.js'
+
+// Archive pipeline stages
+export { resolveArchiveContext } from './resolve.js'
+export { validateArchive } from './validate.js'
+export { collectArchiveArtifacts } from './collect.js'
+export { finalizeArchive, cleanupStaging } from './finalize.js'
+export { formatBlockerMessage, formatArchiveReport, type ReportOptions } from './report.js'
+export { generateAdHocIssueArtifacts, shouldGeneratePostHocPromotionCandidate } from './issue.js'
+export type {
+  ArchiveMode,
+  ArchiveContext,
+  ArchiveSourcePaths,
+  ArchiveBlockerType,
+  ArchiveBlocker,
+  ValidationResult,
+  ArchiveFileChange,
+  FinalizeResult,
+} from './types.js'
