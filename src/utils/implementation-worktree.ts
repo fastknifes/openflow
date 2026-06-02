@@ -11,6 +11,7 @@ export interface WorktreeResult {
   path: string
   branch?: string
   baseRef?: string
+  baseBranch?: string
   error?: string
   stashed?: boolean  // whether auto-stash was performed
 }
@@ -26,6 +27,18 @@ export function getCurrentBaseRef(ctx: OpenFlowContext): string | undefined {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim()
+  } catch {
+    return undefined
+  }
+}
+
+export function getCurrentBranch(ctx: OpenFlowContext): string | undefined {
+  try {
+    return execSync('git branch --show-current', {
+      cwd: ctx.directory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim() || undefined
   } catch {
     return undefined
   }
@@ -81,13 +94,14 @@ export async function createWorktree(ctx: OpenFlowContext, feature: string): Pro
   const path = resolveWorktreePath(ctx, feature)
   const branch = `openflow/implement-${feature}`
   const baseRef = getCurrentBaseRef(ctx)
-  logger.debug('orchestrator', 'createWorktree started', { feature, path, branch, baseRef })
+  const baseBranch = getCurrentBranch(ctx)
+  logger.debug('orchestrator', 'createWorktree started', { feature, path, branch, baseRef, baseBranch })
 
   // Check for existing valid worktree — reuse if resumable
   const existing = await verifyWorktree(ctx, feature)
   if (existing.exists) {
     logger.info('orchestrator', 'reusing existing worktree', { feature, path, branch })
-    return baseRef ? { success: true, path, branch, baseRef } : { success: true, path, branch }
+    return { success: true, path, branch, ...(baseRef ? { baseRef } : {}), ...(baseBranch ? { baseBranch } : {}) }
   }
 
   // Conflicting path: directory exists but is not a valid git worktree
@@ -107,7 +121,7 @@ export async function createWorktree(ctx: OpenFlowContext, feature: string): Pro
     logger.debug('orchestrator', 'git worktree add with new branch', { path, branch })
     runGitCommand(ctx, ['worktree', 'add', '-b', branch, path])
     logger.info('orchestrator', 'worktree created with new branch', { path, branch })
-    return baseRef ? { success: true, path, branch, baseRef, stashed } : { success: true, path, branch, stashed }
+    return { success: true, path, branch, ...(baseRef ? { baseRef } : {}), ...(baseBranch ? { baseBranch } : {}), ...(stashed ? { stashed } : {}) }
   } catch (firstErr: unknown) {
     if (!isBranchAlreadyExistsError(firstErr)) {
       logger.warn('orchestrator', 'git worktree add failed', { feature, error: errorMessage(firstErr) })
@@ -118,7 +132,7 @@ export async function createWorktree(ctx: OpenFlowContext, feature: string): Pro
     try {
       runGitCommand(ctx, ['worktree', 'add', path, branch])
       logger.info('orchestrator', 'worktree created with existing branch', { path, branch })
-      return baseRef ? { success: true, path, branch, baseRef, stashed } : { success: true, path, branch, stashed }
+      return { success: true, path, branch, ...(baseRef ? { baseRef } : {}), ...(baseBranch ? { baseBranch } : {}), ...(stashed ? { stashed } : {}) }
     } catch (secondErr: unknown) {
       logger.warn('orchestrator', 'git worktree add with existing branch failed', { feature, error: errorMessage(secondErr) })
       return { success: false, path, branch, error: errorMessage(secondErr), stashed }

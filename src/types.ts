@@ -718,8 +718,10 @@ export interface ImplementationRun {
   worktree?: string
   /** Git branch used for the worktree */
   branch?: string
-  /** Base ref (git HEAD) when the worktree was created */
+  /** Base ref (git HEAD SHA) when the worktree was created */
   baseRef?: string
+  /** Base branch name (e.g. master/main) when the worktree was created — used by archive to merge back */
+  baseBranch?: string
   /** Backend executing the run */
   backend: ImplementationBackend
   /** Command used to invoke the backend */

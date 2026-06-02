@@ -89,11 +89,13 @@ export async function finalizeArchive(
   let mergeSucceeded = false
   if (isDerivedWorktree && implementationRun!.worktree && archiveCommitHash) {
     const branch = implementationRun!.branch ?? `openflow/implement-${ac.feature}`
-    // Branch check & switch
+    // Switch to the base branch (master/main) before merging the worktree branch
+    const targetBranch = implementationRun!.baseBranch || implementationRun!.baseRef
     try {
       const currentBranch = execSync('git branch --show-current', { cwd: ctx.directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-      if (currentBranch && implementationRun!.baseRef && currentBranch !== implementationRun!.baseRef) {
-        try { execSync(`git checkout ${implementationRun!.baseRef}`, { cwd: ctx.directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) } catch { /* continue */ }
+      if (currentBranch && targetBranch && currentBranch !== targetBranch) {
+        logger.info('orchestrator', 'switching to base branch before merge', { from: currentBranch, to: targetBranch })
+        try { execSync(`git checkout ${targetBranch}`, { cwd: ctx.directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) } catch { /* continue */ }
       }
     } catch { /* continue */ }
 

@@ -55,6 +55,7 @@ export async function handleImplement(
   let worktree: string | undefined
   let branch: string | undefined
   let baseRef: string | undefined
+  let baseBranch: string | undefined
   const containerMode: ImplementationContainerMode = effectiveUseWorktree ? 'worktree' : 'session'
   const backend: ImplementationBackend = 'opencode'
   const backendCommand = ''
@@ -240,7 +241,8 @@ export async function handleImplement(
       worktree = result.path
       branch = result.branch
       baseRef = result.baseRef
-      logger.info('orchestrator', 'worktree created', { path: result.path, branch: result.branch, baseRef })
+      baseBranch = result.baseBranch
+      logger.info('orchestrator', 'worktree created', { path: result.path, branch: result.branch, baseRef, baseBranch })
       await recordObservation(ctx, observationsPath, `Worktree ${worktree ? 'reused' : 'created'} for feature ${sanitizedFeature} at ${result.path} (branch: ${result.branch ?? 'unknown'})`)
       if (result.stashed) {
         await recordObservation(ctx, observationsPath, `Auto-stashed dirty main worktree before creating worktree for ${sanitizedFeature}`)
@@ -292,6 +294,7 @@ export async function handleImplement(
       ...(worktree ? { worktree } : {}),
       ...(branch ? { branch } : {}),
       ...(baseRef ? { baseRef } : {}),
+      ...(baseBranch ? { baseBranch } : {}),
       backend,
       backendCommand,
       status: 'created',
