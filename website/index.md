@@ -11,10 +11,10 @@ hero:
       link: /tutorial/
     - theme: alt
       text: 了解亮点
-      link: /guide/highlights
+      link: /guide/highlights/tdd
     - theme: alt
       text: 安装 OpenFlow
-      link: /tutorial/installation
+      link: /tutorial/getting-started/installation
 
 features:
   - title: 归档自动生成代码地图
@@ -43,6 +43,6 @@ feature → writing-plan → implement → quality-gate → archive
 
 ## 该从哪里开始？
 
-- 第一次接入项目：阅读[手动安装](/tutorial/installation)或把[LLM 自动安装](/tutorial/installation-for-agents)发给你的 Agent。
-- 想快速体验：跟着[10 分钟上手](/tutorial/quickstart)跑一次完整链路。
-- 想理解价值：先看[功能亮点](/guide/highlights)和[核心概念](/guide/core-concepts)。
+- 第一次接入项目：阅读[安装指南](/tutorial/getting-started/installation)。
+- 想快速体验：跟着[10 分钟上手](/tutorial/getting-started/quickstart)跑一次完整链路。
+- 想理解价值：先看[功能亮点](/guide/highlights/tdd)和[核心概念](/guide/understanding/core-concepts)。

@@ -12,58 +12,81 @@ export default defineConfig({
     nav: [
       { text: '指南', link: '/guide/' },
       { text: '教程', link: '/tutorial/' },
+      { text: '参考', link: '/reference/' },
     ],
 
     sidebar: {
       '/guide/': [
         {
-          text: '认识 OpenFlow',
+          text: '了解 OpenFlow',
           items: [
-            { text: '概览', link: '/guide/' },
-            { text: '核心概念', link: '/guide/core-concepts' },
-            { text: '架构图解', link: '/guide/diagrams' },
-            { text: '功能亮点', link: '/guide/highlights' },
-            { text: '适用场景与对比', link: '/guide/comparison' },
-            { text: '目录约定', link: '/guide/directory-conventions' },
+            { text: '概览', link: '/guide/understanding/' },
+            { text: '核心概念', link: '/guide/understanding/core-concepts' },
+          ],
+        },
+        {
+          text: '设计与架构',
+          items: [
+            { text: '架构图解', link: '/guide/architecture/diagrams' },
+            { text: '目录约定', link: '/guide/architecture/directory-conventions' },
+            { text: '适用场景与对比', link: '/guide/architecture/comparison' },
+          ],
+        },
+        {
+          text: '工作原理',
+          items: [
+            { text: '头脑风暴', link: '/guide/how-it-works/brainstorm' },
+            { text: 'Feature', link: '/guide/how-it-works/feature' },
+            { text: '开发计划', link: '/guide/how-it-works/writing-plan' },
+            { text: '执行', link: '/guide/how-it-works/implement' },
+            { text: '质量门', link: '/guide/how-it-works/quality-gate' },
+            { text: '归档', link: '/guide/how-it-works/archive' },
+          ],
+        },
+        {
+          text: '功能亮点',
+          items: [
+            { text: 'TDD 指导', link: '/guide/highlights/tdd' },
+            { text: '金字塔编程', link: '/guide/highlights/pyramid' },
+            { text: 'AI 自我反思', link: '/guide/highlights/ai-reflection' },
+            { text: '设计漂移检测', link: '/guide/highlights/drift-detection' },
+            { text: '合约与约束扫描', link: '/guide/highlights/contract-scanning' },
+            { text: 'Code Map', link: '/guide/highlights/code-map' },
+            { text: 'Harden 对抗审查', link: '/guide/highlights/harden' },
+            { text: 'BDD 与集成测试', link: '/guide/highlights/bdd' },
           ],
         },
       ],
       '/tutorial/': [
         {
-          text: '安装与上手',
+          text: '开始使用',
           items: [
             { text: '教程概览', link: '/tutorial/' },
-            { text: '手动安装', link: '/tutorial/installation' },
-            { text: 'LLM 自动安装', link: '/tutorial/installation-for-agents' },
-            { text: '10 分钟上手', link: '/tutorial/quickstart' },
-            { text: '最小配置', link: '/tutorial/configuration' },
+            { text: '安装', link: '/tutorial/getting-started/installation' },
+            { text: '10 分钟上手', link: '/tutorial/getting-started/quickstart' },
+            { text: '最小配置', link: '/tutorial/getting-started/configuration' },
           ],
         },
         {
-          text: '工作流教程',
+          text: '实操指南',
           items: [
-            { text: 'Feature 工作流', link: '/tutorial/feature-workflow' },
-            { text: '实施与执行后端', link: '/tutorial/implementation' },
-            { text: '质量门与归档', link: '/tutorial/quality-gate-and-archive' },
-            { text: 'Issue 上下文处理', link: '/tutorial/issue-context' },
-            { text: '开发中需求变更', link: '/tutorial/mid-development-change' },
-            { text: '迁移已有文档', link: '/tutorial/migrate-docs' },
+            { text: '设计与规划', link: '/tutorial/walkthrough/design-and-planning' },
+            { text: '实施与完成', link: '/tutorial/walkthrough/implement-and-complete' },
           ],
         },
         {
-          text: '参考',
+          text: '进阶场景',
           items: [
-            { text: '命令速查', link: '/tutorial/commands' },
-            { text: 'FAQ', link: '/tutorial/faq' },
-            { text: '问题排查', link: '/tutorial/troubleshooting' },
+            { text: 'Issue 上下文处理', link: '/tutorial/advanced/issue-context' },
+            { text: '开发中需求变更', link: '/tutorial/advanced/mid-development-change' },
+            { text: '迁移已有文档', link: '/tutorial/advanced/migrate-docs' },
           ],
         },
       ],
-      '/misc/': [
-        {
-          text: '其他',
-          items: [],
-        },
+      '/reference/': [
+        { text: '命令速查', link: '/reference/commands' },
+        { text: 'FAQ', link: '/reference/faq' },
+        { text: '问题排查', link: '/reference/troubleshooting' },
       ],
     },
 
