@@ -1,0 +1,346 @@
+{
+  "version": 4,
+  "feature": "website-content-and-information-architecture-restructure",
+  "sourceIntent": "website-content-and-information-architecture-restructure",
+  "workflowState": "complete",
+  "collectedFacts": {
+    "目标": "重构 website 内容与信息架构：消除重复占位页、建立三层导航结构、按职责重新分区",
+    "当前问题": "18个占位页散布在4个空壳目录(introduction/getting-started/highlights/misc)、guide和tutorial职责边界模糊、sidebar配置不完整、workflow目录与tutorial/guide内容重叠",
+    "最终架构-导航": "Nav bar: 指南 | 教程 | 参考。1级导航=nav bar，2级导航=子目录(guide下4个: understanding/architecture/how-it-works/highlights，tutorial下3个: getting-started/walkthrough/advanced)，3级=具体页面",
+    "最终架构-guide": "guide/含19页。understanding/(概览+核心概念) + architecture/(架构图解+目录约定+适用场景对比) + how-it-works/(头脑风暴+Feature+开发计划+执行+质量门+归档) + highlights/(TDD+金字塔编程+AI反思+漂移检测+合约扫描+CodeMap+Harden+BDD)",
+    "最终架构-tutorial": "tutorial/含10页。getting-started/(安装合并LLM自动+10分钟上手+最小配置) + walkthrough/(设计与规划实操+实施与完成实操) + advanced/(Issue上下文+开发中需求变更+迁移已有文档)",
+    "最终架构-reference": "reference/含4页。index+命令速查+FAQ+问题排查(从tutorial和misc移入)",
+    "关键决策": "guide=概念+工作原理+亮点不做操作步骤; tutorial=纯实操内部节点不独立成页; highlights拆为8个独立页; 安装页合并; 实操指南按阶段分两页; workflow目录删除; 所有流程图用Mermaid不用SVG",
+    "删除清单": "introduction/(4占位页) + getting-started/(3占位页) + highlights/(4占位页) + misc/(2占位页) + workflow/(整个目录) + guide/下6占位页 + public/diagrams/*.svg",
+    "新建清单": "guide/下4个子目录+14个新页面(6个工作原理+8个亮点); tutorial/walkthrough/2个实操页; reference/index.md",
+    "流程图要求": "所有架构图解和流程图使用内联Mermaid代码块(类似原workflow/index.md的风格)，不使用SVG图片",
+    "融移入工作原理的内容": "范围控制→头脑风暴页; 合约约束→Feature页; 工作树隔离+生态集成→执行页; 证据新鲜度→质量门页",
+    "非目标": "不改视觉主题交互体验; 不换技术栈(VitePress); 不做i18n; 不改docs/目录本身的文档结构"
+  },
+  "assumptions": [],
+  "pendingConfirmations": [],
+  "draftStatus": "final",
+  "requirementModel": {
+    "feature": "website-content-and-information-architecture-restructure",
+    "sourceIntent": "website-content-and-information-architecture-restructure",
+    "convergenceStatus": "final",
+    "assumptions": [],
+    "pendingConfirmations": [],
+    "constraints": [
+      {
+        "id": "c-0001",
+        "category": "scope",
+        "severity": "should",
+        "description": "重构 website 内容与信息架构：消除重复占位页、建立三层导航结构、按职责重新分区",
+        "rationale": "Derived from collected fact: 目标",
+        "verificationMethod": "Verify implementation satisfies the 目标 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0002",
+        "category": "scope",
+        "severity": "should",
+        "description": "18个占位页散布在4个空壳目录(introduction/getting-started/highlights/misc)、guide和tutorial职责边界模糊、sidebar配置不完整、workflow目录与tutorial/guide内容重叠",
+        "rationale": "Derived from collected fact: 当前问题",
+        "verificationMethod": "Verify implementation satisfies the 当前问题 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0003",
+        "category": "scope",
+        "severity": "should",
+        "description": "Nav bar: 指南 | 教程 | 参考。1级导航=nav bar，2级导航=子目录(guide下4个: understanding/architecture/how-it-works/highlights，tutorial下3个: getting-started/walkthrough/advanced)，3级=具体页面",
+        "rationale": "Derived from collected fact: 最终架构-导航",
+        "verificationMethod": "Verify implementation satisfies the 最终架构-导航 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0004",
+        "category": "scope",
+        "severity": "should",
+        "description": "guide/含19页。understanding/(概览+核心概念) + architecture/(架构图解+目录约定+适用场景对比) + how-it-works/(头脑风暴+Feature+开发计划+执行+质量门+归档) + highlights/(TDD+金字塔编程+AI反思+漂移检测+合约扫描+CodeMap+Harden+BDD)",
+        "rationale": "Derived from collected fact: 最终架构-guide",
+        "verificationMethod": "Verify implementation satisfies the 最终架构-guide requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0005",
+        "category": "scope",
+        "severity": "should",
+        "description": "tutorial/含10页。getting-started/(安装合并LLM自动+10分钟上手+最小配置) + walkthrough/(设计与规划实操+实施与完成实操) + advanced/(Issue上下文+开发中需求变更+迁移已有文档)",
+        "rationale": "Derived from collected fact: 最终架构-tutorial",
+        "verificationMethod": "Verify implementation satisfies the 最终架构-tutorial requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0006",
+        "category": "scope",
+        "severity": "should",
+        "description": "reference/含4页。index+命令速查+FAQ+问题排查(从tutorial和misc移入)",
+        "rationale": "Derived from collected fact: 最终架构-reference",
+        "verificationMethod": "Verify implementation satisfies the 最终架构-reference requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0007",
+        "category": "scope",
+        "severity": "should",
+        "description": "guide=概念+工作原理+亮点不做操作步骤; tutorial=纯实操内部节点不独立成页; highlights拆为8个独立页; 安装页合并; 实操指南按阶段分两页; workflow目录删除; 所有流程图用Mermaid不用SVG",
+        "rationale": "Derived from collected fact: 关键决策",
+        "verificationMethod": "Verify implementation satisfies the 关键决策 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0008",
+        "category": "scope",
+        "severity": "should",
+        "description": "introduction/(4占位页) + getting-started/(3占位页) + highlights/(4占位页) + misc/(2占位页) + workflow/(整个目录) + guide/下6占位页 + public/diagrams/*.svg",
+        "rationale": "Derived from collected fact: 删除清单",
+        "verificationMethod": "Verify implementation satisfies the 删除清单 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0009",
+        "category": "scope",
+        "severity": "should",
+        "description": "guide/下4个子目录+14个新页面(6个工作原理+8个亮点); tutorial/walkthrough/2个实操页; reference/index.md",
+        "rationale": "Derived from collected fact: 新建清单",
+        "verificationMethod": "Verify implementation satisfies the 新建清单 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0010",
+        "category": "scope",
+        "severity": "should",
+        "description": "所有架构图解和流程图使用内联Mermaid代码块(类似原workflow/index.md的风格)，不使用SVG图片",
+        "rationale": "Derived from collected fact: 流程图要求",
+        "verificationMethod": "Verify implementation satisfies the 流程图要求 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0011",
+        "category": "scope",
+        "severity": "should",
+        "description": "范围控制→头脑风暴页; 合约约束→Feature页; 工作树隔离+生态集成→执行页; 证据新鲜度→质量门页",
+        "rationale": "Derived from collected fact: 融移入工作原理的内容",
+        "verificationMethod": "Verify implementation satisfies the 融移入工作原理的内容 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0012",
+        "category": "scope",
+        "severity": "should",
+        "description": "不改视觉主题交互体验; 不换技术栈(VitePress); 不做i18n; 不改docs/目录本身的文档结构",
+        "rationale": "Derived from collected fact: 非目标",
+        "verificationMethod": "Verify implementation satisfies the 非目标 requirement",
+        "sourceQuestionId": "fallback"
+      }
+    ],
+    "scopeBoundary": {
+      "inScope": [
+        "website-content-and-information-architecture-restructure"
+      ],
+      "outOfScope": []
+    },
+    "acceptanceCriteria": [
+      {
+        "id": "ac-0001",
+        "description": "Deliver website-content-and-information-architecture-restructure"
+      }
+    ],
+    "goals": [
+      "Deliver website-content-and-information-architecture-restructure"
+    ],
+    "nonGoals": [],
+    "sourceContext": {
+      "facts": {
+        "目标": "重构 website 内容与信息架构：消除重复占位页、建立三层导航结构、按职责重新分区",
+        "当前问题": "18个占位页散布在4个空壳目录(introduction/getting-started/highlights/misc)、guide和tutorial职责边界模糊、sidebar配置不完整、workflow目录与tutorial/guide内容重叠",
+        "最终架构-导航": "Nav bar: 指南 | 教程 | 参考。1级导航=nav bar，2级导航=子目录(guide下4个: understanding/architecture/how-it-works/highlights，tutorial下3个: getting-started/walkthrough/advanced)，3级=具体页面",
+        "最终架构-guide": "guide/含19页。understanding/(概览+核心概念) + architecture/(架构图解+目录约定+适用场景对比) + how-it-works/(头脑风暴+Feature+开发计划+执行+质量门+归档) + highlights/(TDD+金字塔编程+AI反思+漂移检测+合约扫描+CodeMap+Harden+BDD)",
+        "最终架构-tutorial": "tutorial/含10页。getting-started/(安装合并LLM自动+10分钟上手+最小配置) + walkthrough/(设计与规划实操+实施与完成实操) + advanced/(Issue上下文+开发中需求变更+迁移已有文档)",
+        "最终架构-reference": "reference/含4页。index+命令速查+FAQ+问题排查(从tutorial和misc移入)",
+        "关键决策": "guide=概念+工作原理+亮点不做操作步骤; tutorial=纯实操内部节点不独立成页; highlights拆为8个独立页; 安装页合并; 实操指南按阶段分两页; workflow目录删除; 所有流程图用Mermaid不用SVG",
+        "删除清单": "introduction/(4占位页) + getting-started/(3占位页) + highlights/(4占位页) + misc/(2占位页) + workflow/(整个目录) + guide/下6占位页 + public/diagrams/*.svg",
+        "新建清单": "guide/下4个子目录+14个新页面(6个工作原理+8个亮点); tutorial/walkthrough/2个实操页; reference/index.md",
+        "流程图要求": "所有架构图解和流程图使用内联Mermaid代码块(类似原workflow/index.md的风格)，不使用SVG图片",
+        "融移入工作原理的内容": "范围控制→头脑风暴页; 合约约束→Feature页; 工作树隔离+生态集成→执行页; 证据新鲜度→质量门页",
+        "非目标": "不改视觉主题交互体验; 不换技术栈(VitePress); 不做i18n; 不改docs/目录本身的文档结构"
+      },
+      "assumptions": []
+    }
+  },
+  "designReview": {
+    "status": "not_ready",
+    "summary": "Design is generated, but implementation constraints are not yet sufficient for reliable planning.",
+    "structuralCompleteness": "missing_architecture",
+    "designReadiness": "not_ready",
+    "findings": [
+      {
+        "id": "F-0001",
+        "severity": "blocking",
+        "category": "constraint_specificity",
+        "message": "Structural completeness is missing_architecture.",
+        "evidenceIds": [],
+        "suggestedFix": "Add the missing structural sections before implementation planning."
+      },
+      {
+        "id": "F-0002",
+        "severity": "blocking",
+        "category": "constraint_specificity",
+        "message": "6 important constraint(s) are not sufficiently covered by scenarios, criteria, and architecture.",
+        "evidenceIds": [],
+        "suggestedFix": "Add implementation-level constraints that name owners, triggers, state changes, failure behavior, and verification methods."
+      },
+      {
+        "id": "F-0003",
+        "severity": "warning",
+        "category": "behavior_coverage",
+        "message": "Behavior coverage is thin; fewer than two scenarios were synthesized.",
+        "evidenceIds": [],
+        "suggestedFix": "Add observable examples for the main success path and at least one failure/edge path."
+      },
+      {
+        "id": "F-0004",
+        "severity": "blocking",
+        "category": "data_contract",
+        "message": "The design references outputs, payloads, compatibility, or result contracts without a concrete data contract.",
+        "evidenceIds": [],
+        "suggestedFix": "Define required fields, optional fields, enum/status values, and compatibility expectations."
+      },
+      {
+        "id": "F-0005",
+        "severity": "blocking",
+        "category": "failure_semantics",
+        "message": "The design involves execution, tasks, or state transitions but lacks explicit failure/timeout/abort semantics.",
+        "evidenceIds": [],
+        "suggestedFix": "Specify failed/blocked/cancelled states, timeout behavior, abort propagation, and retry policy."
+      },
+      {
+        "id": "F-0006",
+        "severity": "blocking",
+        "category": "integration_boundary",
+        "message": "The design references integration with existing systems but lacks explicit allowed and forbidden boundary changes.",
+        "evidenceIds": [],
+        "suggestedFix": "Document integration boundaries, allowed changes, forbidden changes, and compatibility guarantees."
+      }
+    ],
+    "coverageMatrix": [
+      {
+        "constraintId": "c-0001",
+        "constraintText": "重构 website 内容与信息架构：消除重复占位页、建立三层导航结构、按职责重新分区",
+        "coveredByGoals": [
+          "g-0002"
+        ],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0002",
+        "constraintText": "reference/含4页。index+命令速查+FAQ+问题排查(从tutorial和misc移入)",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0003",
+        "constraintText": "guide/下4个子目录+14个新页面(6个工作原理+8个亮点); tutorial/walkthrough/2个实操页; reference/index.md",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0004",
+        "constraintText": "所有架构图解和流程图使用内联Mermaid代码块(类似原workflow/index.md的风格)，不使用SVG图片",
+        "coveredByGoals": [
+          "g-0003"
+        ],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "failure/timeout/abort semantics",
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0005",
+        "constraintText": "范围控制→头脑风暴页; 合约约束→Feature页; 工作树隔离+生态集成→执行页; 证据新鲜度→质量门页",
+        "coveredByGoals": [
+          "g-0001"
+        ],
+        "coveredByScenarios": [
+          "bs-0001"
+        ],
+        "coveredBySuccessCriteria": [
+          "sc-0001"
+        ],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "failure/timeout/abort semantics",
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0006",
+        "constraintText": "不改视觉主题交互体验; 不换技术栈(VitePress); 不做i18n; 不改docs/目录本身的文档结构",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      }
+    ],
+    "missingImplementationFacts": [
+      {
+        "key": "implementation_constraints",
+        "question": "Which concrete APIs, state transitions, payload fields, and ownership rules must the implementation follow?",
+        "reason": "Structural completeness is missing_architecture.",
+        "exampleAnswer": "Define task ids, output schema, state transitions, and ownership for each workflow step."
+      },
+      {
+        "key": "data_contracts",
+        "question": "What are the exact required/optional fields, enum values, and compatibility rules for each output contract?",
+        "reason": "The design references outputs, payloads, compatibility, or result contracts without a concrete data contract.",
+        "exampleAnswer": "harden_result = { findings: Finding[], codeChanges?: CodeChange[], readiness: ReadinessStatus } with status enum ..."
+      },
+      {
+        "key": "failure_semantics",
+        "question": "How should failures, timeouts, aborts, blocked downstream work, and retries be handled?",
+        "reason": "The design involves execution, tasks, or state transitions but lacks explicit failure/timeout/abort semantics.",
+        "exampleAnswer": "On timeout, abort DAG, mark running/pending tasks cancelled, and return a timeout harden_result."
+      },
+      {
+        "key": "integration_boundaries",
+        "question": "Which existing components may change, which must remain compatible, and what changes are forbidden?",
+        "reason": "The design references integration with existing systems but lacks explicit allowed and forbidden boundary changes."
+      }
+    ]
+  },
+  "generatedDocs": [
+    "F:\\ai-code\\openflow\\docs\\changes\\2026-06-01-website-content-and-information-architecture-restructure\\design.md",
+    "F:\\ai-code\\openflow\\docs\\changes\\2026-06-01-website-content-and-information-architecture-restructure\\behavior.md"
+  ],
+  "generationAttemptCount": 2,
+  "updatedAt": "2026-06-01T07:46:38.259Z"
+}

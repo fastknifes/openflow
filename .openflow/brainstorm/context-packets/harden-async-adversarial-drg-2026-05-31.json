@@ -1,0 +1,65 @@
+{
+  "id": "harden-async-adversarial-drg-2026-05-31",
+  "created": "2026-05-31",
+  "topic": "重新设计 harden 工作流，使用 DRG 做异步 AI 对话交互",
+  "decisions": [
+    {
+      "topic": "DRG 角色",
+      "decision": "全局单例任务调度器，插件启动时初始化，不改造成事件总线",
+      "rationale": "事件总线无法表达串行依赖约束，DRG 的 DAG 模型天然适合 reviewer→executor 串行执行"
+    },
+    {
+      "topic": "harden 隔离",
+      "decision": "每次 harden 调用创建独立 DAG（harden-<uuid>），结束后归档销毁",
+      "rationale": "独立 DAG 便于调试和归档，不同 harden 实例互不干扰"
+    },
+    {
+      "topic": "对抗模型",
+      "decision": "异步通信总线，reviewer 和 executor 各持长 session，DRG 调度思考回合任务在已有 session 上追加消息",
+      "rationale": "长 session 保留完整对抗历史，提升推理一致性；像聊天一样追加消息更自然"
+    },
+    {
+      "topic": "任务粒度",
+      "decision": "思考回合任务，让 reviewer/executor session 基于当前消息历史生成下一轮报告",
+      "rationale": "与现有 DRG 任务执行模型匹配"
+    },
+    {
+      "topic": "Session 创建",
+      "decision": "惰性创建，首个需要某类型 session 的 DRG 任务现场创建，session ID 链式传递",
+      "rationale": "避免预创建未使用的 session，链式传递是最简单的不依赖外部状态的方案"
+    },
+    {
+      "topic": "默认轮次",
+      "decision": "1 轮对抗（reviewer→executor→reviewer），可配置最多 10 轮，串行执行",
+      "rationale": "多数 harden 只需一轮收敛，减少不必要的 token 消耗"
+    },
+    {
+      "topic": "终止条件",
+      "decision": "reviewer 判定无争议（executor 上报为空或全部认可），或达到 max rounds",
+      "rationale": "executor 不能单方面静默结束，避免跳过真正的问题"
+    },
+    {
+      "topic": "驳回规则",
+      "decision": "同一 finding 被 executor 连续拒绝 3 次，reviewer session 自维护计数器，达到后不再上报",
+      "rationale": "防止无限循环，reviewer 自维护最简洁，不增加架构复杂度"
+    },
+    {
+      "topic": "DAG 动态生长",
+      "decision": "运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务",
+      "rationale": "不需要编排器，reviewer 和 executor 自行决定是否继续对抗"
+    }
+  ],
+  "constraints": [
+    "DRG 引擎核心不因本功能修改",
+    "harden 输出格式必须与现有格式兼容",
+    "quality-gate 编排逻辑不修改",
+    "同一时间最多一个 harden DAG 运行"
+  ],
+  "nonGoals": [
+    "不改造 DRG 为事件总线",
+    "不支持并行 harden",
+    "不支持分布式多进程对抗",
+    "不修改 reviewer/executor 的 prompt 策略"
+  ],
+  "featureDocs": "docs/changes/2026-05-31-harden-async-adversarial-drg/"
+}

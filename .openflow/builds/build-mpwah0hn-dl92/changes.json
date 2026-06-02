@@ -1,0 +1,32 @@
+[
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\commands\\quality-gate.ts",
+    "tool": "edit",
+    "timestamp": 1780385583828
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\utils\\feature-resolver.ts",
+    "tool": "edit",
+    "timestamp": 1780385954663
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\commands\\verify.ts",
+    "tool": "edit",
+    "timestamp": 1780385423076
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\phases\\archive\\resolve.ts",
+    "tool": "edit",
+    "timestamp": 1780385939481
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\commands\\harden.ts",
+    "tool": "edit",
+    "timestamp": 1780385690440
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\hooks\\implementation-guard.ts",
+    "tool": "edit",
+    "timestamp": 1780385873991
+  }
+]

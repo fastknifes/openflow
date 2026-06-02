@@ -1,0 +1,4 @@
+[2026-06-01T09:11:50.488Z] Worktree reused for feature website-content-and-information-architecture-restructure at F:\ai-code\openflow\.openflow\worktree\website-content-and-information-architecture-restructure (branch: openflow/implement-website-content-and-information-architecture-restructure)
+[2026-06-01T09:11:50.499Z] Auto-stashed dirty main worktree before creating worktree for website-content-and-information-architecture-restructure
+[2026-06-01T09:11:50.515Z] WARNING: Main worktree is dirty while using isolated worktree for website-content-and-information-architecture-restructure. Changes in main worktree are not affected by this run.
+[2026-06-01T09:11:50.520Z] Implementation run run_a55608f5-770f-4147-9fb6-b640bac56189 created for website-content-and-information-architecture-restructure (backend: opencode, containerMode: worktree)

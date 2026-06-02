@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "byFeature": {
+    "constraints": {
+      "changeDir": "2026-05-28-constraints"
+    },
+    "quality-gate": {
+      "changeDir": "2026-05-29-quality-gate",
+      "archiveDir": "2026-05-29-quality-gate"
+    },
+    "openflow-implement": {
+      "changeDir": "2026-05-29-openflow-implement"
+    },
+    "describe-idea-in-natural-language-continue-in-session": {
+      "changeDir": "2026-05-31-describe-idea-in-natural-language-continue-in-session"
+    },
+    "workflow": {
+      "changeDir": "2026-05-31-workflow"
+    },
+    "harden-drg-reviewer": {
+      "changeDir": "2026-05-31-harden-drg-reviewer"
+    },
+    "harden-drg-adversarial-loop": {
+      "changeDir": "2026-05-31-harden-drg-adversarial-loop"
+    },
+    "harden-drg-async-adversarial": {
+      "changeDir": "2026-05-31-harden-drg-async-adversarial"
+    },
+    "harden-drg-adversarial": {
+      "changeDir": "2026-05-31-harden-drg-adversarial"
+    },
+    "requirement-synthesizer": {
+      "changeDir": "2026-05-31-requirement-synthesizer",
+      "archiveDir": "2026-05-31-requirement-synthesizer"
+    },
+    "harden-drg-async": {
+      "changeDir": "2026-05-31-harden-drg-async",
+      "archiveDir": "2026-05-31-harden-drg-async"
+    },
+    "brainstorm-context-packet": {
+      "changeDir": "2026-06-01-brainstorm-context-packet",
+      "archiveDir": "2026-06-01-brainstorm-context-packet"
+    },
+    "2026-05-23-brainstorm-context-packet": {
+      "changeDir": "2026-06-01-2026-05-23-brainstorm-context-packet",
+      "archiveDir": "2026-06-01-2026-05-23-brainstorm-context-packet"
+    },
+    "openflow-archive-design": {
+      "changeDir": "2026-06-01-openflow-archive-design"
+    },
+    "website-content-and-information-architecture-restructure": {
+      "changeDir": "2026-06-01-website-content-and-information-architecture-restructure"
+    },
+    "changes-2026-06": {
+      "changeDir": "2026-06-01-changes-2026-06"
+    },
+    "design": {
+      "changeDir": "2026-06-02-design",
+      "archiveDir": "2026-06-02-design"
+    }
+  }
+}
