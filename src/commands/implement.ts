@@ -404,7 +404,11 @@ export async function handleImplement(
     '',
     `*Implementation run created at ${new Date().toISOString()}*`,
     '',
-    `> 提醒：实现完成并通过质量门禁后，请运行 \`/openflow-archive ${sanitizedFeature}\` 来归档本次变更。`,
+    '> 提醒：实现完成并通过质量门禁后，请运行以下命令来归档本次变更：',
+    '',
+    '```',
+    `/openflow-archive ${sanitizedFeature}`,
+    '```',
   )
 
   return resultLines.filter(Boolean).join('\n')

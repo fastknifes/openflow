@@ -556,6 +556,7 @@ When: the relevant workflow step executes
 Then:
 - 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。
 
+<<<<<<< Updated upstream
 ## Behavior Evidence
 
 | Scenario ID | Criticality | Evidence Ref | Evidence Type | Coverage Level | Equivalence Rationale | Freshness | Status |
@@ -565,6 +566,8 @@ Then:
 | SC-003 | critical | Harden dynamic task injection review | code-review | exact | Verified by runDrgAdversarialLoop dynamic task submission | fresh | verified |
 | SC-004 | critical | Harden async session bus review | code-review | exact | Verified by DRG task chaining with session ID propagation | fresh | verified |
 
+=======
+>>>>>>> Stashed changes
 ## Design Sufficiency Review
 
 - Status: Not Ready

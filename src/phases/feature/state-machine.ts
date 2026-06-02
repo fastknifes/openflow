@@ -24,6 +24,11 @@ export interface FeatureSession {
   lastConsumedMessageId?: string | undefined
   lastError?: string | undefined
   updatedAt: string
+  clarificationState?: {
+    round: number
+    maxRounds: number
+    unresolvedDimensions?: string[]
+  } | undefined
   pendingContextHarvest?: {
     awaitingPacketId?: string | undefined
     confirmedPacketId?: string | undefined
