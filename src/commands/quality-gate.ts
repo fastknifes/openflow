@@ -537,6 +537,34 @@ async function runSetupPhase(
     ? { ...ctx, directory: executionRoot, worktree: activeRun.worktree || executionRoot }
     : ctx
 
+  // Auto-commit uncommitted changes in worktree before proceeding with quality gate.
+  // The build agent may not have committed its changes, which would prevent proper
+  // diff analysis and evidence collection.
+  if (activeRun?.worktree) {
+    try {
+      const worktreeStatus = execSync('git status --porcelain', {
+        cwd: activeRun.worktree,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim()
+      if (worktreeStatus.length > 0) {
+        logger.info('quality_gate', 'auto-committing worktree changes before quality gate', { worktree: activeRun.worktree })
+        execSync('git add -A', { cwd: activeRun.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        execSync(`git commit -m "chore: auto-commit before quality gate for ${activeRun.feature}" --no-verify`, {
+          cwd: activeRun.worktree,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+        logger.info('quality_gate', 'worktree auto-commit succeeded', { worktree: activeRun.worktree })
+      }
+    } catch (err) {
+      logger.warn('quality_gate', 'auto-commit failed in worktree (non-blocking)', {
+        worktree: activeRun.worktree,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   if (activeRun) {
     await implementationRunStore.updateRun(ctx, activeRun.runID, { status: 'quality_gate_running' })
     await appendQualityGateRunEvent(ctx, activeRun, { type: 'quality_gate_started' })

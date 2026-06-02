@@ -1,8 +1,10 @@
 import { execSync } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
+import * as fs from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { OpenFlowContext } from '../types.js'
 import { logger } from '../utils/logger.js'
+import { resolveChangeUnitDir } from './change-units.js'
 
 export interface WorktreeResult {
   success: boolean
@@ -225,4 +227,91 @@ function worktreeListIncludesPath(list: string, path: string): boolean {
 
 function normalizePath(path: string): string {
   return resolve(path).replace(/\\/g, '/').toLowerCase()
+}
+
+/**
+ * Sync changes workspace files from the main repo to the worktree.
+ *
+ * When a worktree is created from HEAD, it only contains committed files.
+ * The docs/changes/ workspace (design, plan, behavior, constraints) and
+ * supporting state files (.openflow/change-units.json, .sisyphus/plans/)
+ * may be uncommitted in the main repo and thus missing from the worktree.
+ *
+ * This function copies those files so the build agent and QG can find them.
+ */
+export async function syncChangesToWorktree(
+  ctx: OpenFlowContext,
+  feature: string,
+  worktreePath: string,
+): Promise<{ synced: string[]; errors: string[] }> {
+  const synced: string[] = []
+  const errors: string[] = []
+
+  // 1. Resolve and copy docs/changes/{changeDir}/
+  try {
+    const changeDir = await resolveChangeUnitDir(ctx.directory, feature)
+    const sourceChangeDir = join(ctx.directory, 'docs', 'changes', changeDir)
+    const targetChangeDir = join(worktreePath, 'docs', 'changes', changeDir)
+
+    if (existsSync(sourceChangeDir)) {
+      await fs.mkdir(join(targetChangeDir, '..'), { recursive: true })
+      await copyDirRecursive(sourceChangeDir, targetChangeDir)
+      synced.push(`docs/changes/${changeDir}/`)
+      logger.info('orchestrator', 'synced changes workspace to worktree', { feature, changeDir, worktreePath })
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    errors.push(`docs/changes sync failed: ${msg}`)
+    logger.warn('orchestrator', 'failed to sync changes workspace to worktree', { feature, error: msg })
+  }
+
+  // 2. Copy .openflow/change-units.json (needed for resolveChangeUnitDir in worktree)
+  try {
+    const sourceIndex = join(ctx.directory, '.openflow', 'change-units.json')
+    const targetIndex = join(worktreePath, '.openflow', 'change-units.json')
+    if (existsSync(sourceIndex)) {
+      await fs.mkdir(join(targetIndex, '..'), { recursive: true })
+      await fs.copyFile(sourceIndex, targetIndex)
+      synced.push('.openflow/change-units.json')
+    }
+  } catch {
+    // Non-critical — change unit resolution has fallback logic
+  }
+
+  // 3. Copy .sisyphus/plans/ if it exists (plan state tracking)
+  try {
+    const sourcePlans = join(ctx.directory, '.sisyphus', 'plans')
+    const targetPlans = join(worktreePath, '.sisyphus', 'plans')
+    if (existsSync(sourcePlans)) {
+      await copyDirRecursive(sourcePlans, targetPlans)
+      synced.push('.sisyphus/plans/')
+    }
+  } catch {
+    // Non-critical
+  }
+
+  // 4. Copy .openflow/acceptance.local.md if it exists (acceptance state)
+  try {
+    const sourceAcceptance = join(ctx.directory, '.openflow', 'acceptance.local.md')
+    const targetAcceptance = join(worktreePath, '.openflow', 'acceptance.local.md')
+    if (existsSync(sourceAcceptance)) {
+      await fs.mkdir(join(targetAcceptance, '..'), { recursive: true })
+      await fs.copyFile(sourceAcceptance, targetAcceptance)
+      synced.push('.openflow/acceptance.local.md')
+    }
+  } catch {
+    // Non-critical — QG will create a fresh state if missing
+  }
+
+  return { synced, errors }
+}
+
+/**
+ * Recursively copy a directory. Uses fs.cp when available (Node 16.7+),
+ * falls back to manual recursive copy for older runtimes.
+ */
+async function copyDirRecursive(source: string, target: string): Promise<void> {
+  await fs.mkdir(target, { recursive: true })
+  // fs.cp with recursive:true is available in Node 16.7+
+  await fs.cp(source, target, { recursive: true })
 }

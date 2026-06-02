@@ -6,7 +6,7 @@ import type { ToolContext } from '@opencode-ai/plugin/tool'
 import type { ImplementationBackend, ImplementationContainerMode, ImplementationRunStatus, OpenFlowContext } from '../types.js'
 import { implementationRunStore, recordObservation } from '../utils/implementation-run.js'
 import { handoffToBackend } from '../utils/implementation-backend.js'
-import { createWorktree, isMainWorktreeDirty } from '../utils/implementation-worktree.js'
+import { createWorktree, isMainWorktreeDirty, syncChangesToWorktree } from '../utils/implementation-worktree.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { sanitizeFeatureName } from '../utils/security.js'
 import type { ImplementationRun } from '../types.js'
@@ -247,6 +247,22 @@ export async function handleImplement(
       }
       if (mainWorktreeDirty) {
         await recordObservation(ctx, observationsPath, `WARNING: Main worktree is dirty while using isolated worktree for ${sanitizedFeature}. Changes in main worktree are not affected by this run.`)
+      }
+
+      // Sync changes workspace to worktree so build agent and QG can find docs/changes files
+      try {
+        const syncResult = await syncChangesToWorktree(ctx, sanitizedFeature, result.path)
+        if (syncResult.synced.length > 0) {
+          logger.info('orchestrator', 'changes workspace synced to worktree', { feature: sanitizedFeature, synced: syncResult.synced })
+          await recordObservation(ctx, observationsPath, `Synced changes workspace to worktree: ${syncResult.synced.join(', ')}`)
+        }
+        if (syncResult.errors.length > 0) {
+          logger.warn('orchestrator', 'changes workspace sync partial failure', { feature: sanitizedFeature, errors: syncResult.errors })
+          await recordObservation(ctx, observationsPath, `WARNING: Changes workspace sync had errors: ${syncResult.errors.join('; ')}`)
+        }
+      } catch (syncErr) {
+        logger.warn('orchestrator', 'changes workspace sync failed (non-blocking)', { feature: sanitizedFeature, error: syncErr instanceof Error ? syncErr.message : String(syncErr) })
+        await recordObservation(ctx, observationsPath, `WARNING: Changes workspace sync failed: ${syncErr instanceof Error ? syncErr.message : String(syncErr)}`)
       }
     } else {
       logger.warn('orchestrator', 'worktree creation failed', { feature: sanitizedFeature, error: result.error })

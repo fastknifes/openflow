@@ -59,11 +59,25 @@ export async function finalizeArchive(
 
   if (isDerivedWorktree && implementationRun!.worktree) {
     try {
-      execSync('git add -A', { cwd: implementationRun!.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-      execSync(`git commit -m "Archive: ${ac.feature}" --no-verify`, { cwd: implementationRun!.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+      // Check if there are uncommitted changes before trying to commit.
+      // The worktree may already have commits from auto-commit (QG) or manual commit.
+      const worktreeStatus = execSync('git status --porcelain', {
+        cwd: implementationRun!.worktree,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim()
+
+      if (worktreeStatus.length > 0) {
+        execSync('git add -A', { cwd: implementationRun!.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        execSync(`git commit -m "Archive: ${ac.feature}" --no-verify`, { cwd: implementationRun!.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        logger.info('orchestrator', 'archive commit created from derived worktree', { feature: ac.feature })
+      } else {
+        logger.info('orchestrator', 'worktree already committed, skipping archive commit', { feature: ac.feature })
+      }
+
       archiveCommitHash = execSync('git rev-parse HEAD', { cwd: implementationRun!.worktree, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
       commitSucceeded = true
-      logger.info('orchestrator', 'archive commit created from derived worktree', { feature: ac.feature, commit: archiveCommitHash })
+      logger.info('orchestrator', 'archive commit hash resolved', { feature: ac.feature, commit: archiveCommitHash })
     } catch (err) {
       logger.warn('orchestrator', 'failed to create archive commit from derived worktree', { feature: ac.feature, error: err instanceof Error ? err.message : String(err) })
     }

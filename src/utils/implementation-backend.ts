@@ -114,10 +114,21 @@ export function buildExecutionGuide(options: {
   if (run.worktree) {
     lines.push(
       '',
-      '### Worktree Completion',
-      '- After all tasks complete, commit all changes in the worktree',
+      '### ⚠️ Worktree Completion (MANDATORY)',
+      '',
+      '**You MUST commit all changes in the worktree directory before calling quality-gate.**',
+      'If you skip this step, quality-gate will auto-commit for you, but it is better to commit explicitly.',
+      '',
+      'Steps (run these commands in the worktree directory):',
+      '```bash',
+      `cd ${run.worktree}`,
+      'git add -A',
+      `git commit -m "feat: implement ${run.feature}" --no-verify`,
+      '```',
+      '',
+      '- After committing, call `/openflow-quality-gate`',
       '- Do NOT merge the worktree branch yourself — the system handles merge during archive',
-      '- Call `/openflow-quality-gate` after committing, then `/openflow-archive` when ready',
+      '- Do NOT push the branch — the system handles all remote operations',
     )
   }
 
