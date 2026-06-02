@@ -56,6 +56,23 @@ export async function findActiveFeature(ctx: OpenFlowContext): Promise<string | 
   }
 }
 
+export async function featureHasArtifacts(ctx: OpenFlowContext, feature: string): Promise<boolean> {
+  const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${feature}.md`)
+  try {
+    await fs.access(planPath)
+    return true
+  } catch {
+    // No plan file; also check docs/changes workspace
+    const changeDir = createSafePath(ctx.directory, 'docs', 'changes')
+    try {
+      const entries = await fs.readdir(changeDir)
+      return entries.some(entry => entry.endsWith(`-${feature}`) || entry === feature)
+    } catch {
+      return false
+    }
+  }
+}
+
 export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
   const trimmed = input.trim()
   const direct = trySanitizeFeatureName(trimmed)

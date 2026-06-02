@@ -31,7 +31,7 @@ import {
 import { resolveChangeUnitDir } from '../utils/change-units.js'
 import { loadAcceptanceState, saveAcceptanceState, saveVerifyResult } from '../utils/acceptance-state.js'
 import { createSafePath, escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
-import { findActiveFeature } from '../utils/feature-resolver.js'
+import { featureHasArtifacts, findActiveFeature } from '../utils/feature-resolver.js'
 import { getActiveFeatureSession } from '../hooks/feature-workflow.js'
 import { loadExecutionPolicy } from '../utils/execution-policy.js'
 import { runCompilationProbe } from '../utils/compilation-probe.js'
@@ -126,11 +126,25 @@ export async function handleVerify(
   toolContext?: unknown,
   sessionID?: string,
 ): Promise<string> {
-  // Step 1: Sanitize the feature parameter to remove OpenFlow command tokens
-  let candidateFeature = feature?.trim() ? stripOpenFlowCommandTokens(feature.trim()) : undefined
+  // Step 1: Resolve feature with raw-first strategy.
+  // If the raw argument names an existing artifact (plan file / change workspace),
+  // prefer it over the stripped version to avoid destroying legitimate feature names
+  // like "openflow-archive-design" that share a prefix with command tokens.
+  const rawFeature = feature?.trim() ? feature.trim().replace(/^`+|`+$/g, '') : undefined
+  const strippedFeature = rawFeature ? stripOpenFlowCommandTokens(rawFeature) : undefined
 
-  // Step 2: Sanitized away to empty string → treat as undefined
-  if (candidateFeature === '') candidateFeature = undefined
+  let candidateFeature: string | undefined
+  if (rawFeature && rawFeature !== '') {
+    if (await featureHasArtifacts(ctx, rawFeature)) {
+      candidateFeature = rawFeature
+    } else if (strippedFeature && strippedFeature !== '') {
+      candidateFeature = strippedFeature
+    } else {
+      candidateFeature = rawFeature
+    }
+  } else if (strippedFeature && strippedFeature !== '') {
+    candidateFeature = strippedFeature
+  }
 
   // Step 3: Resolution chain: explicit arg → session active feature → filesystem fallback
   const resolvedFeature = candidateFeature

@@ -14,7 +14,7 @@ import {
   getRequirementsCandidatePaths,
 } from '../../config.js'
 import { stripOpenFlowCommandTokens } from '../../commands/verify.js'
-import { findActiveFeature } from '../../utils/feature-resolver.js'
+import { featureHasArtifacts, findActiveFeature } from '../../utils/feature-resolver.js'
 import { createSafePath, sanitizeFeatureName } from '../../utils/security.js'
 import { loadAcceptanceState } from '../../utils/acceptance-state.js'
 import { implementationRunStore } from '../../utils/implementation-run.js'
@@ -33,8 +33,23 @@ import type { ArchiveContext, ArchiveFileChange, ArchiveMode } from './types.js'
 const RECENT_BUILDS_WINDOW = 5
 
 export async function resolveArchiveContext(ctx: OpenFlowContext, feature?: string): Promise<ArchiveContext> {
-  let candidateFeature = feature?.trim() ? stripOpenFlowCommandTokens(feature.trim()) : undefined
-  if (candidateFeature === '') candidateFeature = undefined
+  // Raw-first feature resolution: prefer raw argument if it names an existing artifact,
+  // otherwise fall back to the stripped version (see verify.ts for rationale).
+  const rawFeature = feature?.trim() ? feature.trim().replace(/^`+|`+$/g, '') : undefined
+  const strippedFeature = rawFeature ? stripOpenFlowCommandTokens(rawFeature) : undefined
+
+  let candidateFeature: string | undefined
+  if (rawFeature && rawFeature !== '') {
+    if (await featureHasArtifacts(ctx, rawFeature)) {
+      candidateFeature = rawFeature
+    } else if (strippedFeature && strippedFeature !== '') {
+      candidateFeature = strippedFeature
+    } else {
+      candidateFeature = rawFeature
+    }
+  } else if (strippedFeature && strippedFeature !== '') {
+    candidateFeature = strippedFeature
+  }
 
   const activeFeature = candidateFeature || await findActiveFeature(ctx)
   const acceptanceStateRaw = await loadAcceptanceState(ctx.directory)

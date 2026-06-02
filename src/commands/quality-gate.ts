@@ -64,13 +64,6 @@ export interface NodeExecutor {
   ) => Promise<string>
 }
 
-interface QualityGateSessionClientLike {
-  session?: {
-    create?: (options: unknown) => Promise<unknown>
-    prompt?: (options: unknown) => Promise<unknown>
-  }
-}
-
 interface QualityGateVisibleSession {
   id?: string
   title: string
@@ -333,35 +326,14 @@ function resolveRunLogPath(ctx: OpenFlowContext, filePath: string): string {
 }
 
 async function resolveQualityGateVisibleSession(
-  ctx: OpenFlowContext,
+  _ctx: OpenFlowContext,
   feature: string | undefined,
   parentSessionID: string | undefined,
 ): Promise<QualityGateVisibleSession> {
   const title = `Quality Gate: ${feature ? sanitizeFeatureName(feature) : 'unresolved'}`
-  const client = getQualityGateSessionClient(ctx)
-  if (!client.session?.create) {
-    return buildQualityGateVisibleSession(title, false, parentSessionID)
-  }
-
-  const body: Record<string, unknown> = { title }
-  if (parentSessionID) {
-    body.parentID = parentSessionID
-  }
-
-  try {
-    const created = await client.session.create({
-      query: { directory: ctx.directory },
-      body,
-    })
-    return buildQualityGateVisibleSession(title, true, extractCreatedSessionID(created))
-  } catch (error) {
-    logger.warn('quality_gate', 'failed to create visible quality gate session; continuing without session container', {
-      title,
-      parentSessionID,
-      error: error instanceof Error ? error.message : String(error),
-    })
-    return buildQualityGateVisibleSession(title, false, parentSessionID)
-  }
+  // Quality gate no longer creates its own session.
+  // Harden/Verify use the main session ID directly as their parent.
+  return buildQualityGateVisibleSession(title, false, parentSessionID)
 }
 
 function buildQualityGateVisibleSession(title: string, created: boolean, id?: string): QualityGateVisibleSession {
@@ -384,21 +356,6 @@ async function recordQualityGateSessionProgress(
   })
 }
 
-function getQualityGateSessionClient(ctx: OpenFlowContext): QualityGateSessionClientLike {
-  return ctx.client as QualityGateSessionClientLike
-}
-
-function extractCreatedSessionID(response: unknown): string | undefined {
-  const object = asRecord(response)
-  if (typeof object.id === 'string') return object.id
-  const data = asRecord(object.data)
-  if (typeof data.id === 'string') return data.id
-  return undefined
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
-}
 
 function getImplementationRunStatusForReadiness(readiness: string, applicabilityStatus?: string): ImplementationRunStatus {
   if (applicabilityStatus === 'limited_context') {
@@ -767,7 +724,7 @@ async function runHardenPhase(params: {
     logger.info('quality_gate', 'starting harden', { feature: sanitizedFeature })
     try {
       if (nodeExecutor?.executeHarden) {
-        hardenOutput = await nodeExecutor.executeHarden(executionCtx, sanitizedFeature, qualityGateSession.id ?? sessionID)
+        hardenOutput = await nodeExecutor.executeHarden(executionCtx, sanitizedFeature, sessionID)
         hardenStatus = extractHardenStatus(hardenOutput)
       } else {
         hardenStatus = 'skipped'
@@ -1664,10 +1621,8 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
   const summarySection = [
     '### Quality Gate Result Summary',
     '',
-    `- **Title**: ${escapeMarkdown(qualityGateSession.title)}`,
-    `- **Quality Gate Session**: ${qualityGateSession.id ? `Session: ${escapeMarkdown(qualityGateSession.id)} (session reference)` : 'Session: unavailable (session reference)'}`,
-    `- Session: ${escapeMarkdown(qualityGateSession.id ?? 'unavailable')}`,
-    `- **Session Container**: ${qualityGateSession.created ? 'created' : qualityGateSession.id ? 'reused' : 'unavailable'}`,
+    `- **Feature**: ${escapeMarkdown(feature)}`,
+    `- **Session**: ${qualityGateSession.id ? escapeMarkdown(qualityGateSession.id) : 'unavailable (session reference)'}`,
     `- **Harden**: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
     `- Harden: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
     `- **Verify**: ${escapeMarkdown(verifyStatus)}`,
@@ -1688,8 +1643,8 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     `- Harden progress: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
     `- Verify summary: ${escapeMarkdown(verifyStatus)}`,
     `- Readiness: ${escapeMarkdown(effectiveReadiness)}`,
-    `- Reviewer Session: parent: ${escapeMarkdown(qualityGateSession.id ?? 'unavailable')}`,
-    `- Executor Session: parent: ${escapeMarkdown(qualityGateSession.id ?? 'unavailable')}`,
+    `- Reviewer Session: parent: ${qualityGateSession.id ? escapeMarkdown(qualityGateSession.id) : 'unavailable'}`,
+    `- Executor Session: parent: ${qualityGateSession.id ? escapeMarkdown(qualityGateSession.id) : 'unavailable'}`,
     '- round summary: see Harden Trace when harden ran',
     '',
   ].filter(Boolean).join('\n')
@@ -1885,7 +1840,7 @@ function buildApplicabilityOnlyReport(input: {
   const summarySection = [
     '### Summary',
     '',
-    `- **Quality Gate Session**: ${input.qualityGateSession.id ? `\`${escapeMarkdown(input.qualityGateSession.id)}\`` : '`unavailable`'} (${escapeMarkdown(input.qualityGateSession.title)})`,
+    `- **Session**: ${input.qualityGateSession.id ? `\`${escapeMarkdown(input.qualityGateSession.id)}\`` : '`unavailable`'}`,
     `- **Harden Status**: \`skipped\``,
     `- **Verify Status**: \`skipped\``,
     `- **Readiness**: \`${VerifyReadinessStatus.NotReady}\``,
