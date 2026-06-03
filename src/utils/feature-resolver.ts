@@ -125,6 +125,40 @@ export async function findIncompleteFeatureSessions(projectDir: string, featureS
   }
 }
 
+export async function featureHasArtifacts(ctx: OpenFlowContext, feature: string): Promise<boolean> {
+  const sanitized = sanitizeFeatureName(feature)
+  if (!sanitized) return false
+
+  // Check for plan file
+  const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${sanitized}.md`)
+  try {
+    await fs.access(planPath)
+    return true
+  } catch {
+    // continue checking other artifacts
+  }
+
+  // Check for feature session
+  const sessionPath = createSafePath(ctx.directory, ctx.config.paths.feature_state, `${sanitized}.json`)
+  try {
+    await fs.access(sessionPath)
+    return true
+  } catch {
+    // continue
+  }
+
+  // Check for change workspace
+  const changeDir = createSafePath(ctx.directory, ctx.config.paths.changes, sanitized)
+  try {
+    const stat = await fs.stat(changeDir)
+    if (stat.isDirectory()) return true
+  } catch {
+    // continue
+  }
+
+  return false
+}
+
 function trySanitizeFeatureName(value: string): string | undefined {
   try {
     return sanitizeFeatureName(value)

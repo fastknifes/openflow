@@ -10,7 +10,6 @@ import { OPENFLOW_COMMAND_FILES } from './commands/manifest.js'
 const LEGACY_SKILL_DIRS = [
   'openflow-feature',
   'openflow-change',
-  'openflow-init',
   'openflow-archive',
   'openflow-migrate-docs',
 ]

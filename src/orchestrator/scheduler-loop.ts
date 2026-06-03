@@ -32,6 +32,7 @@ interface SubmitTaskInput {
   resources?: ResourceLock[]
   timeoutMs?: number
   runAfter?: number
+  idPrefix?: string
 }
 
 interface RunningTaskState {
@@ -75,7 +76,7 @@ export class SchedulerLoop {
 
   submitTask(input: SubmitTaskInput): string {
     const now = Date.now()
-    const taskId = this.createTaskId()
+    const taskId = input.idPrefix ? `${input.idPrefix}${this.createTaskId()}` : this.createTaskId()
     const task: SchedulerTask = {
       id: taskId,
       type: input.type,
@@ -114,6 +115,22 @@ export class SchedulerLoop {
   listTasks(filter?: TaskFilter): SchedulerStatus {
     const tasks = this.dagEngine.listTasks().filter((task) => this.matchesFilter(task, filter))
     return { tasks, corrupted: this.corrupted }
+  }
+
+  listTasksByPrefix(prefix: string): SchedulerTask[] {
+    return this.dagEngine.listTasks().filter((task) => task.id.startsWith(prefix))
+  }
+
+  cancelTasksByPrefix(prefix: string): string[] {
+    const tasks = this.listTasksByPrefix(prefix)
+    const cancelledIds: string[] = []
+    for (const task of tasks) {
+      if (task.status === 'pending' || task.status === 'ready' || task.status === 'running') {
+        this.cancelTask(task.id)
+        cancelledIds.push(task.id)
+      }
+    }
+    return cancelledIds
   }
 
   cancelTask(taskId: string): SchedulerTask {

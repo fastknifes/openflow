@@ -3,7 +3,7 @@ import type { ToolContext } from '@opencode-ai/plugin/tool'
 import type { ImplementationBackend, ImplementationContainerMode, OpenFlowContext } from '../types.js'
 import { implementationRunStore, recordObservation } from '../utils/implementation-run.js'
 import { handoffToBackend } from '../utils/implementation-backend.js'
-import { createWorktree, isMainWorktreeDirty } from '../utils/implementation-worktree.js'
+import { autoCommitDocs, type AutoCommitResult, createWorktree, isMainWorktreeDirty } from '../utils/implementation-worktree.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { sanitizeFeatureName } from '../utils/security.js'
 import type { ImplementationRun } from '../types.js'
@@ -56,7 +56,7 @@ export async function handleImplement(
 
   // ── 3. Check for duplicate active run ───────────────────────────────────
   logger.debug('orchestrator', 'checking for duplicate active run', { sanitizedFeature, sessionID: sessionID || undefined })
-  const activeRun = await implementationRunStore.getActiveRun(ctx, sanitizedFeature, sessionID || undefined)
+  const activeRun = await implementationRunStore.getActiveRun(ctx, sanitizedFeature)
   if (activeRun) {
     logger.warn('orchestrator', 'duplicate active run blocked', { feature: sanitizedFeature, runID: activeRun.runID })
     return [
@@ -78,7 +78,13 @@ export async function handleImplement(
   const observationsPath = join('.sisyphus', 'openflow', 'observations', `${sanitizedFeature}.jsonl`)
 
   // ── 5. Optionally create worktree ───────────────────────────────────────
+  let autoCommitResult: AutoCommitResult | undefined
   if (effectiveUseWorktree) {
+    // Auto-commit uncommitted feature docs so they are visible in the worktree.
+    // Without this, docs produced by /openflow-writing-plan that haven't been
+    // manually committed would be invisible in the new worktree (checked out from HEAD).
+    autoCommitResult = autoCommitDocs(ctx, sanitizedFeature)
+
     logger.debug('orchestrator', 'creating worktree', { feature: sanitizedFeature })
     const result = await createWorktree(ctx, sanitizedFeature)
     if (result.success) {
@@ -184,6 +190,8 @@ export async function handleImplement(
     effectiveUseWorktree && worktree ? `- **Worktree**: \`${worktree}\`` : '',
     `- **Directory**: \`${directory}\``,
     handoffResult.command ? `- **Backend Command**: \`${handoffResult.command}\`` : '',
+    autoCommitResult?.committed ? `- **Auto-Commit**: ${autoCommitResult.dirtyPaths.length} doc file(s) committed` : '',
+    autoCommitResult?.warning ? `- ⚠️ **Auto-Commit Warning**: ${autoCommitResult.warning}` : '',
     '',
     handoffResult.success
       ? 'Backend handoff successful. The implementation run is now active.'

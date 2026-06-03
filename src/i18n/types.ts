@@ -3,25 +3,8 @@ export type Locale = 'zh-CN' | 'en'
 export interface I18nResource {
   // ── Commands: feature ──
   'commands.feature.guardAlreadyPrompted': string
-  'commands.feature.nextStepHeader': string
-  'commands.feature.nextStepQuestion': string
-  'commands.feature.nextStepOptionPlan': string
-  'commands.feature.nextStepOptionPlanDesc': string
-  'commands.feature.nextStepOptionReview': string
-  'commands.feature.nextStepOptionReviewDesc': string
-  'commands.feature.nextStepOptionInspect': string
-  'commands.feature.nextStepOptionInspectDesc': string
-  'commands.feature.postDesignConfirmProceed': string
-  'commands.feature.postDesignConfirmReview': string
-  'commands.feature.postDesignConfirmInspect': string
 
   // ── Commands: verify ──
-  'commands.verify.failureHeader': string
-  'commands.verify.failureQuestion': string
-  'commands.verify.failureOptionFix': string
-  'commands.verify.failureOptionFixDesc': string
-  'commands.verify.failureOptionAccept': string
-  'commands.verify.failureOptionAcceptDesc': string
   'commands.verify.acceptedFailuresMessage': string
 
   // ── Signals: closure ──

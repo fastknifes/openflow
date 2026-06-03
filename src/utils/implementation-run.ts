@@ -101,7 +101,7 @@ function sortNewestFirst(runs: ImplementationRun[]): ImplementationRun[] {
 
 export const implementationRunStore: RunStore = {
   async createRun(ctx, run) {
-    const existing = await this.getActiveRun(ctx, run.feature, run.sessionID)
+    const existing = await this.getActiveRun(ctx, run.feature)
     if (existing) {
       return existing
     }

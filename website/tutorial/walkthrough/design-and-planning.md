@@ -25,8 +25,10 @@ flowchart LR
 当你还不知道方案、范围或取舍时，先让 AI 进行对话探索：
 
 ```text
-/openflow-brainstorm
+我们先 brainstorm，不要写代码。请帮我比较几种方案，并指出最小可交付范围。
 ```
+
+如果你的 OpenCode 客户端支持按名称调用 Skill，也可以调用 `openflow-brainstorm`。
 
 头脑风暴不会生成正式文件，只帮助你收敛意图。
 

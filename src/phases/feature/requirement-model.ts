@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import type { FeatureQuestionId } from './state-machine.js'
 
 // --- Enums ---
 
@@ -32,7 +31,7 @@ export const ConstraintSchema = z.object({
   description: z.string().min(1),
   rationale: z.string().min(1),
   verificationMethod: z.string().min(1),
-  sourceQuestionId: z.string().transform((val): FeatureQuestionId => val as FeatureQuestionId),
+  sourceQuestionId: z.string(),
 })
 
 export const ScopeBoundarySchema = z.object({
@@ -97,6 +96,10 @@ export const RequirementModelSchema = z.object({
   risks: z.array(RiskSchema).optional(),
   testingStrategy: z.string().optional(),
   synthesis: z.record(z.unknown()).optional(),
+  sourceContext: z.object({
+    facts: z.record(z.string()),
+    assumptions: z.array(z.string()).optional(),
+  }).optional(),
 })
 
 // --- Inferred types ---

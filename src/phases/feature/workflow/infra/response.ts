@@ -1,5 +1,5 @@
 ﻿import { escapeMarkdown } from '../../../../utils/security.js'
-import type { FeatureSession, PostDesignDecision } from '../../../../phases/feature/state-machine.js'
+import type { FeatureSession } from '../../../../phases/feature/state-machine.js'
 import type { DerivedFeatureIdentity } from '../../../../utils/feature-resolver.js'
 import type { RequirementModel } from '../../../../phases/feature/requirement-model.js'
 import type { DesignReviewReport } from '../../../../phases/feature/design-review-report.js'
@@ -62,10 +62,6 @@ export function formatNextStepOptions(feature: string, designReview?: DesignRevi
 
     return `## Next Step Options
 
-- Add missing implementation constraints
-- Review design sufficiency report
-- Inspect generated artifacts
-
 Design is not ready for implementation planning yet.
 
 Required next facts:
@@ -74,43 +70,9 @@ ${missing}`
 
   return `## Next Step Options
 
-- Proceed to implementation planning
-- Review design documents
-- Inspect generated artifacts
+It is recommended to review design.md and behavior.md first to confirm key flows and constraints are correct before proceeding to implementation planning.
 
-> To proceed, manually run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` when ready.`
-}
-
-export function formatPostDesignDecisionResult(decision: PostDesignDecision, feature: string, model?: RequirementModel, designReview?: DesignReviewReport): string {
-  if (decision === 'proceed_to_plan') {
-    if (designReview?.status === 'not_ready') {
-      return `## Post-Design Confirmation
-
-Design is not ready for implementation planning yet.
-
-${formatDesignDocumentReview(model, designReview)}
-
-Add the missing implementation constraints before running \`/openflow-writing-plan ${escapeMarkdown(feature)}\`.`
-    }
-
-    return `## Post-Design Confirmation
-
-Design is ready for implementation planning. To generate the plan, manually run:
-
-\`\`\`
-/openflow-writing-plan ${escapeMarkdown(feature)}
-\`\`\`
-
-OpenFlow will not run this automatically; start it only when you are ready.`
-  }
-
-  if (decision === 'review_docs') {
-    return formatDesignDocumentReview(model, designReview)
-  }
-
-  return `## Documents Ready
-
-The generated design documents are ready for inspection. Review them before choosing whether to proceed to planning or refine constraints.`
+When ready, run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` to generate the implementation plan.`
 }
 
 export function formatDesignDocumentReview(model?: RequirementModel, designReview?: DesignReviewReport): string {

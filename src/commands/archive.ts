@@ -6,6 +6,7 @@ import { sanitizeFeatureName, createSafePath, escapeMarkdown } from '../utils/se
 import { OpenFlowError, ErrorCode } from '../utils/errors.js'
 import { fileExists } from '../hooks/file-utils.js'
 import { getImplementationState, loadAcceptanceState, saveAcceptanceState, setWaitingForDocUpdateConfirm } from '../utils/acceptance-state.js'
+import { parsePlanProgress } from '../plan/parser.js'
 import {
   applyPromotionSuggestions,
   buildPromotionSuggestions,
@@ -56,6 +57,10 @@ export async function handleArchive(ctx: OpenFlowContext, feature?: string): Pro
   if (implementationRun && !isArchiveAllowedRunStatus(implementationRun.status)) {
     return formatImplementationRunArchiveBlock(sanitizedFeature, implementationRun.status)
   }
+
+  // ── Plan Completion Gate: block archive on incomplete plan tasks ──────────
+  const planProgressBlock = await checkPlanProgress(ctx, sanitizedFeature)
+  if (planProgressBlock) return planProgressBlock
 
   const archiveMode = await detectMode(ctx, sanitizedFeature)
 
@@ -455,6 +460,74 @@ async function resolveArchiveImplementationRun(ctx: OpenFlowContext, feature: st
 
 function isArchiveAllowedRunStatus(status: ImplementationRun['status']): boolean {
   return status === 'ready_for_archive' || status === 'archived'
+}
+
+/**
+ * Check plan.md for unchecked tasks. If any remain, return a blocking message.
+ * Returns null if plan has no tasks or all tasks are completed.
+ */
+async function checkPlanProgress(
+  ctx: OpenFlowContext,
+  feature: string
+): Promise<string | null> {
+  const planContent = await readArchivePlanContent(ctx, feature)
+  if (!planContent) return null
+
+  const progress = parsePlanProgress(planContent)
+  if (progress.totalTasks === 0 || progress.allCompleted) return null
+
+  // Build a preview of unchecked tasks (up to 10)
+  const lines = planContent.split('\n')
+  const uncheckedPreviews = progress.uncheckedLineNumbers
+    .slice(0, 10)
+    .map(lineNum => {
+      const line = lines[lineNum - 1]?.trim() ?? '(empty line)'
+      return `- ${escapeMarkdown(line)}`
+    })
+
+  const moreCount = progress.uncheckedTasks - uncheckedPreviews.length
+
+  return `## Archive Blocked — Incomplete Plan Tasks
+
+Feature: ${escapeMarkdown(feature)}
+
+Archive stopped because **${progress.uncheckedTasks} of ${progress.totalTasks}** plan tasks remain unchecked in plan.md.
+
+### Unchecked Tasks
+${uncheckedPreviews.join('\n')}${moreCount > 0 ? `\n- ... and ${moreCount} more` : ''}
+
+### What to Do
+1. Return to the implementation session and complete the remaining tasks.
+2. Mark each completed task as \`- [x]\` in plan.md.
+3. Alternatively, if a task should be skipped, explicitly mark it with a note: \`- [x] ~~task~~ (skipped: reason)\`.
+4. Rerun \`/openflow-archive ${escapeMarkdown(feature)}\` after all tasks are resolved.`
+}
+
+/**
+ * Read plan.md content for archive progress checking.
+ * Tries change workspace plan first, then sisyphus plans dir.
+ */
+async function readArchivePlanContent(
+  ctx: OpenFlowContext,
+  feature: string
+): Promise<string | null> {
+  // Try change workspace plan first
+  const changePlansPath = await getChangePlansPath(ctx.directory, feature, ctx.config)
+  if (await fileExists(changePlansPath)) {
+    try {
+      return await fs.readFile(changePlansPath, 'utf-8')
+    } catch { /* fall through */ }
+  }
+
+  // Try sisyphus plans dir
+  const planPath = createSafePath(ctx.directory, ctx.config.paths.plans, `${feature}.md`)
+  if (await fileExists(planPath)) {
+    try {
+      return await fs.readFile(planPath, 'utf-8')
+    } catch { /* fall through */ }
+  }
+
+  return null
 }
 
 async function recordArchiveRunEvent(ctx: OpenFlowContext, run: ImplementationRun): Promise<void> {

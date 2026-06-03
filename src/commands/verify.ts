@@ -42,12 +42,6 @@ import {
   readGuardianRepairs,
   readSessionPending,
 } from '../drift/state-store.js'
-import {
-  askGuardedQuestion,
-  hasAskQuestion,
-  type QuestionToolContext,
-} from '../utils/question-guard.js'
-import { logger } from '../utils/logger.js'
 
 export interface VerifyReadinessResult {
   status: VerifyReadinessStatus
@@ -121,7 +115,7 @@ export async function handleVerify(
   ctx: OpenFlowContext,
   feature?: string,
   acceptFailures?: boolean,
-  toolContext?: unknown,
+  _toolContext?: unknown,
   sessionID?: string,
 ): Promise<string> {
   // Step 1: Sanitize the feature parameter to remove OpenFlow command tokens
@@ -196,14 +190,6 @@ export async function handleVerify(
     verifyResult.evidenceSummary,
   )
   await saveVerifyResult(ctx.directory, verifyResult, freshnessMetadata, sanitizedFeature)
-
-  if (readiness.status === VerifyReadinessStatus.NotReady && hasAskQuestion(toolContext)) {
-    const selectedOption = await askVerifyFailureQuestion(toolContext)
-
-    if (selectedOption === 'accept') {
-      return handleVerify(ctx, sanitizedFeature, true, toolContext, sessionID)
-    }
-  }
 
   return await formatVerifyResult(ctx, sanitizedFeature, evidence, readiness)
 }
@@ -1029,44 +1015,6 @@ ${failureOptions}${policySection}
 
 ${readiness.nextStep}${nextCommandBlock}
 `
-}
-
-async function askVerifyFailureQuestion(toolContext: QuestionToolContext): Promise<VerifyFailureOption | undefined> {
-  logger.info('quality_gate', 'invoking verify failure question picker')
-  const result = await askGuardedQuestion(
-    toolContext,
-    {
-      id: 'verify-failure-next-step',
-      header: t('commands.verify.failureHeader'),
-      question: t('commands.verify.failureQuestion'),
-      options: [
-        { label: t('commands.verify.failureOptionFix'), description: t('commands.verify.failureOptionFixDesc') },
-        { label: t('commands.verify.failureOptionAccept'), description: t('commands.verify.failureOptionAcceptDesc') },
-      ],
-      multiple: false,
-      custom: false,
-    },
-  )
-  logger.info('quality_gate', 'verify failure question result', { hasAnswer: !!result.answer, wasAlreadyPrompted: result.wasAlreadyPrompted, wasDuplicateMessage: result.wasDuplicateMessage })
-
-  return normalizeVerifyFailureOption(result.answer ? [result.answer] : undefined)
-}
-
-function normalizeVerifyFailureOption(answer: string[] | undefined): VerifyFailureOption | undefined {
-  const firstAnswer = answer?.[0]?.trim().toLowerCase()
-  if (!firstAnswer) {
-    return undefined
-  }
-
-  if (firstAnswer.includes('标记') || firstAnswer.includes('accept')) {
-    return 'accept'
-  }
-
-  if (firstAnswer.includes('修复') || firstAnswer.includes('fix')) {
-    return 'fix'
-  }
-
-  return undefined
 }
 
 // hasAskQuestion moved to ../utils/question-guard.js

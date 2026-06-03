@@ -31,7 +31,6 @@ import {
   markGenerationFailed,
   markQuestionPrompted,
   normalizeFeatureSession,
-  type PostDesignDecision,
   shouldGenerateDesign,
 } from '../phases/feature/state-machine.js'
 import {
@@ -256,19 +255,7 @@ async function finalizeFeature(
 
     const baseResult = formatGenerationResultAll(session.feature, completedSession.generatedDocs, completedSession.featureTitle, validatedModel)
 
-    if (hasAskQuestion(toolContext) && !completedSession.postDesignDecision) {
-      const decision = await askPostDesignConfirmation(toolContext, validatedModel)
-      if (decision) {
-        completedSession = {
-          ...completedSession,
-          postDesignDecision: decision,
-        }
-        await saveFeatureSession(ctx.directory, completedSession, ctx.config.paths.feature_state)
-        return `${baseResult}\n\n${formatPostDesignDecisionResult(decision, session.feature, validatedModel)}`
-      }
-    }
-
-    return baseResult
+    return `${baseResult}\n\n${formatNextStepOptions(session.feature)}`
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const failedSession = markGenerationFailed(markGenerating(session), message)
@@ -761,80 +748,6 @@ function getToolMessageID(toolContext: unknown): string | undefined {
     : undefined
 }
 
-async function askPostDesignConfirmation(toolContext: unknown, _model?: RequirementModel): Promise<PostDesignDecision | undefined> {
-  if (!hasAskQuestion(toolContext)) return undefined
-
-  const result = await askGuardedQuestion(
-    toolContext,
-    {
-      id: 'post-design-confirmation',
-      header: t('commands.feature.nextStepHeader'),
-      question: t('commands.feature.nextStepQuestion'),
-      options: [
-        { label: t('commands.feature.nextStepOptionPlan'), description: t('commands.feature.nextStepOptionPlanDesc') },
-        { label: t('commands.feature.nextStepOptionReview'), description: t('commands.feature.nextStepOptionReviewDesc') },
-        { label: t('commands.feature.nextStepOptionInspect'), description: t('commands.feature.nextStepOptionInspectDesc') },
-      ],
-      multiple: false,
-      custom: false,
-    },
-  )
-
-  const answer = result.answer
-  if (answer === t('commands.feature.nextStepOptionPlan')) {
-    return 'proceed_to_plan'
-  }
-
-  if (answer === t('commands.feature.nextStepOptionReview')) {
-    return 'review_docs'
-  }
-
-  if (answer === t('commands.feature.nextStepOptionInspect')) {
-    return 'inspect'
-  }
-
-  return undefined
-}
-
-function formatPostDesignDecisionResult(decision: PostDesignDecision, feature: string, model?: RequirementModel): string {
-  if (decision === 'proceed_to_plan') {
-    return `## Post-Design Confirmation
-
-Design is ready for implementation planning. To generate the plan, manually run:
-
-\`\`\`
-/openflow-writing-plan ${escapeMarkdown(feature)}
-\`\`\`
-
-OpenFlow will not run this automatically; start it only when you are ready.`
-  }
-
-  if (decision === 'review_docs') {
-    return formatDesignDocumentReview(model)
-  }
-
-  return `## Documents Ready
-
-The generated design documents are ready for inspection. Review them before choosing whether to proceed to planning or refine constraints.`
-}
-
-function formatDesignDocumentReview(model?: RequirementModel): string {
-  const constraints = model?.constraints?.length
-    ? model.constraints.map((constraint) => `- ${escapeMarkdown(constraint.description)}`).join('\n')
-    : '- None recorded.'
-
-  return `## Design Document Review
-
-Documents to review:
-- \`design.md\`
-- \`behavior.md\`
-
-Constraints from the requirement model:
-${constraints}
-
-Assistant/runtime instruction: review whether these constraints are sufficient for implementation planning, including boundary coverage, compatibility expectations, and unresolved confirmations. Do not assume constraint sufficiency without checking the generated documents.`
-}
-
 function formatQuestionPrompt(feature: string, session: FeatureSession, question: FeatureQuestion, rationale?: string): string {
   const options = getRecommendedOptions(session, question)
     .map((option) => `- ${escapeMarkdown(option.label)}: ${escapeMarkdown(option.description)}`)
@@ -924,20 +837,16 @@ Pending confirmations:
 ${pending}
 
 Constraints:
-${constraints}
+${constraints}`
+}
 
-## Next Step Options
+function formatNextStepOptions(feature: string): string {
+  return `## Next Step Options
 
-Design documents are generated. It is recommended to review design.md and behavior.md first to confirm constraints and boundaries are OK before proceeding to implementation planning.
+It is recommended to review design.md and behavior.md first to confirm key flows and constraints are correct before proceeding to implementation planning.
 
-Please choose the next step:
-
-1. **Review design documents** — Call Momus to review constraint sufficiency, identify missing or ambiguous items and attempt to fix them
-2. **Proceed to implementation plan** — Run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` to generate the implementation plan
-3. **Ignore** — Take no action for now, continue the current session
-
-> If the design documents need adjustment, choose option 1; if already confirmed OK, choose option 2 to proceed directly to implementation planning.
-`}
+When ready, run \`/openflow-writing-plan ${escapeMarkdown(feature)}\` to generate the implementation plan.`
+}
 
 function formatGenerationFailure(feature: string, message: string): string {
   return `## Feature Design Pending

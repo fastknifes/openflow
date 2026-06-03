@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises'
 import type { OpenFlowContext } from '../types.js'
 import {
   getChangePlansPath,
@@ -5,10 +6,11 @@ import {
   getPlanPath,
   getRequirementsCandidatePaths,
 } from '../config.js'
+import { parsePlanProgress } from '../plan/parser.js'
 import { fileExists } from './file-utils.js'
 
 const FEATURE_PATTERNS = [
-  /\.openflow[\\/]plans[\\/]([^\\/\s]+)\.md/i,
+  /\.(?:openflow|sisyphus)[\\/]plans[\\/]([^\\/\s]+)\.md/i,
   /docs[\\/]current[\\/]design[\\/]([^\\/\s]+)/i,
   /docs[\\/]current[\\/]requirements[\\/]([^\\/\s]+)/i,
   /docs[\\/]changes[\\/]([^\\/\s]+)[\\/](?:design|proposal|decisions|prd|plan)\.md/i,
@@ -29,6 +31,11 @@ export async function buildImplementationContextPrompt(
 
   const featureHint = feature ? `, user_message="${feature}"` : ''
 
+  // ── Completion Gate: read plan progress ────────────────────────────────────
+  const completionGateSection = feature
+    ? await buildCompletionGateSection(ctx, feature)
+    : ''
+
   return `
 
 ---
@@ -44,10 +51,71 @@ ${sources.join('\n')}
 - Follow TDD when tests are applicable: RED -> GREEN -> REFACTOR.
 - Before any completion claim, call \`skill(name="openflow-quality-gate"${featureHint})\` and use fresh evidence.
 - If implementation drifts from design or requirements, update the docs or surface the drift before archive.
-
+${completionGateSection}
 ---
 
 ${currentPrompt}`
+}
+
+/**
+ * Build the Completion Gate prompt section from the current plan progress.
+ * This enforces that AI marks plan.md checkboxes as tasks are completed.
+ */
+async function buildCompletionGateSection(
+  ctx: OpenFlowContext,
+  feature: string
+): Promise<string> {
+  const planContent = await readPlanContent(ctx, feature)
+  if (!planContent) return ''
+
+  const progress = parsePlanProgress(planContent)
+  if (progress.totalTasks === 0) return ''
+
+  const progressLine = progress.allCompleted
+    ? `All ${progress.totalTasks} plan tasks are completed.`
+    : `${progress.uncheckedTasks} of ${progress.totalTasks} plan tasks remain unchecked.`
+
+  return `
+
+### Completion Gate (Plan Progress)
+${progressLine}
+
+**plan.md is the single source of truth for task progress.** todowrite is only a session scratchpad.
+
+After completing each plan task:
+1. Verify the task implementation and tests pass.
+2. Edit plan.md: change \`- [ ]\` to \`- [x]\` for that task.
+3. Re-read plan.md to confirm the checkbox is updated.
+4. **Do not continue to the next task until the above is done.**
+
+Sub-agents (fixer, explorer, reviewer) MUST NOT edit plan.md. Only the orchestrator session may mark tasks as completed.`
+}
+
+/**
+ * Read plan.md content from the canonical location.
+ * Tries change workspace plan first, then sisyphus plans dir.
+ */
+async function readPlanContent(
+  ctx: OpenFlowContext,
+  feature: string
+): Promise<string | null> {
+  // Try change workspace plan first
+  const changePlansPath = await getChangePlansPath(ctx.directory, feature, ctx.config)
+  if (await fileExists(changePlansPath)) {
+    try {
+      return await fs.readFile(changePlansPath, 'utf-8')
+    } catch { /* fall through */ }
+  }
+
+  // Try sisyphus plans dir
+  const planPath = getPlanPath(ctx.directory, feature, ctx.config)
+  if (await fileExists(planPath)) {
+    try {
+      return await fs.readFile(planPath, 'utf-8')
+    } catch { /* fall through */ }
+  }
+
+  return null
 }
 
 function extractFeature(prompt: string): string | undefined {

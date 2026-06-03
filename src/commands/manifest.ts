@@ -61,9 +61,11 @@ export const OPENFLOW_COMMAND_FILES: readonly OpenFlowCommandMetadata[] = [
 ]
 
 export const OPENFLOW_REGISTERED_SKILL_NAMES = [
+  'openflow-feature',
   'openflow-writing-plan',
   'openflow-brainstorm',
   'openflow-quality-gate',
   'openflow-ai-reflection',
   'openflow-tdd',
+  'openflow-init',
 ] as const

@@ -4,25 +4,8 @@ export const zhCN: I18nResource = {
   // ── Commands: feature ──
   'commands.feature.guardAlreadyPrompted':
     '> 该问题已通过交互工具询问过。请在当前对话中直接回复你的选择，或输入"跳过"继续。',
-  'commands.feature.nextStepHeader': '下一步行动',
-  'commands.feature.nextStepQuestion': '设计文档已生成。您希望如何继续？',
-  'commands.feature.nextStepOptionPlan': '进入开发计划',
-  'commands.feature.nextStepOptionPlanDesc': '查看推荐命令，手动进入 implementation plan 生成。',
-  'commands.feature.nextStepOptionReview': '检查约束充分性',
-  'commands.feature.nextStepOptionReviewDesc': '让 assistant/runtime 复查 design.md 与 behavior.md 的约束是否充分。',
-  'commands.feature.nextStepOptionInspect': '查看文档',
-  'commands.feature.nextStepOptionInspectDesc': '先检查已生成的设计文档，再决定后续动作。',
-  'commands.feature.postDesignConfirmProceed': '进入开发计划',
-  'commands.feature.postDesignConfirmReview': '检查约束充分性',
-  'commands.feature.postDesignConfirmInspect': '查看文档',
 
   // ── Commands: verify ──
-  'commands.verify.failureHeader': '验证失败',
-  'commands.verify.failureQuestion': '验证发现未通过的检查。请选择下一步操作：',
-  'commands.verify.failureOptionFix': '修复问题',
-  'commands.verify.failureOptionFixDesc': '修复失败的检查，然后重新运行验证',
-  'commands.verify.failureOptionAccept': '标记成功',
-  'commands.verify.failureOptionAcceptDesc': '接受当前失败，标记验证通过',
   'commands.verify.acceptedFailuresMessage':
     '已接受当前失败项；如需恢复严格验证，请修复失败检查后重新运行 /openflow-verify。',
 

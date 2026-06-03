@@ -433,6 +433,8 @@ function resolveFindingDisposition(
       return { group: 'nonBlocking', level: 'test_gap', disposition: 'needs_decision' }
     case 'style_or_preference':
       return { group: 'style', level: 'style_or_preference' }
+    default:
+      return { group: 'nonBlocking', level: 'design_ambiguity', disposition: 'needs_decision' }
   }
 }
 

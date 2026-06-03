@@ -25,10 +25,10 @@ OpenFlow 最适合棕地项目——已有生产流量、遗留行为和历史�
 
 ## 工作流问题
 
-### 什么时候用 `/openflow-feature`，什么时候用 `/openflow-issue`？
+### 需求明确和问题模糊时分别怎么处理？
 
-- **需求明确**（新功能、已知重构）→ `/openflow-feature`
-- **问题模糊**（数据异常、行为不符预期、不确定是不是 bug）→ `/openflow-issue`
+- **需求明确**（新功能、已知重构）→ 直接运行 `/openflow-feature <描述>`
+- **问题模糊**（数据异常、行为不符预期、不确定是不是 bug）→ 先让 AI 只读调查或 brainstorm，分类清楚后再用 `/openflow-feature <描述>` 建档
 
 ### `/openflow-writing-plan` 和 `/openflow-implement` 的关系？
 
