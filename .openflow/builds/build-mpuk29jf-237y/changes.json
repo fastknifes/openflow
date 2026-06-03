@@ -1,0 +1,57 @@
+[
+  {
+    "filePath": "F:\\ai-code\\openflow\\tests\\phases\\feature\\generation-draft-gate.test.ts",
+    "tool": "write",
+    "timestamp": 1780280373079
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\phases\\feature\\workflow\\rules\\generation.ts",
+    "tool": "edit",
+    "timestamp": 1780280348002
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\tests\\phases\\feature\\generation-design-review.test.ts",
+    "tool": "write",
+    "timestamp": 1780280393858
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\tests\\phases\\feature\\generation-preflight.test.ts",
+    "tool": "write",
+    "timestamp": 1780278964628
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\phases\\feature\\workflow\\finalization.ts",
+    "tool": "edit",
+    "timestamp": 1780280283521
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\phases\\feature\\workflow\\infra\\response.ts",
+    "tool": "edit",
+    "timestamp": 1780280534558
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\skills\\feature-skill.ts",
+    "tool": "edit",
+    "timestamp": 1780280511493
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\phases\\feature\\requirement-clearance.ts",
+    "tool": "write",
+    "timestamp": 1780279937412
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\tests\\phases\\feature\\requirement-clearance.test.ts",
+    "tool": "edit",
+    "timestamp": 1780280041912
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\phases\\feature\\state-machine.ts",
+    "tool": "edit",
+    "timestamp": 1780280010295
+  },
+  {
+    "filePath": "F:\\ai-code\\openflow\\src\\phases\\feature\\workflow\\feature-workflow.ts",
+    "tool": "edit",
+    "timestamp": 1780280153012
+  }
+]

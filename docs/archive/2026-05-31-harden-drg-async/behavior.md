@@ -54,8 +54,8 @@ Desired change: reviewer 报告包含：问题、证据链、置信度（高/中
 - Must satisfy: 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。
 - Must satisfy: 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。
 - Must satisfy: DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。
-- Must satisfy: 默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。
-- Must satisfy: 流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。
+- Must satisfy: 默认1轮对抗；1轮是 reviewer 与 executor 的完整对话，直到 reviewer 判定已无 bug / 文档漂移需要继续追，或循环次数耗尽。每轮最多5个循环，executor 每输出一次修复/审查报告算1个循环；总轮数可配置最多10轮，串行执行。当前默认 maxRounds 从5改为1。
+- Must satisfy: 流程结束当且仅当 reviewer 在审查 executor 报告后判定没有需要继续追的问题，或达到每轮最大循环次数 / max rounds。终止判定权在 reviewer；executor 只能修复、审查、报告，不能单方面结束循环。
 - Must satisfy: 同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。
 - Must satisfy: reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。
 - Must satisfy: quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。
@@ -131,8 +131,8 @@ Then:
 | Verify that 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。 | Design and implementation review | manual-review |
 | Verify that 每次 harden 调用创建独立 DAG（如 harden-<uuid\>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。 | Design and implementation review | manual-review |
 | Verify that harden 输出格式必须与现有格式兼容 | Compatibility review and regression test | manual-review |
-| Verify that 默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。 | Design and implementation review | manual-review |
-| Verify that 流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。 | Automated or integration test | manual-review |
+| Verify that 默认1轮对抗；1轮是 reviewer 与 executor 的完整对话，直到 reviewer 判定已无 bug / 文档漂移需要继续追，或循环次数耗尽。每轮最多5个循环，executor 每输出一次修复/审查报告算1个循环；总轮数可配置最多10轮，串行执行。当前默认 maxRounds 从5改为1。 | Design and implementation review | manual-review |
+| Verify that 流程结束当且仅当 reviewer 在审查 executor 报告后判定没有需要继续追的问题，或达到每轮最大循环次数 / max rounds。终止判定权在 reviewer；executor 只能修复、审查、报告，不能单方面结束循环。 | Automated or integration test | manual-review |
 | Verify that 同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。 | Design and implementation review | manual-review |
 | Verify that reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。 | Design and implementation review | manual-review |
 | Verify that DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。 | Design and implementation review | manual-review |
@@ -178,8 +178,8 @@ Then:
 | 每次 harden 调用创建独立 DAG（如 harden-<uuid>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。 | 1 | 1 | 1 | 5 | partial | strong verification |
 | 异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。 | 2 | 3 | 6 | 4 | sufficient | - |
 | DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。 | 0 | 1 | 2 | 2 | partial | strong verification |
-| 默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。 | 2 | 3 | 5 | 4 | sufficient | - |
-| 流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。 | 2 | 3 | 5 | 4 | sufficient | - |
+| 默认1轮对抗；1轮是 reviewer 与 executor 的完整对话，直到 reviewer 判定已无 bug / 文档漂移需要继续追，或循环次数耗尽。每轮最多5个循环，executor 每输出一次修复/审查报告算1个循环；总轮数可配置最多10轮，串行执行。当前默认 maxRounds 从5改为1。 | 2 | 3 | 5 | 4 | sufficient | - |
+| 流程结束当且仅当 reviewer 在审查 executor 报告后判定没有需要继续追的问题，或达到每轮最大循环次数 / max rounds。终止判定权在 reviewer；executor 只能修复、审查、报告，不能单方面结束循环。 | 2 | 3 | 5 | 4 | sufficient | - |
 | 同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。 | 2 | 3 | 5 | 4 | sufficient | - |
 | reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。 | 2 | 3 | 5 | 4 | sufficient | - |
 | quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。 | 1 | 0 | 0 | 3 | partial | strong verification |

@@ -1,0 +1,1019 @@
+{
+  "version": 4,
+  "feature": "harden-drg-async",
+  "sourceIntent": "harden-drg-async",
+  "workflowState": "complete",
+  "collectedFacts": {
+    "architecture-drg-role": "DRG 保持为全局单例任务调度器（不是事件总线），插件启动时初始化。所有异步任务共享同一个 SchedulerLoop 和 DagEngine 实例，统一状态存储。",
+    "harden-isolation": "每次 harden 调用创建独立 DAG（如 harden-<uuid>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。",
+    "adversarial-model": "异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。",
+    "task-granularity": "DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。",
+    "session-creation": "惰性创建，链式传递 session ID。reviewer_round_1 现场创建 reviewer session，executor_round_1 现场创建 executor session。后续任务从上游任务输出中读取 ID 复用。",
+    "rounds-default-1-max-10": "默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。",
+    "termination-condition": "流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。",
+    "rejection-3-times": "同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。",
+    "report-format": "reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。",
+    "integration-with-quality-gate": "quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。",
+    "current-harden-removal": "当前 harden 的同步 in-process reviewer→executor 循环（src/commands/harden.ts 中的 runAdversarialLoop）将被替换为 DRG 异步任务链。rebuttal 子循环被移除，由 reviewer↔executor 的多轮对抗替代。",
+    "drg-engine-needs-extension": "现有 DRG 引擎（src/orchestrator/drg-engine.ts）需要扩展：支持运行时动态添加任务节点（用于表达 reviewer→executor→reviewer 的循环链）；支持任务间数据传递（session ID 链式传递）。",
+    "current_state": "DRG task scheduler infrastructure is complete; harden still uses old synchronous adversarial loop.",
+    "source_intent": "Redesign harden workflow to use DRG for decoupled async reviewer/executor task orchestration.",
+    "core_motivation": "Architecture decoupling: harden should run independently from quality-gate internals while quality-gate remains readiness owner.",
+    "runtime_scope": "Session-local only; no cross-session or cross-restart continuation required for the first version.",
+    "drg_usage": "Fully reuse SchedulerLoop; harden creates an isolated in-session SchedulerLoop instance.",
+    "dag_growth": "Runtime dynamic task injection is required.",
+    "task_injection_owner": "External callback injects downstream tasks; reviewer/executor executors do not hold SchedulerLoop references.",
+    "callback_mechanism": "Add lightweight SchedulerLoop onTaskComplete callback hook; do not change core DRG semantics.",
+    "quality_gate_boundary": "Do not modify quality-gate orchestration logic; keep handleHarden black-box markdown output contract.",
+    "output_compatibility": "harden output format must remain compatible with existing consumers.",
+    "implementation_direction": "Create harden-dag-manager.ts and harden-executors.ts; refactor harden.ts entry to delegate to manager.",
+    "drg_instance_scope": "Each harden run creates an independent in-session SchedulerLoop instance; no plugin-level global SchedulerLoop is required for this feature.",
+    "drg_core_extension_policy": "Supersedes old constraint 'do not modify DRG core'. The new policy allows generic DRG core extensions, but forbids harden-specific semantics inside DRG core.",
+    "required_generic_drg_extensions": "DRG core should support generic runtime task injection/data passing mechanisms needed by harden and future workflows, without hardcoding harden behavior.",
+    "harden_dag_lifetime": "Harden DAG is in-session and ephemeral; it is created at harden start and destroyed after final result formatting.",
+    "harden_isolation_model": "Isolation is provided by independent SchedulerLoop instance and harden-prefixed task IDs within that instance."
+  },
+  "assumptions": [
+    "[high] Problem: 重新设计 harden 工作流，使用 DRG 做异步 AI 对话交互",
+    "[high] Decisions: DRG 角色: 全局单例任务调度器，插件启动时初始化，不改造成事件总线 (理由: 事件总线无法表达串行依赖约束，DRG 的 DAG 模型天然适合 reviewer→executor 串行执行)",
+    "[high] Decisions: harden 隔离: 每次 harden 调用创建独立 DAG（harden-<uuid>），结束后归档销毁 (理由: 独立 DAG 便于调试和归档，不同 harden 实例互不干扰)",
+    "[high] Decisions: 对抗模型: 异步通信总线，reviewer 和 executor 各持长 session，DRG 调度思考回合任务在已有 session 上追加消息 (理由: 长 session 保留完整对抗历史，提升推理一致性；像聊天一样追加消息更自然)",
+    "[high] Decisions: 任务粒度: 思考回合任务，让 reviewer/executor session 基于当前消息历史生成下一轮报告 (理由: 与现有 DRG 任务执行模型匹配)",
+    "[high] Decisions: Session 创建: 惰性创建，首个需要某类型 session 的 DRG 任务现场创建，session ID 链式传递 (理由: 避免预创建未使用的 session，链式传递是最简单的不依赖外部状态的方案)",
+    "[high] Decisions: 默认轮次: 1 轮对抗（reviewer→executor→reviewer），可配置最多 10 轮，串行执行 (理由: 多数 harden 只需一轮收敛，减少不必要的 token 消耗)",
+    "[high] Decisions: 终止条件: reviewer 判定无争议（executor 上报为空或全部认可），或达到 max rounds (理由: executor 不能单方面静默结束，避免跳过真正的问题)",
+    "[high] Decisions: 驳回规则: 同一 finding 被 executor 连续拒绝 3 次，reviewer session 自维护计数器，达到后不再上报 (理由: 防止无限循环，reviewer 自维护最简洁，不增加架构复杂度)",
+    "[high] Decisions: DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务 (理由: 不需要编排器，reviewer 和 executor 自行决定是否继续对抗)",
+    "[high] Constraints: DRG 引擎核心不因本功能修改",
+    "[high] Constraints: harden 输出格式必须与现有格式兼容",
+    "[high] Constraints: quality-gate 编排逻辑不修改",
+    "[high] Constraints: 同一时间最多一个 harden DAG 运行",
+    "[high] Non-Goals: 不改造 DRG 为事件总线",
+    "[high] Non-Goals: 不支持并行 harden",
+    "[high] Non-Goals: 不支持分布式多进程对抗",
+    "[high] Non-Goals: 不修改 reviewer/executor 的 prompt 策略"
+  ],
+  "pendingConfirmations": [],
+  "draftStatus": "final",
+  "requirementModel": {
+    "feature": "harden-drg-async",
+    "sourceIntent": "harden-drg-async",
+    "convergenceStatus": "final",
+    "assumptions": [
+      "[high] Problem: 重新设计 harden 工作流，使用 DRG 做异步 AI 对话交互",
+      "[high] Decisions: DRG 角色: 全局单例任务调度器，插件启动时初始化，不改造成事件总线 (理由: 事件总线无法表达串行依赖约束，DRG 的 DAG 模型天然适合 reviewer→executor 串行执行)",
+      "[high] Decisions: harden 隔离: 每次 harden 调用创建独立 DAG（harden-<uuid>），结束后归档销毁 (理由: 独立 DAG 便于调试和归档，不同 harden 实例互不干扰)",
+      "[high] Decisions: 对抗模型: 异步通信总线，reviewer 和 executor 各持长 session，DRG 调度思考回合任务在已有 session 上追加消息 (理由: 长 session 保留完整对抗历史，提升推理一致性；像聊天一样追加消息更自然)",
+      "[high] Decisions: 任务粒度: 思考回合任务，让 reviewer/executor session 基于当前消息历史生成下一轮报告 (理由: 与现有 DRG 任务执行模型匹配)",
+      "[high] Decisions: Session 创建: 惰性创建，首个需要某类型 session 的 DRG 任务现场创建，session ID 链式传递 (理由: 避免预创建未使用的 session，链式传递是最简单的不依赖外部状态的方案)",
+      "[high] Decisions: 默认轮次: 1 轮对抗（reviewer→executor→reviewer），可配置最多 10 轮，串行执行 (理由: 多数 harden 只需一轮收敛，减少不必要的 token 消耗)",
+      "[high] Decisions: 终止条件: reviewer 判定无争议（executor 上报为空或全部认可），或达到 max rounds (理由: executor 不能单方面静默结束，避免跳过真正的问题)",
+      "[high] Decisions: 驳回规则: 同一 finding 被 executor 连续拒绝 3 次，reviewer session 自维护计数器，达到后不再上报 (理由: 防止无限循环，reviewer 自维护最简洁，不增加架构复杂度)",
+      "[high] Decisions: DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务 (理由: 不需要编排器，reviewer 和 executor 自行决定是否继续对抗)",
+      "[high] Constraints: DRG 引擎核心不因本功能修改",
+      "[high] Constraints: harden 输出格式必须与现有格式兼容",
+      "[high] Constraints: quality-gate 编排逻辑不修改",
+      "[high] Constraints: 同一时间最多一个 harden DAG 运行",
+      "[high] Non-Goals: 不改造 DRG 为事件总线",
+      "[high] Non-Goals: 不支持并行 harden",
+      "[high] Non-Goals: 不支持分布式多进程对抗",
+      "[high] Non-Goals: 不修改 reviewer/executor 的 prompt 策略"
+    ],
+    "pendingConfirmations": [],
+    "constraints": [
+      {
+        "id": "c-0001",
+        "category": "scope",
+        "severity": "should",
+        "description": "DRG 保持为全局单例任务调度器（不是事件总线），插件启动时初始化。所有异步任务共享同一个 SchedulerLoop 和 DagEngine 实例，统一状态存储。",
+        "rationale": "Derived from collected fact: architecture-drg-role",
+        "verificationMethod": "Verify implementation satisfies the architecture-drg-role requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0002",
+        "category": "scope",
+        "severity": "should",
+        "description": "每次 harden 调用创建独立 DAG（如 harden-<uuid>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。",
+        "rationale": "Derived from collected fact: harden-isolation",
+        "verificationMethod": "Verify implementation satisfies the harden-isolation requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0003",
+        "category": "scope",
+        "severity": "should",
+        "description": "异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。",
+        "rationale": "Derived from collected fact: adversarial-model",
+        "verificationMethod": "Verify implementation satisfies the adversarial-model requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0004",
+        "category": "scope",
+        "severity": "should",
+        "description": "DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。",
+        "rationale": "Derived from collected fact: task-granularity",
+        "verificationMethod": "Verify implementation satisfies the task-granularity requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0005",
+        "category": "scope",
+        "severity": "should",
+        "description": "惰性创建，链式传递 session ID。reviewer_round_1 现场创建 reviewer session，executor_round_1 现场创建 executor session。后续任务从上游任务输出中读取 ID 复用。",
+        "rationale": "Derived from collected fact: session-creation",
+        "verificationMethod": "Verify implementation satisfies the session-creation requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0006",
+        "category": "scope",
+        "severity": "should",
+        "description": "默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。",
+        "rationale": "Derived from collected fact: rounds-default-1-max-10",
+        "verificationMethod": "Verify implementation satisfies the rounds-default-1-max-10 requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0007",
+        "category": "scope",
+        "severity": "should",
+        "description": "流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。",
+        "rationale": "Derived from collected fact: termination-condition",
+        "verificationMethod": "Verify implementation satisfies the termination-condition requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0008",
+        "category": "time",
+        "severity": "should",
+        "description": "同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。",
+        "rationale": "Derived from collected fact: rejection-3-times",
+        "verificationMethod": "Verify implementation satisfies the rejection-3-times requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0009",
+        "category": "scope",
+        "severity": "should",
+        "description": "reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。",
+        "rationale": "Derived from collected fact: report-format",
+        "verificationMethod": "Verify implementation satisfies the report-format requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0010",
+        "category": "scope",
+        "severity": "should",
+        "description": "quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。",
+        "rationale": "Derived from collected fact: integration-with-quality-gate",
+        "verificationMethod": "Verify implementation satisfies the integration-with-quality-gate requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0011",
+        "category": "scope",
+        "severity": "should",
+        "description": "当前 harden 的同步 in-process reviewer→executor 循环（src/commands/harden.ts 中的 runAdversarialLoop）将被替换为 DRG 异步任务链。rebuttal 子循环被移除，由 reviewer↔executor 的多轮对抗替代。",
+        "rationale": "Derived from collected fact: current-harden-removal",
+        "verificationMethod": "Verify implementation satisfies the current-harden-removal requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0012",
+        "category": "scope",
+        "severity": "should",
+        "description": "现有 DRG 引擎（src/orchestrator/drg-engine.ts）需要扩展：支持运行时动态添加任务节点（用于表达 reviewer→executor→reviewer 的循环链）；支持任务间数据传递（session ID 链式传递）。",
+        "rationale": "Derived from collected fact: drg-engine-needs-extension",
+        "verificationMethod": "Verify implementation satisfies the drg-engine-needs-extension requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0013",
+        "category": "scope",
+        "severity": "should",
+        "description": "DRG task scheduler infrastructure is complete; harden still uses old synchronous adversarial loop.",
+        "rationale": "Derived from collected fact: current_state",
+        "verificationMethod": "Verify implementation satisfies the current_state requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0014",
+        "category": "scope",
+        "severity": "should",
+        "description": "Redesign harden workflow to use DRG for decoupled async reviewer/executor task orchestration.",
+        "rationale": "Derived from collected fact: source_intent",
+        "verificationMethod": "Verify implementation satisfies the source_intent requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0015",
+        "category": "scope",
+        "severity": "should",
+        "description": "Architecture decoupling: harden should run independently from quality-gate internals while quality-gate remains readiness owner.",
+        "rationale": "Derived from collected fact: core_motivation",
+        "verificationMethod": "Verify implementation satisfies the core_motivation requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0016",
+        "category": "time",
+        "severity": "should",
+        "description": "Session-local only; no cross-session or cross-restart continuation required for the first version.",
+        "rationale": "Derived from collected fact: runtime_scope",
+        "verificationMethod": "Verify implementation satisfies the runtime_scope requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0017",
+        "category": "scope",
+        "severity": "should",
+        "description": "Fully reuse SchedulerLoop; harden creates an isolated in-session SchedulerLoop instance.",
+        "rationale": "Derived from collected fact: drg_usage",
+        "verificationMethod": "Verify implementation satisfies the drg_usage requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0018",
+        "category": "scope",
+        "severity": "should",
+        "description": "Runtime dynamic task injection is required.",
+        "rationale": "Derived from collected fact: dag_growth",
+        "verificationMethod": "Verify implementation satisfies the dag_growth requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0019",
+        "category": "scope",
+        "severity": "should",
+        "description": "External callback injects downstream tasks; reviewer/executor executors do not hold SchedulerLoop references.",
+        "rationale": "Derived from collected fact: task_injection_owner",
+        "verificationMethod": "Verify implementation satisfies the task_injection_owner requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0020",
+        "category": "scope",
+        "severity": "should",
+        "description": "Add lightweight SchedulerLoop onTaskComplete callback hook; do not change core DRG semantics.",
+        "rationale": "Derived from collected fact: callback_mechanism",
+        "verificationMethod": "Verify implementation satisfies the callback_mechanism requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0021",
+        "category": "scope",
+        "severity": "should",
+        "description": "Do not modify quality-gate orchestration logic; keep handleHarden black-box markdown output contract.",
+        "rationale": "Derived from collected fact: quality_gate_boundary",
+        "verificationMethod": "Verify implementation satisfies the quality_gate_boundary requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0022",
+        "category": "compatibility",
+        "severity": "should",
+        "description": "harden output format must remain compatible with existing consumers.",
+        "rationale": "Derived from collected fact: output_compatibility",
+        "verificationMethod": "Verify implementation satisfies the output_compatibility requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0023",
+        "category": "scope",
+        "severity": "should",
+        "description": "Create harden-dag-manager.ts and harden-executors.ts; refactor harden.ts entry to delegate to manager.",
+        "rationale": "Derived from collected fact: implementation_direction",
+        "verificationMethod": "Verify implementation satisfies the implementation_direction requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0024",
+        "category": "scope",
+        "severity": "should",
+        "description": "Each harden run creates an independent in-session SchedulerLoop instance; no plugin-level global SchedulerLoop is required for this feature.",
+        "rationale": "Derived from collected fact: drg_instance_scope",
+        "verificationMethod": "Verify implementation satisfies the drg_instance_scope requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0025",
+        "category": "scope",
+        "severity": "should",
+        "description": "Supersedes old constraint 'do not modify DRG core'. The new policy allows generic DRG core extensions, but forbids harden-specific semantics inside DRG core.",
+        "rationale": "Derived from collected fact: drg_core_extension_policy",
+        "verificationMethod": "Verify implementation satisfies the drg_core_extension_policy requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0026",
+        "category": "scope",
+        "severity": "should",
+        "description": "DRG core should support generic runtime task injection/data passing mechanisms needed by harden and future workflows, without hardcoding harden behavior.",
+        "rationale": "Derived from collected fact: required_generic_drg_extensions",
+        "verificationMethod": "Verify implementation satisfies the required_generic_drg_extensions requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0027",
+        "category": "time",
+        "severity": "should",
+        "description": "Harden DAG is in-session and ephemeral; it is created at harden start and destroyed after final result formatting.",
+        "rationale": "Derived from collected fact: harden_dag_lifetime",
+        "verificationMethod": "Verify implementation satisfies the harden_dag_lifetime requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "c-0028",
+        "category": "scope",
+        "severity": "should",
+        "description": "Isolation is provided by independent SchedulerLoop instance and harden-prefixed task IDs within that instance.",
+        "rationale": "Derived from collected fact: harden_isolation_model",
+        "verificationMethod": "Verify implementation satisfies the harden_isolation_model requirement",
+        "sourceQuestionId": "fallback"
+      },
+      {
+        "id": "harvest-c-0029",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: DRG 角色: 全局单例任务调度器，插件启动时初始化，不改造成事件总线 (理由: 事件总线无法表达串行依赖约束，DRG 的 DAG 模型天然适合 reviewer→executor 串行执行) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0030",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: harden 隔离: 每次 harden 调用创建独立 DAG（harden-<uuid>），结束后归档销毁 (理由: 独立 DAG 便于调试和归档，不同 harden 实例互不干扰) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0031",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: 对抗模型: 异步通信总线，reviewer 和 executor 各持长 session，DRG 调度思考回合任务在已有 session 上追加消息 (理由: 长 session 保留完整对抗历史，提升推理一致性；像聊天一样追加消息更自然) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0032",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: 任务粒度: 思考回合任务，让 reviewer/executor session 基于当前消息历史生成下一轮报告 (理由: 与现有 DRG 任务执行模型匹配) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0033",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: Session 创建: 惰性创建，首个需要某类型 session 的 DRG 任务现场创建，session ID 链式传递 (理由: 避免预创建未使用的 session，链式传递是最简单的不依赖外部状态的方案) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0034",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: 默认轮次: 1 轮对抗（reviewer→executor→reviewer），可配置最多 10 轮，串行执行 (理由: 多数 harden 只需一轮收敛，减少不必要的 token 消耗) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0035",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: 终止条件: reviewer 判定无争议（executor 上报为空或全部认可），或达到 max rounds (理由: executor 不能单方面静默结束，避免跳过真正的问题) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0036",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: 驳回规则: 同一 finding 被 executor 连续拒绝 3 次，reviewer session 自维护计数器，达到后不再上报 (理由: 防止无限循环，reviewer 自维护最简洁，不增加架构复杂度) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0037",
+        "category": "scope",
+        "severity": "must",
+        "description": "Decision from brainstorm: DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务 (理由: 不需要编排器，reviewer 和 executor 自行决定是否继续对抗) (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0038",
+        "category": "scope",
+        "severity": "must",
+        "description": "DRG 引擎核心不因本功能修改 (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0039",
+        "category": "scope",
+        "severity": "must",
+        "description": "harden 输出格式必须与现有格式兼容 (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0040",
+        "category": "scope",
+        "severity": "must",
+        "description": "quality-gate 编排逻辑不修改 (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      },
+      {
+        "id": "harvest-c-0041",
+        "category": "scope",
+        "severity": "must",
+        "description": "同一时间最多一个 harden DAG 运行 (source: user, high confidence, confirmed by legacy-brainstorm)",
+        "rationale": "Preserved from confirmed brainstorm context (user, high confidence, confirmed by legacy-brainstorm)",
+        "verificationMethod": "Review generated design and implementation plan against the original brainstorm context",
+        "sourceQuestionId": "constraints"
+      }
+    ],
+    "scopeBoundary": {
+      "inScope": [
+        "harden-drg-async"
+      ],
+      "outOfScope": []
+    },
+    "acceptanceCriteria": [
+      {
+        "id": "ac-0001",
+        "description": "Deliver harden-drg-async"
+      }
+    ],
+    "goals": [
+      "Deliver harden-drg-async"
+    ],
+    "nonGoals": [
+      "不改造 DRG 为事件总线 (source: user, high confidence, confirmed by legacy-brainstorm)",
+      "不支持并行 harden (source: user, high confidence, confirmed by legacy-brainstorm)",
+      "不支持分布式多进程对抗 (source: user, high confidence, confirmed by legacy-brainstorm)",
+      "不修改 reviewer/executor 的 prompt 策略 (source: user, high confidence, confirmed by legacy-brainstorm)"
+    ],
+    "problemStatement": "重新设计 harden 工作流，使用 DRG 做异步 AI 对话交互 (source: user, high confidence, confirmed by legacy-brainstorm)",
+    "risks": [],
+    "sourceContext": {
+      "facts": {
+        "architecture-drg-role": "DRG 保持为全局单例任务调度器（不是事件总线），插件启动时初始化。所有异步任务共享同一个 SchedulerLoop 和 DagEngine 实例，统一状态存储。",
+        "harden-isolation": "每次 harden 调用创建独立 DAG（如 harden-<uuid>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。",
+        "adversarial-model": "异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。",
+        "task-granularity": "DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。",
+        "session-creation": "惰性创建，链式传递 session ID。reviewer_round_1 现场创建 reviewer session，executor_round_1 现场创建 executor session。后续任务从上游任务输出中读取 ID 复用。",
+        "rounds-default-1-max-10": "默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。",
+        "termination-condition": "流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。",
+        "rejection-3-times": "同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。",
+        "report-format": "reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。",
+        "integration-with-quality-gate": "quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。",
+        "current-harden-removal": "当前 harden 的同步 in-process reviewer→executor 循环（src/commands/harden.ts 中的 runAdversarialLoop）将被替换为 DRG 异步任务链。rebuttal 子循环被移除，由 reviewer↔executor 的多轮对抗替代。",
+        "drg-engine-needs-extension": "现有 DRG 引擎（src/orchestrator/drg-engine.ts）需要扩展：支持运行时动态添加任务节点（用于表达 reviewer→executor→reviewer 的循环链）；支持任务间数据传递（session ID 链式传递）。",
+        "current_state": "DRG task scheduler infrastructure is complete; harden still uses old synchronous adversarial loop.",
+        "source_intent": "Redesign harden workflow to use DRG for decoupled async reviewer/executor task orchestration.",
+        "core_motivation": "Architecture decoupling: harden should run independently from quality-gate internals while quality-gate remains readiness owner.",
+        "runtime_scope": "Session-local only; no cross-session or cross-restart continuation required for the first version.",
+        "drg_usage": "Fully reuse SchedulerLoop; harden creates an isolated in-session SchedulerLoop instance.",
+        "dag_growth": "Runtime dynamic task injection is required.",
+        "task_injection_owner": "External callback injects downstream tasks; reviewer/executor executors do not hold SchedulerLoop references.",
+        "callback_mechanism": "Add lightweight SchedulerLoop onTaskComplete callback hook; do not change core DRG semantics.",
+        "quality_gate_boundary": "Do not modify quality-gate orchestration logic; keep handleHarden black-box markdown output contract.",
+        "output_compatibility": "harden output format must remain compatible with existing consumers.",
+        "implementation_direction": "Create harden-dag-manager.ts and harden-executors.ts; refactor harden.ts entry to delegate to manager.",
+        "drg_instance_scope": "Each harden run creates an independent in-session SchedulerLoop instance; no plugin-level global SchedulerLoop is required for this feature.",
+        "drg_core_extension_policy": "Supersedes old constraint 'do not modify DRG core'. The new policy allows generic DRG core extensions, but forbids harden-specific semantics inside DRG core.",
+        "required_generic_drg_extensions": "DRG core should support generic runtime task injection/data passing mechanisms needed by harden and future workflows, without hardcoding harden behavior.",
+        "harden_dag_lifetime": "Harden DAG is in-session and ephemeral; it is created at harden start and destroyed after final result formatting.",
+        "harden_isolation_model": "Isolation is provided by independent SchedulerLoop instance and harden-prefixed task IDs within that instance."
+      },
+      "assumptions": [
+        "[high] Problem: 重新设计 harden 工作流，使用 DRG 做异步 AI 对话交互",
+        "[high] Decisions: DRG 角色: 全局单例任务调度器，插件启动时初始化，不改造成事件总线 (理由: 事件总线无法表达串行依赖约束，DRG 的 DAG 模型天然适合 reviewer→executor 串行执行)",
+        "[high] Decisions: harden 隔离: 每次 harden 调用创建独立 DAG（harden-<uuid>），结束后归档销毁 (理由: 独立 DAG 便于调试和归档，不同 harden 实例互不干扰)",
+        "[high] Decisions: 对抗模型: 异步通信总线，reviewer 和 executor 各持长 session，DRG 调度思考回合任务在已有 session 上追加消息 (理由: 长 session 保留完整对抗历史，提升推理一致性；像聊天一样追加消息更自然)",
+        "[high] Decisions: 任务粒度: 思考回合任务，让 reviewer/executor session 基于当前消息历史生成下一轮报告 (理由: 与现有 DRG 任务执行模型匹配)",
+        "[high] Decisions: Session 创建: 惰性创建，首个需要某类型 session 的 DRG 任务现场创建，session ID 链式传递 (理由: 避免预创建未使用的 session，链式传递是最简单的不依赖外部状态的方案)",
+        "[high] Decisions: 默认轮次: 1 轮对抗（reviewer→executor→reviewer），可配置最多 10 轮，串行执行 (理由: 多数 harden 只需一轮收敛，减少不必要的 token 消耗)",
+        "[high] Decisions: 终止条件: reviewer 判定无争议（executor 上报为空或全部认可），或达到 max rounds (理由: executor 不能单方面静默结束，避免跳过真正的问题)",
+        "[high] Decisions: 驳回规则: 同一 finding 被 executor 连续拒绝 3 次，reviewer session 自维护计数器，达到后不再上报 (理由: 防止无限循环，reviewer 自维护最简洁，不增加架构复杂度)",
+        "[high] Decisions: DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务 (理由: 不需要编排器，reviewer 和 executor 自行决定是否继续对抗)",
+        "[high] Constraints: DRG 引擎核心不因本功能修改",
+        "[high] Constraints: harden 输出格式必须与现有格式兼容",
+        "[high] Constraints: quality-gate 编排逻辑不修改",
+        "[high] Constraints: 同一时间最多一个 harden DAG 运行",
+        "[high] Non-Goals: 不改造 DRG 为事件总线",
+        "[high] Non-Goals: 不支持并行 harden",
+        "[high] Non-Goals: 不支持分布式多进程对抗",
+        "[high] Non-Goals: 不修改 reviewer/executor 的 prompt 策略"
+      ]
+    }
+  },
+  "designReview": {
+    "status": "not_ready",
+    "summary": "Design is generated, but implementation constraints are not yet sufficient for reliable planning.",
+    "structuralCompleteness": "structurally_complete",
+    "designReadiness": "needs_implementation_constraints",
+    "findings": [
+      {
+        "id": "F-0002",
+        "severity": "blocking",
+        "category": "constraint_specificity",
+        "message": "21 important constraint(s) are not sufficiently covered by scenarios, criteria, and architecture.",
+        "evidenceIds": [],
+        "suggestedFix": "Add implementation-level constraints that name owners, triggers, state changes, failure behavior, and verification methods."
+      }
+    ],
+    "coverageMatrix": [
+      {
+        "constraintId": "c-0001",
+        "constraintText": "DRG 保持为全局单例任务调度器（不是事件总线），插件启动时初始化。所有异步任务共享同一个 SchedulerLoop 和 DagEngine 实例，统一状态存储。",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0002",
+        "constraintText": "每次 harden 调用创建独立 DAG（如 harden-<uuid>），任务 ID 带前缀隔离。harden 结束后整个 DAG 归档/销毁。",
+        "coveredByGoals": [
+          "g-0002"
+        ],
+        "coveredByScenarios": [
+          "bs-0002"
+        ],
+        "coveredBySuccessCriteria": [
+          "sc-0002"
+        ],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0003",
+        "constraintText": "异步通信总线模式：reviewer 和 executor 各持一个长生命周期 session，DRG 调度'思考回合任务'在已有 session 上追加消息。像聊天一样来回对话。",
+        "coveredByGoals": [
+          "g-0001"
+        ],
+        "coveredByScenarios": [
+          "bs-0001"
+        ],
+        "coveredBySuccessCriteria": [
+          "sc-0001",
+          "sc-0006",
+          "sc-0007",
+          "sc-0008"
+        ],
+        "coveredByArchitecture": [
+          "DRG harden DAG",
+          "reviewer session",
+          "executor session",
+          "tf-0001"
+        ],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0004",
+        "constraintText": "DRG 任务粒度是'思考回合'：让 session 基于当前消息历史生成下一轮报告。任务输出包含 session ID 和报告内容。",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0005",
+        "constraintText": "默认1轮对抗（reviewer→executor→reviewer 为一轮），可配置最多10轮，串行执行。当前默认是 maxRounds=5，改为1。",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [
+          "sc-0004"
+        ],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0006",
+        "constraintText": "流程结束当且仅当 reviewer 在一轮审查后认为没有需要继续追的问题（executor 的上报为空或 reviewer 全部认可），或达到 max rounds。终止判定权在 reviewer。",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [
+          "sc-0005"
+        ],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": []
+      },
+      {
+        "constraintId": "c-0007",
+        "constraintText": "同一 finding 被 executor 连续拒绝3次后，reviewer session 自行维护计数器，达到3次后忽略该 finding，不再上报给 executor。",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [
+          "sc-0001",
+          "sc-0006"
+        ],
+        "coveredByArchitecture": [
+          "reviewer session",
+          "executor session",
+          "tf-0001"
+        ],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0008",
+        "constraintText": "reviewer 报告包含：问题、证据链、置信度（高/中/低）。executor 修复高置信度问题；对中低置信度自行决定是否修复；不需要修复的通过 DRG 报告回复 reviewer。",
+        "coveredByGoals": [
+          "g-0001"
+        ],
+        "coveredByScenarios": [
+          "bs-0001"
+        ],
+        "coveredBySuccessCriteria": [
+          "sc-0001",
+          "sc-0007",
+          "sc-0008"
+        ],
+        "coveredByArchitecture": [
+          "DRG harden DAG",
+          "executor session",
+          "tf-0001"
+        ],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0009",
+        "constraintText": "quality-gate 的对话负责决定是否启动 harden（风险评估）和最终收敛判定。harden 不直接修改 acceptance state 或 ImplementationRun 状态。",
+        "coveredByGoals": [
+          "g-0003"
+        ],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0010",
+        "constraintText": "DRG task scheduler infrastructure is complete; harden still uses old synchronous adversarial loop.",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [
+          "sc-0008"
+        ],
+        "coveredByArchitecture": [
+          "DRG harden DAG",
+          "tf-0001",
+          "harden DRG flow->DRG engine"
+        ],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0011",
+        "constraintText": "Redesign harden workflow to use DRG for decoupled async reviewer/executor task orchestration.",
+        "coveredByGoals": [
+          "g-0001"
+        ],
+        "coveredByScenarios": [
+          "bs-0001",
+          "bs-0004"
+        ],
+        "coveredBySuccessCriteria": [
+          "sc-0001",
+          "sc-0007",
+          "sc-0008"
+        ],
+        "coveredByArchitecture": [
+          "DRG harden DAG",
+          "reviewer session",
+          "executor session",
+          "tf-0001",
+          "quality-gate->harden DRG flow",
+          "harden DRG flow->DRG engine"
+        ],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0012",
+        "constraintText": "Session-local only; no cross-session or cross-restart continuation required for the first version.",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [
+          "tf-0001"
+        ],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0013",
+        "constraintText": "Fully reuse SchedulerLoop; harden creates an isolated in-session SchedulerLoop instance.",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0014",
+        "constraintText": "Runtime dynamic task injection is required.",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0015",
+        "constraintText": "Add lightweight SchedulerLoop onTaskComplete callback hook; do not change core DRG semantics.",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [
+          "harden DRG flow->DRG engine"
+        ],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0016",
+        "constraintText": "harden output format must remain compatible with existing consumers.",
+        "coveredByGoals": [
+          "g-0004"
+        ],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0017",
+        "constraintText": "Isolation is provided by independent SchedulerLoop instance and harden-prefixed task IDs within that instance.",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [
+          "sc-0008"
+        ],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0018",
+        "constraintText": "DRG 引擎核心不因本功能修改",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0019",
+        "constraintText": "harden 输出格式必须与现有格式兼容",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [
+          "sc-0003"
+        ],
+        "coveredByArchitecture": [],
+        "sufficiency": "partial",
+        "missingDetails": []
+      },
+      {
+        "constraintId": "c-0020",
+        "constraintText": "quality-gate 编排逻辑不修改",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      },
+      {
+        "constraintId": "c-0021",
+        "constraintText": "同一时间最多一个 harden DAG 运行",
+        "coveredByGoals": [],
+        "coveredByScenarios": [],
+        "coveredBySuccessCriteria": [],
+        "coveredByArchitecture": [],
+        "sufficiency": "missing",
+        "missingDetails": [
+          "strong verification"
+        ]
+      }
+    ],
+    "missingImplementationFacts": [
+      {
+        "key": "implementation_constraints",
+        "question": "Which concrete APIs, state transitions, payload fields, and ownership rules must the implementation follow?",
+        "reason": "21 important constraint(s) are not sufficiently covered by scenarios, criteria, and architecture.",
+        "exampleAnswer": "Define task ids, output schema, state transitions, and ownership for each workflow step."
+      }
+    ]
+  },
+  "generatedDocs": [
+    "F:\\ai-code\\openflow\\docs\\changes\\2026-05-31-harden-drg-async\\design.md",
+    "F:\\ai-code\\openflow\\docs\\changes\\2026-05-31-harden-drg-async\\behavior.md"
+  ],
+  "generationAttemptCount": 4,
+  "updatedAt": "2026-06-01T03:44:24.942Z",
+  "pendingContextHarvest": {
+    "confirmedPacketId": "harden-async-adversarial-drg-2026-05-31",
+    "confirmedItems": [
+      {
+        "type": "problem",
+        "content": "重新设计 harden 工作流，使用 DRG 做异步 AI 对话交互",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "DRG 角色: 全局单例任务调度器，插件启动时初始化，不改造成事件总线 (理由: 事件总线无法表达串行依赖约束，DRG 的 DAG 模型天然适合 reviewer→executor 串行执行)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "harden 隔离: 每次 harden 调用创建独立 DAG（harden-<uuid>），结束后归档销毁 (理由: 独立 DAG 便于调试和归档，不同 harden 实例互不干扰)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "对抗模型: 异步通信总线，reviewer 和 executor 各持长 session，DRG 调度思考回合任务在已有 session 上追加消息 (理由: 长 session 保留完整对抗历史，提升推理一致性；像聊天一样追加消息更自然)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "任务粒度: 思考回合任务，让 reviewer/executor session 基于当前消息历史生成下一轮报告 (理由: 与现有 DRG 任务执行模型匹配)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "Session 创建: 惰性创建，首个需要某类型 session 的 DRG 任务现场创建，session ID 链式传递 (理由: 避免预创建未使用的 session，链式传递是最简单的不依赖外部状态的方案)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "默认轮次: 1 轮对抗（reviewer→executor→reviewer），可配置最多 10 轮，串行执行 (理由: 多数 harden 只需一轮收敛，减少不必要的 token 消耗)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "终止条件: reviewer 判定无争议（executor 上报为空或全部认可），或达到 max rounds (理由: executor 不能单方面静默结束，避免跳过真正的问题)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "驳回规则: 同一 finding 被 executor 连续拒绝 3 次，reviewer session 自维护计数器，达到后不再上报 (理由: 防止无限循环，reviewer 自维护最简洁，不增加架构复杂度)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "decision",
+        "content": "DAG 动态生长: 运行时动态创建，reviewer/executor 完成后根据输出决定是否注入下游任务 (理由: 不需要编排器，reviewer 和 executor 自行决定是否继续对抗)",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "constraint",
+        "content": "DRG 引擎核心不因本功能修改",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "constraint",
+        "content": "harden 输出格式必须与现有格式兼容",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "constraint",
+        "content": "quality-gate 编排逻辑不修改",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "constraint",
+        "content": "同一时间最多一个 harden DAG 运行",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "nonGoal",
+        "content": "不改造 DRG 为事件总线",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "nonGoal",
+        "content": "不支持并行 harden",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "nonGoal",
+        "content": "不支持分布式多进程对抗",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      },
+      {
+        "type": "nonGoal",
+        "content": "不修改 reviewer/executor 的 prompt 策略",
+        "confidence": "high",
+        "source": "user",
+        "confirmedBy": "legacy-brainstorm"
+      }
+    ],
+    "ignoredPacketIds": []
+  }
+}

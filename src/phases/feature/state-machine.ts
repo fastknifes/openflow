@@ -1,8 +1,10 @@
 import { buildRequirementModel } from './constraint-derivation.js'
 import type { RequirementModel } from './requirement-model.js'
+import type { ExtractedItem } from './context-extraction.js'
+import type { DesignReviewReport } from './design-review-report.js'
 
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
-export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed'
+export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed' | 'complete' | 'draft_blocked'
 export type FeatureDraftStatus = 'final' | 'draft_with_assumptions'
 export type PostDesignDecision = 'proceed_to_plan' | 'review_docs' | 'inspect'
 
@@ -43,6 +45,23 @@ export interface FeatureSession {
   lastQuestionPromptedAt?: string | undefined
   lastAnsweredAt?: string | undefined
   updatedAt: string
+  /** Collected facts from brainstorm and user input */
+  collectedFacts: Record<string, string>
+  /** Pending context harvest state */
+  pendingContextHarvest?: {
+    awaitingPacketId?: string
+    confirmedPacketId?: string
+    ignoredPacketIds: string[]
+    confirmedItems?: ExtractedItem[]
+  } | undefined
+  /** Requirement clearance clarification state */
+  clarificationState?: {
+    round: number
+    maxRounds: number
+    unresolvedDimensions?: string[]
+  } | undefined
+  /** Design review report from generation */
+  designReview?: DesignReviewReport | undefined
 }
 
 type LegacyFeatureSession = {
@@ -140,6 +159,7 @@ export function createInitialFeatureSession(feature: string): FeatureSession {
     draftStatus: 'final',
     generatedDocs: [],
     generationAttemptCount: 0,
+    collectedFacts: {},
     updatedAt: new Date().toISOString(),
   }
 }
@@ -184,6 +204,7 @@ export function normalizeFeatureSession(feature: string, raw: unknown): FeatureS
     lastError: typeof parsed.lastError === 'string' ? parsed.lastError : undefined,
     lastQuestionPromptedAt: typeof parsed.lastQuestionPromptedAt === 'string' ? parsed.lastQuestionPromptedAt : undefined,
     lastAnsweredAt: typeof parsed.lastAnsweredAt === 'string' ? parsed.lastAnsweredAt : undefined,
+    collectedFacts: typeof parsed.collectedFacts === 'object' && parsed.collectedFacts !== null ? parsed.collectedFacts as Record<string, string> : {},
     updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
   }
 }
@@ -272,6 +293,16 @@ export function markGenerationFailed(session: FeatureSession, message: string): 
     pendingQuestionId: null,
     promptMode: 'discussion',
     lastError: message,
+  }
+}
+
+export function markDraftBlocked(session: FeatureSession, reason: string): FeatureSession {
+  return {
+    ...session,
+    workflowState: 'draft_blocked',
+    pendingQuestionId: null,
+    promptMode: 'discussion',
+    lastError: reason,
   }
 }
 

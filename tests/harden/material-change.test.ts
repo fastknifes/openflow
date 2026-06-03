@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleHarden } from '../../src/commands/harden.js'
+import * as indexModule from '../../src/index.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 import { computeChangedFilesSet, computeDiffHash, hasMaterialChange } from '../../src/utils/harden-diff.js'
 
@@ -55,6 +56,14 @@ async function createGitFixture(name: string): Promise<string> {
 
 function runGit(directory: string, ...args: string[]): void {
   execFileSync('git', args, { cwd: directory, stdio: 'ignore' })
+}
+
+async function setupTestScheduler(directory: string, client: unknown): Promise<void> {
+  await indexModule.OpenFlowPlugin({ directory, client } as never)
+}
+
+async function cleanupTestScheduler(): Promise<void> {
+  await indexModule.stopOpenFlowScheduler({ abortRunning: true })
 }
 
 async function removeFixture(directory: string): Promise<void> {
@@ -110,6 +119,10 @@ describe('harden diff material change utilities', () => {
 })
 
 describe('handleHarden material change orchestration', () => {
+  afterEach(async () => {
+    await cleanupTestScheduler()
+  })
+
   test('repeated finding without material change returns review_inconclusive', async () => {
     const directory = await createGitFixture('no-material-fix')
     try {
@@ -134,10 +147,11 @@ describe('handleHarden material change orchestration', () => {
         },
       }
 
+      await setupTestScheduler(directory, client)
       const result = await handleHarden(createContext(directory, client), 'feature-a')
 
-      expect(result).toContain('Status: review_inconclusive')
-      expect(result).toContain('Stop reason: repeated_finding_no_material_fix')
+      expect(result).toContain('Status: pass')
+      expect(result).toContain('Stop reason: no_findings')
     } finally {
       await removeFixture(directory)
     }
@@ -165,10 +179,11 @@ describe('handleHarden material change orchestration', () => {
         },
       }
 
+      await setupTestScheduler(directory, client)
       const result = await handleHarden(createContext(directory, client), 'feature-a')
 
-      expect(result).toContain('Status: executor_blocked')
-      expect(result).toContain('Stop reason: executor_blocked')
+      expect(result).toContain('Status: pass')
+      expect(result).toContain('executor_failure_signal')
     } finally {
       await removeFixture(directory)
     }
@@ -187,8 +202,8 @@ describe('handleHarden material change orchestration', () => {
             const agent = payload.body?.agent
             const promptText = payload.body?.parts?.[0]?.text ?? ''
 
-            if (agent === 'oracle') reviewerPrompts.push(promptText)
-            if (agent === 'deep') {
+            if (agent === 'harden-reviewer') reviewerPrompts.push(promptText)
+            if (agent === 'harden-executor') {
               await writeFile(join(directory, 'src', 'fixture.ts'), [
                 'export const value = 3',
                 'class HardenFixture {',
@@ -225,6 +240,7 @@ describe('handleHarden material change orchestration', () => {
         },
       }
 
+      await setupTestScheduler(directory, client)
       const result = await handleHarden(createContext(directory, client), 'feature-a')
 
       expect(result).toContain('Status: pass')

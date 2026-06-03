@@ -160,6 +160,39 @@ describe.serial('handleImplement', () => {
         await cleanupDir(testDir)
       }
     })
+
+    test('returns duplicate error for same feature even from a different session', async () => {
+      const testDir = uniqueTestDir('dup-feature-global')
+      const runsDir = join(testDir, '.sisyphus', 'openflow', 'runs', 'dup-feature-global')
+      try {
+        await mkdir(runsDir, { recursive: true })
+        const activeRun = {
+          runID: 'run_existing-global-001',
+          feature: 'dup-feature-global',
+          sessionID: 'session-a',
+          messageID: 'msg-old',
+          agent: 'test-agent',
+          directory: testDir,
+          backend: 'opencode',
+          backendCommand: '',
+          status: 'running',
+          containerMode: 'session',
+          startedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          eventsPath: '.sisyphus/openflow/events/run_existing-global-001.jsonl',
+          observationsPath: '.sisyphus/openflow/observations/run_existing-global-001.jsonl',
+        }
+        await writeFile(join(runsDir, 'run_existing-global-001.json'), JSON.stringify(activeRun, null, 2), 'utf8')
+
+        const ctx = createContext({ directory: testDir })
+        const result = await handleImplement(ctx, 'dup-feature-global', undefined, createToolContext(testDir, 'session-b'))
+
+        expect(result).toContain('Duplicate Blocked')
+        expect(result).toContain('run_existing-global-001')
+      } finally {
+        await cleanupDir(testDir)
+      }
+    })
   })
 
   describe('successful run creation', () => {
@@ -261,6 +294,29 @@ describe.serial('handleImplement', () => {
         } else {
           expect(cleanup.error).toBeDefined()
         }
+      } finally {
+        await cleanupDir(testDir)
+      }
+    })
+
+    test('auto-commits dated feature docs before creating worktree so docs are visible', async () => {
+      const testDir = uniqueTestDir('worktree-docs-autocommit')
+      const feature = `docs-visible-${randomUUID()}`
+      const changeDir = `2026-06-01-${feature}`
+      try {
+        await mkdir(testDir, { recursive: true })
+        initGitRepo(testDir)
+        await mkdir(join(testDir, 'docs', 'changes', changeDir), { recursive: true })
+        await writeFile(join(testDir, 'docs', 'changes', changeDir, 'plan.md'), '# Plan\n\nVisible in worktree', 'utf-8')
+
+        const ctx = createContext({ directory: testDir, worktree: testDir })
+        const result = await handleImplement(ctx, feature, true, createToolContext(testDir, 'test-session-worktree-docs'))
+        const expectedWorktree = join(testDir, defaultConfig.paths.worktree_dir, feature)
+
+        expect(result).toContain('- **Auto-Commit**:')
+        await expect(access(join(expectedWorktree, 'docs', 'changes', changeDir, 'plan.md'))).resolves.toBeNull()
+
+        await removeWorktree(ctx, feature)
       } finally {
         await cleanupDir(testDir)
       }

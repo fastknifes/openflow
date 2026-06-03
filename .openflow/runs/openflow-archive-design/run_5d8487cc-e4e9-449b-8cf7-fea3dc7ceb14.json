@@ -1,0 +1,23 @@
+{
+  "feature": "openflow-archive-design",
+  "sessionID": "ses_17f312af9ffeoIcwBUBDa0LuJD",
+  "messageID": "",
+  "agent": "",
+  "directory": "F:\\ai-code\\openflow\\.openflow\\worktree\\openflow-archive-design",
+  "worktree": "F:\\ai-code\\openflow\\.openflow\\worktree\\openflow-archive-design",
+  "branch": "openflow/implement-openflow-archive-design",
+  "baseRef": "4445a835a05f87b2a53de06bbe4a4c1a649c81ff",
+  "backend": "omo",
+  "backendCommand": "/start-work openflow-archive-design\n\nOpenFlow Implementation Context:\n- runID: run_5d8487cc-e4e9-449b-8cf7-fea3dc7ceb14\n- feature: openflow-archive-design\n- executionRoot: F:\\ai-code\\openflow\\.openflow\\worktree\\openflow-archive-design\n- worktree: F:\\ai-code\\openflow\\.openflow\\worktree\\openflow-archive-design\n- planPath: docs/changes/openflow-archive-design/plan.md\n- containerMode: worktree\n- mustUseExistingImplementationRun: true",
+  "status": "blocked",
+  "containerMode": "worktree",
+  "worktreeKind": "derived",
+  "commitPolicy": "archive",
+  "cleanupPolicy": "archive_remove",
+  "mainWorktreeDirty": true,
+  "eventsPath": ".openflow\\events\\openflow-archive-design.jsonl",
+  "observationsPath": ".openflow\\observations\\openflow-archive-design.jsonl",
+  "runID": "run_5d8487cc-e4e9-449b-8cf7-fea3dc7ceb14",
+  "startedAt": "2026-06-01T09:31:34.394Z",
+  "updatedAt": "2026-06-02T01:56:58.227Z"
+}

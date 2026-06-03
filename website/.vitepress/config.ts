@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: 'OpenFlow',
   description: '面向 AI 驱动开发的文档治理工作流',
   lang: 'zh-CN',
@@ -10,73 +11,62 @@ export default defineConfig({
     logo: '/logo.svg',
 
     nav: [
-      { text: '介绍', link: '/introduction/' },
-      { text: '快速开始', link: '/getting-started/installation' },
-      { text: '使用指南', link: '/guide/feature-workflow' },
-      { text: '参考', link: '/reference/commands' },
-      { text: '亮点', link: '/highlights/quality-gate' },
+      { text: '介绍', link: '/介绍/' },
+      { text: '使用指南', link: '/使用指南/' },
     ],
 
     sidebar: {
-      '/introduction/': [
+      '/介绍/': [
         {
           text: '介绍',
           items: [
-            { text: '概览', link: '/introduction/' },
-            { text: '核心概念', link: '/introduction/concepts' },
-            { text: '工程哲学', link: '/introduction/philosophy' },
-            { text: '与竞品对比', link: '/introduction/comparison' },
+            { text: '概览', link: '/介绍/' },
+            { text: '快速开始', link: '/介绍/quickstart' },
+            { text: '核心概念', link: '/介绍/concepts' },
+            { text: '与竞品对比', link: '/介绍/comparison' },
           ],
         },
       ],
-      '/getting-started/': [
-        {
-          text: '快速开始',
-          items: [
-            { text: '安装', link: '/getting-started/installation' },
-            { text: '10 分钟上手', link: '/getting-started/quickstart' },
-            { text: '最小配置', link: '/getting-started/configuration' },
-          ],
-        },
-      ],
-      '/guide/': [
+      '/使用指南/': [
         {
           text: '使用指南',
           items: [
-            { text: 'Feature 工作流', link: '/guide/feature-workflow' },
-            { text: '行为文档指南', link: '/guide/behavior-document-guide' },
-            { text: '实现工作流', link: '/guide/implement-workflow' },
-            { text: '开发中变更', link: '/guide/mid-development-change' },
-            { text: '迁移已有文档', link: '/guide/migrate-existing-docs' },
-            { text: '归档与追溯', link: '/guide/archive-and-traceability' },
+            { text: '概览', link: '/使用指南/' },
           ],
         },
-      ],
-      '/reference/': [
+        {
+          text: '教学流程',
+          items: [
+            { text: '阶段一：需求探索与确认', link: '/使用指南/tutorial-phase1' },
+            { text: '阶段二：开发计划与实现', link: '/使用指南/tutorial-phase2' },
+            { text: '阶段三：验证与归档', link: '/使用指南/tutorial-phase3' },
+          ],
+        },
+        {
+          text: '进阶',
+          items: [
+            { text: '迁移已有文档', link: '/使用指南/migrate-existing-docs' },
+          ],
+        },
+        {
+          text: '亮点机制',
+          items: [
+            { text: 'TDD', link: '/使用指南/highlights/tdd' },
+            { text: 'BDD 与集成测试', link: '/使用指南/highlights/bdd' },
+            { text: '金字塔原则编程', link: '/使用指南/highlights/pyramid' },
+            { text: '对抗性硬化', link: '/使用指南/highlights/harden' },
+            { text: '代码地图', link: '/使用指南/highlights/code-map' },
+            { text: '漂移检测', link: '/使用指南/highlights/drift-detection' },
+            { text: '契约扫描', link: '/使用指南/highlights/contract-scanning' },
+            { text: 'AI 反思', link: '/使用指南/highlights/ai-reflection' },
+          ],
+        },
         {
           text: '参考',
           items: [
-            { text: '命令速查', link: '/reference/commands' },
-            { text: '配置项', link: '/reference/config-options' },
-            { text: '目录约定', link: '/reference/directory-conventions' },
+            { text: '命令速查', link: '/使用指南/reference/commands' },
+            { text: '配置项', link: '/使用指南/reference/config-options' },
           ],
-        },
-      ],
-      '/highlights/': [
-        {
-          text: '亮点',
-          items: [
-            { text: '质量门', link: '/highlights/quality-gate' },
-            { text: '漂移守护', link: '/highlights/drift-guardian' },
-            { text: '智能归档', link: '/highlights/smart-archive' },
-            { text: 'TDD/BDD/SDD', link: '/highlights/tdd-bdd-sdd' },
-          ],
-        },
-      ],
-      '/misc/': [
-        {
-          text: '其他',
-          items: [],
         },
       ],
     },
@@ -97,11 +87,5 @@ export default defineConfig({
       label: '简体中文',
       lang: 'zh-CN',
     },
-    // en: {
-    //   label: 'English',
-    //   lang: 'en-US',
-    //   link: '/en/',
-    //   themeConfig: {},
-    // },
   },
-})
+}))

@@ -1,0 +1,23 @@
+{
+  "feature": "harden-drg-async",
+  "sessionID": "ses_17ed9275fffejGYF1kgjrtUyZS",
+  "messageID": "",
+  "agent": "",
+  "directory": "F:\\ai-code\\openflow\\.openflow\\worktree\\harden-drg-async",
+  "worktree": "F:\\ai-code\\openflow\\.openflow\\worktree\\harden-drg-async",
+  "branch": "openflow/implement-harden-drg-async",
+  "baseRef": "f0f380e2d41ea965c0e346667023d0a0e958a4f0",
+  "backend": "omo",
+  "backendCommand": "/start-work harden-drg-async\n\nOpenFlow Implementation Context:\n- runID: run_dcbf42d8-310c-43e8-a3d0-50c1113b9a27\n- feature: harden-drg-async\n- executionRoot: F:\\ai-code\\openflow\\.openflow\\worktree\\harden-drg-async\n- worktree: F:\\ai-code\\openflow\\.openflow\\worktree\\harden-drg-async\n- planPath: docs/changes/2026-05-31-harden-drg-async/plan.md\n- containerMode: worktree\n- mustUseExistingImplementationRun: true",
+  "status": "archived",
+  "containerMode": "worktree",
+  "worktreeKind": "merged",
+  "commitPolicy": "archive",
+  "cleanupPolicy": "archive_remove",
+  "mainWorktreeDirty": true,
+  "eventsPath": ".openflow\\events\\harden-drg-async.jsonl",
+  "observationsPath": ".openflow\\observations\\harden-drg-async.jsonl",
+  "runID": "run_dcbf42d8-310c-43e8-a3d0-50c1113b9a27",
+  "startedAt": "2026-06-01T06:34:13.267Z",
+  "updatedAt": "2026-06-01T08:28:08.705Z"
+}

@@ -4,32 +4,8 @@ export const en: I18nResource = {
   // ── Commands: feature ──
   'commands.feature.guardAlreadyPrompted':
     '> This question has already been asked via the interactive tool. Please reply with your choice directly in this conversation, or type "skip" to continue.',
-  'commands.feature.nextStepHeader': 'Next Steps',
-  'commands.feature.nextStepQuestion':
-    'Design documents have been generated. How would you like to proceed?',
-  'commands.feature.nextStepOptionPlan': 'Proceed to Plan',
-  'commands.feature.nextStepOptionPlanDesc':
-    'View the recommended command and manually enter implementation plan generation.',
-  'commands.feature.nextStepOptionReview': 'Review Constraint Sufficiency',
-  'commands.feature.nextStepOptionReviewDesc':
-    'Have the assistant/runtime review whether constraints in design.md and behavior.md are sufficient.',
-  'commands.feature.nextStepOptionInspect': 'Inspect Documents',
-  'commands.feature.nextStepOptionInspectDesc':
-    'Check the generated design documents first before deciding on next steps.',
-  'commands.feature.postDesignConfirmProceed': 'Proceed to Plan',
-  'commands.feature.postDesignConfirmReview': 'Review Constraint Sufficiency',
-  'commands.feature.postDesignConfirmInspect': 'Inspect Documents',
 
   // ── Commands: verify ──
-  'commands.verify.failureHeader': 'Verification Failed',
-  'commands.verify.failureQuestion':
-    'Some checks did not pass. Please choose the next step:',
-  'commands.verify.failureOptionFix': 'Fix Issues',
-  'commands.verify.failureOptionFixDesc':
-    'Fix the failing checks, then re-run verification',
-  'commands.verify.failureOptionAccept': 'Mark as Success',
-  'commands.verify.failureOptionAcceptDesc':
-    'Accept the current failures and mark verification as passed',
   'commands.verify.acceptedFailuresMessage':
     'Current failures have been accepted; to restore strict verification, fix the failing checks and re-run /openflow-verify.',
 

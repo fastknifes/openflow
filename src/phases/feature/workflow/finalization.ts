@@ -25,10 +25,8 @@ import {
   formatGenerationResultAll,
   formatHarvestOpenQuestionBlock,
   formatNextStepOptions,
-  formatPostDesignDecisionResult,
 } from './infra/response.js'
 import { shouldReturnEarly } from './rules/decision.js'
-import { askPostDesignConfirmation } from './rules/questioning.js'
 import { buildSessionRequirementModel, generateDesignDocument, prepareRequirementModel } from './rules/generation.js'
 
 export async function finalizeFeatureWorkflow(
@@ -228,24 +226,7 @@ async function generateFeatureDocuments(
     await markRecentFeatureCompletion(ctx.directory, getToolSessionID(toolContext), completedSession.feature)
 
     const baseResult = formatGenerationResultAll(session.feature, completedSession.generatedDocs, completedSession.featureTitle, validatedModel, designReview)
-
-    if (hasAskQuestion(toolContext) && !completedSession.postDesignDecision) {
-      const decision = await askPostDesignConfirmation(toolContext, validatedModel, designReview)
-      if (decision) {
-        completedSession = {
-          ...completedSession,
-          postDesignDecision: decision,
-        }
-        await saveFeatureSession(ctx.directory, completedSession, ctx.config.paths.feature_state)
-        return `${baseResult}\n\n${formatPostDesignDecisionResult(decision, session.feature, validatedModel, designReview)}`
-      }
-    }
-
-    if (!hasAskQuestion(toolContext)) {
-      return `${baseResult}\n\n${formatNextStepOptions(session.feature, designReview)}`
-    }
-
-    return baseResult
+    return `${baseResult}\n\n${formatNextStepOptions(session.feature, designReview)}`
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const failedSession = markGenerationFailed(markGenerating(session), message)

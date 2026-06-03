@@ -1,0 +1,17 @@
+{
+  "version": 4,
+  "feature": "changes-2026-06",
+  "workflowState": "collecting",
+  "collectedFacts": {
+    "design_review_status": "constraints_insufficient",
+    "gap_count": "7_major_gaps_identified",
+    "needs_supplement": "true"
+  },
+  "assumptions": [],
+  "pendingConfirmations": [],
+  "draftStatus": "final",
+  "generatedDocs": [],
+  "generationAttemptCount": 0,
+  "updatedAt": "2026-06-01T09:01:48.940Z",
+  "sourceIntent": "changes-2026-06"
+}

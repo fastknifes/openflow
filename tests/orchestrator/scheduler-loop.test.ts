@@ -274,3 +274,135 @@ describe('SchedulerLoop', () => {
     expect(maxSeen).toBe(1)
   })
 })
+
+describe('SchedulerLoop prefix APIs', () => {
+  test('submitTask with idPrefix generates prefixed task ID', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+
+    const taskId = scheduler.submitTask({ type: 'simple', idPrefix: 'harden-abc-' })
+    const task = scheduler.getTask(taskId)
+
+    expect(task.id.startsWith('harden-abc-')).toBe(true)
+    expect(scheduler.getTask(taskId).id).toBe(taskId)
+  })
+
+  test('submitTask without idPrefix generates non-prefixed ID', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+
+    const taskId = scheduler.submitTask({ type: 'simple' })
+
+    expect(taskId.startsWith('harden-')).toBe(false)
+  })
+
+  test('listTasksByPrefix returns only matching tasks', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const first = scheduler.submitTask({ type: 'simple', idPrefix: 'test-prefix-' })
+    const second = scheduler.submitTask({ type: 'simple', idPrefix: 'test-prefix-' })
+    scheduler.submitTask({ type: 'simple' })
+
+    const tasks = scheduler.listTasksByPrefix('test-prefix-')
+
+    expect(tasks.map((task) => task.id).sort()).toEqual([first, second].sort())
+  })
+
+  test('listTasksByPrefix returns empty array for non-matching prefix', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    scheduler.submitTask({ type: 'simple', idPrefix: 'existing-' })
+
+    expect(scheduler.listTasksByPrefix('nonexistent-')).toEqual([])
+  })
+
+  test('cancelTasksByPrefix cancels pending tasks with prefix', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const first = scheduler.submitTask({ type: 'simple', idPrefix: 'cancel-' })
+    const second = scheduler.submitTask({ type: 'simple', idPrefix: 'cancel-' })
+
+    const cancelled = scheduler.cancelTasksByPrefix('cancel-')
+
+    expect(cancelled.sort()).toEqual([first, second].sort())
+    expect(scheduler.getTask(first).status).toBe('cancelled')
+    expect(scheduler.getTask(second).status).toBe('cancelled')
+  })
+
+  test('cancelTasksByPrefix does not cancel tasks with different prefix', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const keep = scheduler.submitTask({ type: 'simple', idPrefix: 'keep-' })
+    const remove = scheduler.submitTask({ type: 'simple', idPrefix: 'remove-' })
+
+    const cancelled = scheduler.cancelTasksByPrefix('remove-')
+
+    expect(cancelled).toEqual([remove])
+    expect(scheduler.getTask(keep).status).toBe('pending')
+    expect(scheduler.getTask(remove).status).toBe('cancelled')
+  })
+
+  test('cancelTasksByPrefix returns empty array when no tasks match', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+
+    expect(scheduler.cancelTasksByPrefix('nothing-')).toEqual([])
+  })
+})
+
+describe('SchedulerLoop prefix APIs', () => {
+  test('submitTask with idPrefix generates prefixed task ID', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const taskId = scheduler.submitTask({ type: 'test', idPrefix: 'harden-abc-' })
+    expect(taskId.startsWith('harden-abc-')).toBe(true)
+    const task = scheduler.getTask(taskId)
+    expect(task.id).toBe(taskId)
+    expect(task.type).toBe('test')
+  })
+
+  test('submitTask without idPrefix generates standard UUID', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const taskId = scheduler.submitTask({ type: 'test' })
+    expect(taskId.startsWith('harden-')).toBe(false)
+    expect(taskId.length).toBeGreaterThan(0)
+  })
+
+  test('listTasksByPrefix returns only matching tasks', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const id1 = scheduler.submitTask({ type: 'a', idPrefix: 'test-prefix-' })
+    const id2 = scheduler.submitTask({ type: 'b', idPrefix: 'test-prefix-' })
+    const id3 = scheduler.submitTask({ type: 'c' })
+    const matching = scheduler.listTasksByPrefix('test-prefix-')
+    expect(matching.length).toBe(2)
+    const ids = matching.map(t => t.id)
+    expect(ids).toContain(id1)
+    expect(ids).toContain(id2)
+    expect(ids).not.toContain(id3)
+  })
+
+  test('listTasksByPrefix returns empty array for non-matching prefix', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    scheduler.submitTask({ type: 'test' })
+    expect(scheduler.listTasksByPrefix('nonexistent-')).toEqual([])
+  })
+
+  test('cancelTasksByPrefix cancels pending tasks with prefix', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const id1 = scheduler.submitTask({ type: 'a', idPrefix: 'cancel-' })
+    const id2 = scheduler.submitTask({ type: 'b', idPrefix: 'cancel-' })
+    const cancelled = scheduler.cancelTasksByPrefix('cancel-')
+    expect(cancelled.length).toBe(2)
+    expect(cancelled).toContain(id1)
+    expect(cancelled).toContain(id2)
+    expect(scheduler.getTask(id1).status).toBe('cancelled')
+    expect(scheduler.getTask(id2).status).toBe('cancelled')
+  })
+
+  test('cancelTasksByPrefix does not cancel tasks with different prefix', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    const keepId = scheduler.submitTask({ type: 'a', idPrefix: 'keep-' })
+    const removeId = scheduler.submitTask({ type: 'b', idPrefix: 'remove-' })
+    const cancelled = scheduler.cancelTasksByPrefix('remove-')
+    expect(cancelled).toEqual([removeId])
+    expect(scheduler.getTask(keepId).status).toBe('pending')
+    expect(scheduler.getTask(removeId).status).toBe('cancelled')
+  })
+
+  test('cancelTasksByPrefix returns empty array when no tasks match', () => {
+    const scheduler = new SchedulerLoop(makeTempRoot())
+    expect(scheduler.cancelTasksByPrefix('nothing-')).toEqual([])
+  })
+})

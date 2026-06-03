@@ -1,0 +1,23 @@
+{
+  "feature": "website-content-and-information-architecture-restructure",
+  "sessionID": "ses_17e0b282dffeQF0E2gbo5LNUBE",
+  "messageID": "",
+  "agent": "",
+  "directory": "F:\\ai-code\\openflow\\.openflow\\worktree\\website-content-and-information-architecture-restructure",
+  "worktree": "F:\\ai-code\\openflow\\.openflow\\worktree\\website-content-and-information-architecture-restructure",
+  "branch": "openflow/implement-website-content-and-information-architecture-restructure",
+  "baseRef": "4445a835a05f87b2a53de06bbe4a4c1a649c81ff",
+  "backend": "opencode",
+  "backendCommand": "",
+  "status": "blocked",
+  "containerMode": "worktree",
+  "worktreeKind": "derived",
+  "commitPolicy": "archive",
+  "cleanupPolicy": "archive_remove",
+  "mainWorktreeDirty": true,
+  "eventsPath": ".openflow\\events\\website-content-and-information-architecture-restructure.jsonl",
+  "observationsPath": ".openflow\\observations\\website-content-and-information-architecture-restructure.jsonl",
+  "runID": "run_a55608f5-770f-4147-9fb6-b640bac56189",
+  "startedAt": "2026-06-01T09:11:50.517Z",
+  "updatedAt": "2026-06-01T10:15:56.226Z"
+}

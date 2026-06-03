@@ -1,5 +1,64 @@
 import type { TaskType } from '../types.js'
 
+// ── Plan Progress ──────────────────────────────────────────────────────────
+// Tracks completion status of checkbox tasks in plan.md.
+// Used by the Completion Gate mechanism to enforce task-by-task progress.
+
+export interface PlanProgress {
+  /** Total number of checkbox tasks found (`- [ ]` + `- [x]`) */
+  totalTasks: number
+  /** Number of completed tasks (`- [x]`) */
+  completedTasks: number
+  /** Number of unchecked tasks (`- [ ]`) */
+  uncheckedTasks: number
+  /** 1-indexed line numbers of unchecked tasks */
+  uncheckedLineNumbers: number[]
+  /** Whether all tasks are completed (or no tasks exist) */
+  allCompleted: boolean
+}
+
+/**
+ * Scan plan.md content for checkbox task progress.
+ * Only counts lines matching `- [ ] ...` or `- [x] ...`.
+ * Returns a structured progress report.
+ */
+export function parsePlanProgress(content: string): PlanProgress {
+  const lines = content.split('\n')
+  let completedTasks = 0
+  let uncheckedTasks = 0
+  const uncheckedLineNumbers: number[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (!line) continue
+
+    // Match unchecked: - [ ] or * [ ]
+    if (/^[-*]\s*\[\s\]\s*.+$/.test(line)) {
+      uncheckedTasks++
+      uncheckedLineNumbers.push(i + 1)
+      continue
+    }
+
+    // Match checked: - [x] or * [x]
+    if (/^[-*]\s*\[x\]\s*.+$/i.test(line)) {
+      completedTasks++
+      continue
+    }
+  }
+
+  const totalTasks = completedTasks + uncheckedTasks
+
+  return {
+    totalTasks,
+    completedTasks,
+    uncheckedTasks,
+    uncheckedLineNumbers,
+    allCompleted: totalTasks === 0 || uncheckedTasks === 0,
+  }
+}
+
+// ── Plan Task Parsing ──────────────────────────────────────────────────────
+
 export interface ParsedTask {
   id: number
   title: string

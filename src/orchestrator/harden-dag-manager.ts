@@ -98,7 +98,7 @@ export class HardenDagManager {
     const taskInput: Parameters<SchedulerLoop['submitTask']>[0] = {
       type,
       payload: {
-        ...payload,
+        ...omitUndefinedPayloadFields(payload),
         dagId: this.activeDagId,
         round,
       },
@@ -111,4 +111,10 @@ export class HardenDagManager {
     this.previousTaskId = taskId
     return taskId
   }
+}
+
+function omitUndefinedPayloadFields(payload: TaskPayload): TaskPayload {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  ) as TaskPayload
 }
