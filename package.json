@@ -1,6 +1,6 @@
 {
   "name": "@fastknife/openflow",
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "description": "OpenFlow - document-as-constraint governance for AI-driven OpenCode development",
   "type": "module",
   "main": "./dist/index.js",
