@@ -3,46 +3,33 @@ layout: home
 
 hero:
   name: OpenFlow
-  text: AI 驱动开发的治理层
-  tagline: 先澄清边界，再让 AI 带着证据完成变更
+  text: AI 写代码，OpenFlow 守边界
+  tagline: 文档即契约 · 证据即完成 · 归档即权威——让 AI 驱动开发真正可靠
   actions:
     - theme: brand
-      text: 开始教程
-      link: /tutorial/
+      text: 10 分钟上手
+      link: /getting-started/quickstart
     - theme: alt
-      text: 了解亮点
-      link: /guide/highlights
-    - theme: alt
-      text: 安装 OpenFlow
-      link: /tutorial/installation
+      text: 了解设计哲学
+      link: /introduction/
 
 features:
-  - title: 归档自动生成代码地图
-    details: 每次完成后生成 implementation-mapper.md，把需求、设计约束、代码文件、关键符号和验证证据连起来。
-    icon: 🗺️
-  - title: 质量门统一 harden / verify
-    details: AI 完成代码后调用 openflow-quality-gate，由它按风险决定是否硬化审查，并检查证据是否足够进入归档。
+  - title: 先问边界，再写代码
+    details: 不急于生成代码。通过头脑风暴和苏格拉底式对话，先把问题定义清楚、约束标记明白，才允许 AI 动手。Feature 工作流确保每一次变更都有据可依。
+    icon: 🎯
+  - title: 证据门控，不是口头完成
+    details: 'AI 说“做完了”不算数。质量门要求 lint、typecheck、test 全部通过，行为证据必须新鲜有效，高风险变更还要经过对抗性硬化审查，才能拿到 Ready 判定。'
     icon: 🛡️
-  - title: 把项目知识变成长期记忆
-    details: current / decisions / changes / archive 让需求边界、架构决策、实现过程和历史原因不再丢在聊天记录里。
+  - title: 需求到代码，永久追溯
+    details: 每个归档特性生成 implementation-mapper.md——需求精确映射到文件、函数、符号。从此不再困惑「这段代码为什么存在」，新成员也能快速理解历史决策。
+    icon: 🗺️
+  - title: 三层文档 = 项目级长期记忆
+    details: current（当前事实）· changes（活跃变更）· archive（冻结历史）——让项目知识在人员变动、会话丢失、Agent 切换后依然不丢失。
     icon: 🧠
+  - title: TDD / BDD / SDD 一体化
+    details: 测试驱动、行为驱动、规格驱动不是三个独立工具，而是同一工作流的不同切面。计划增强自动注入验证要求，行为文档约束在里程碑处检查漂移。
+    icon: ⚡
+  - title: 适配你的环境
+    details: 开箱即用零配置，同时支持 OpenCode 原生构建和 oh-my-openagent / oh-my-opencode 多 Agent 编排。Git Worktree 隔离执行，棕地项目友好，中途改需求也不慌。
+    icon: 🔧
 ---
-
-## 一句话理解 OpenFlow
-
-OpenFlow 不是替代 AI 写代码的工具，而是让 AI 在写代码前先明确边界、在写代码后拿出证据、在完成后把事实归档。
-
-```text
-feature → writing-plan → implement → quality-gate → archive
-             │                │             │              │
-             │                │             │              └─ 生成 implementation-mapper.md
-             │                │             └─ 统一 harden / verify readiness
-             │                └─ OMO 或 OpenCode 原生执行
-             └─ 生成可执行计划与验证要求
-```
-
-## 该从哪里开始？
-
-- 第一次接入项目：阅读[手动安装](/tutorial/installation)或把[LLM 自动安装](/tutorial/installation-for-agents)发给你的 Agent。
-- 想快速体验：跟着[10 分钟上手](/tutorial/quickstart)跑一次完整链路。
-- 想理解价值：先看[功能亮点](/guide/highlights)和[核心概念](/guide/core-concepts)。
