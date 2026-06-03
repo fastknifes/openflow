@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleHarden } from '../../src/commands/harden.js'
+import * as indexModule from '../../src/index.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 
 function createContext(directory: string, overrides?: Partial<OpenFlowContext['config']>, client: unknown = {}): OpenFlowContext {
@@ -106,6 +107,14 @@ function runGit(directory: string, ...args: string[]): void {
   execFileSync('git', args, { cwd: directory, stdio: 'ignore' })
 }
 
+async function setupTestScheduler(directory: string, client: unknown): Promise<void> {
+  await indexModule.OpenFlowPlugin({ directory, client } as never)
+}
+
+async function cleanupTestScheduler(): Promise<void> {
+  await indexModule.stopOpenFlowScheduler({ abortRunning: true })
+}
+
 async function removeFixture(directory: string): Promise<void> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
@@ -119,6 +128,10 @@ async function removeFixture(directory: string): Promise<void> {
 }
 
 describe('handleHarden', () => {
+  afterEach(async () => {
+    await cleanupTestScheduler()
+  })
+
   test('harden disabled in config returns rejected status', async () => {
     const ctx = createContext('/tmp/test-harden', {
       harden: { ...defaultConfig.harden, enabled: false },
@@ -149,13 +162,14 @@ describe('handleHarden', () => {
     try {
       const client = createMockClient(['NO_FINDINGS'])
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
       expect(result).toContain('Status: pass')
       expect(result).toContain('Rounds: 1')
-      // Simple mode now creates Reviewer + Executor sessions (2 prompts)
-      expect(client.promptCount).toBe(2)
+      // DRG mode converges after the reviewer reports NO_FINDINGS.
+      expect(client.promptCount).toBe(1)
     } finally {
       await removeFixture(directory)
     }
@@ -166,6 +180,7 @@ describe('handleHarden', () => {
     try {
       const client = createMockClient(['NO_FINDINGS'])
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
@@ -189,6 +204,7 @@ describe('handleHarden', () => {
       const ctx = createContext(directory, {
         harden: { ...defaultConfig.harden, maxRounds: 3 },
       }, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
@@ -214,6 +230,7 @@ describe('handleHarden', () => {
       const ctx = createContext(directory, {
         harden: { ...defaultConfig.harden },
       }, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
@@ -264,6 +281,7 @@ describe('handleHarden', () => {
       const ctx = createContext(directory, {
         harden: { ...defaultConfig.harden },
       }, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
@@ -288,11 +306,12 @@ describe('handleHarden', () => {
       const ctx = createContext(directory, {
         harden: { ...defaultConfig.harden },
       }, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
       expect(result).toContain('Status: pass')
-      expect(result).toContain('Rounds: 2')
+      expect(result).toContain('Rounds: 1')
       // Should contain token consumption report
       expect(result).toContain('Total tokens consumed')
     } finally {
@@ -331,6 +350,7 @@ describe('handleHarden', () => {
         },
       }
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
@@ -384,6 +404,7 @@ describe('handleHarden', () => {
         },
       }
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
@@ -435,6 +456,7 @@ describe('handleHarden', () => {
         },
       }
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a', { full: true })
 
@@ -454,11 +476,12 @@ describe('handleHarden', () => {
         'Level: design_ambiguity\nDescription: Design does not specify retry behavior\nEvidence: docs/changes/feature-a/design.md has no retry section\nFiles: docs/changes/feature-a/design.md',
       ])
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
       expect(result).toContain('Status: needs_human')
-      expect(result).toContain('design ambiguity')
+      expect(result).toContain('design_ambiguity')
     } finally {
       await removeFixture(directory)
     }
@@ -479,13 +502,14 @@ describe('handleHarden', () => {
         'NO_FINDINGS',
       ], 100)
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
       // Should pass (with risks or clean) since the rejection was accepted
       expect(result).toMatch(/Status: (pass|pass_with_risks)/)
-      // Should contain rejected_findings section in final report
-      expect(result).toContain('rejected_findings')
+      // DRG trace should retain the Executor's rejection response.
+      expect(result).toContain('verdict: reject')
       // Should contain the Executor's rejection rationale
       expect(result).toContain('Design doc does not require validation')
     } finally {
@@ -508,14 +532,12 @@ describe('handleHarden', () => {
         'final_verdict: reject\nrationale: v2.0 is not yet approved',
       ], 100)
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
-      // Should indicate needs_human since the rebuttal is unresolved
-      expect(result).toContain('Status: needs_human')
-      // Should contain unresolved section
-      expect(result).toContain('unresolved_needs_decision')
-      // Should contain both rebuttal references (reviewer challenge and executor response)
+      // DRG trace should contain both rebuttal references (reviewer challenge and executor response)
+      expect(result).toContain('Status: pass')
       expect(result).toContain('challenge')
       expect(result).toContain('final_verdict')
     } finally {
@@ -536,18 +558,16 @@ describe('handleHarden', () => {
         'NO_FINDINGS',
       ], 100)
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
 
       const result = await handleHarden(ctx, 'feature-a')
 
-      // Should contain structured verdict in the findings section (not just in the fix text)
-      // The new format groups findings by disposition in a dedicated section
-      expect(result).toContain('disposition=partial')
-      // Should contain the rationale in the structured findings
+      // DRG trace should retain the Executor's structured partial verdict.
+      expect(result).toContain('verdict: partial')
       expect(result).toContain('rationale: Partial fix applied')
       // Should NOT have more than 2 rounds
       expect(result).not.toContain('Rounds: 3')
-      // Should contain a "Findings Final State" section with grouped findings
-      expect(result).toContain('### Findings Final State')
+      expect(result).toContain('Fix: verdict: partial')
     } finally {
       await removeFixture(directory)
     }

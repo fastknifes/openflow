@@ -2,209 +2,129 @@
 
 ## Overview
 
-Replace the synchronous in-process harden adversarial loop (`src/commands/harden.ts`) with an asynchronous DRG-backed flow. Each harden call creates an isolated DAG using the global singleton `SchedulerLoop`, with reviewer and executor tasks running as DRG executors that communicate via long-lived sessions. The output format (`HardenResult`) remains fully backward-compatible.
+Replace the synchronous in-process harden adversarial loop with a DRG-backed asynchronous reviewer↔executor conversation that runs on the global singleton `SchedulerLoop`, isolates each harden DAG with `harden-<uuid>-` task prefixes, preserves long-lived reviewer/executor sessions, enforces reviewer-owned termination, and returns the existing `HardenResult` output format without changing quality-gate orchestration.
 
 ## Design Context
 
+- Design workspace: `docs/changes/2026-05-31-harden-drg-async/`
 - Design: `docs/changes/2026-05-31-harden-drg-async/design.md`
 - Behavior: `docs/changes/2026-05-31-harden-drg-async/behavior.md`
-- State: `docs/changes/2026-05-31-harden-drg-async/state.md`
+- Current plan state: `docs/changes/2026-05-31-harden-drg-async/plan.state.json`
+- TDD: enabled by `openflow.jsonc`
+- Planning mode: pyramid by `openflow.jsonc`
+- Constraints carried into execution: DRG remains a global singleton; `DagEngine` semantics are not modified; all harden tasks use `harden-<uuid>-` prefix isolation; one harden DAG runs at a time; reviewer and executor keep long-lived sessions; one round is a complete reviewer↔executor conversation; each executor fix/review report counts as one cycle; each round has max 5 cycles; default maxRounds is 1 and ceiling is 10; executor cannot end the loop; every executor report must be reviewed by reviewer; reviewer executor owns 3-rejection counts; output remains compatible with `HardenResult` / `formatHardenResult`; quality-gate orchestration is not modified.
 
-Key constraints carried forward:
-- `[must]` DRG remains a global singleton; all harden tasks share the same `SchedulerLoop` / `DagEngine`.
-- `[must]` Each harden call uses an isolated DAG via task-ID prefix (`harden-<uuid>-*`).
-- `[must]` Reviewer and executor hold long-lived sessions; session IDs chain via task payload/result.
-- `[must]` Default 1 round (reviewer→executor→reviewer), max 10, serial execution.
-- `[must]` Termination判定权在 reviewer; max rounds is a hard ceiling.
-- `[must]` Same finding rejected 3 times → reviewer ignores it (tracked per-finding in reviewer session state).
-- `[must]` Reviewer reports include confidence (`high` / `medium` / `low`); executor fixes high only.
-- `[must]` harden output format compatible with existing `HardenResult` / `formatHardenResult`.
-- `[must]` quality-gate orchestration logic is NOT modified.
-- `[must]` DRG engine core is NOT modified (existing semantics preserved; only additive extensions).
-- `[must]` At most one harden DAG runs at a time.
+## Pyramid + TDD Strategy
 
-## Planning Strategy
+### Highest-Level Goal
 
-No specific methodology enforced. Decompose directly into executable tasks by functional boundary:
+Deliver a harden workflow where reviewer and executor converse asynchronously through DRG tasks until reviewer-owned convergence, while preserving existing user-facing harden and quality-gate contracts.
 
-1. **SchedulerLoop extension** — add prefix-based query/cancel helpers without touching `DagEngine` core.
-2. **Harden DAG manager** — lifecycle (create, track, await, archive/destroy) for an isolated harden DAG.
-3. **DRG executors** — `harden-reviewer` and `harden-executor` executor functions registered at plugin startup.
-4. **Async harden orchestrator** — rewrite `runAdversarialLoop` into an async DRG driver.
-5. **Prompt & confidence integration** — inject confidence levels into reviewer/executor prompts; update `classifyFindings` and `filterExecutorFindings`.
-6. **Tests & verification** — unit tests for DAG manager and executors; integration test for end-to-end async flow.
+### Task Pyramid
+
+1. Scheduler foundation
+   1.1 Write RED tests for generic prefixed task IDs and prefix query/cancel helpers
+   1.2 Implement prefix helpers in `SchedulerLoop` without modifying `DagEngine` semantics
+2. Harden DAG lifecycle
+   2.1 Write RED lifecycle tests for prefix submit, dependency chaining, await, archive, and single-active guard
+   2.2 Implement `HardenDagManager` as a thin wrapper over the global scheduler
+3. Harden conversation executors
+   3.1 Write RED tests for confidence parsing and executor routing
+   3.2 Implement confidence parsing and executor routing helpers
+   3.3 Write RED tests for reviewer/executor task contracts, sessions, dispositions, and 3-rejection ownership
+   3.4 Implement reviewer and executor DRG executors
+4. Harden command orchestration
+   4.1 Write RED tests for round/cycle semantics and output compatibility
+   4.2 Replace in-process adversarial loop with `runDrgAdversarialLoop`
+   4.3 Preserve result formatting, token trace, diff scoping, model selection, and session linkage
+5. Plugin wiring and verification
+   5.1 Write RED tests for plugin executor registration
+   5.2 Register harden executors on the global scheduler at plugin startup
+   5.3 Prove round/cycle semantics, output compatibility, and quality-gate boundaries through integration and final verification
+
+### Core Abstractions and Boundaries
+
+- `SchedulerLoop` prefix helpers: generate and query generic prefixed task IDs; must not know about harden or change `DagEngine` scheduling semantics.
+- `HardenDagManager`: owns harden DAG prefix, single-active guard, task submission, task polling, and archive/cancel cleanup; must not build prompts, classify findings, own sessions, or decide convergence.
+- `HardenReviewerExecutor`: owns reviewer session reuse, finding classification, confidence-aware reporting, reviewer convergence, and 3-rejection counters; must not submit DRG tasks or mutate command state.
+- `HardenExecutorExecutor`: owns executor session reuse, fix/report execution, and disposition parsing; must not end the loop or update 3-rejection counters.
+- `runDrgAdversarialLoop`: owns round/cycle orchestration, task payload assembly, task result aggregation, and `FormattedHardenResult` conversion; must not modify quality-gate state or acceptance state.
+- Plugin bootstrap: owns executor registration on the already-created global scheduler; must not create a second scheduler.
+
+### TDD Driving Order
+
+1. RED: add failing scheduler prefix tests in `tests/orchestrator/scheduler-loop.test.ts` for `idPrefix`, `listTasksByPrefix`, and `cancelTasksByPrefix`.
+2. GREEN: implement generic prefix helpers in `src/orchestrator/scheduler-loop.ts` with no `DagEngine` semantic changes.
+3. REFACTOR: keep prefix helper implementation generic and harden-free while scheduler tests stay green.
+4. RED: add failing `HardenDagManager` lifecycle tests in `tests/orchestrator/harden-dag-manager.test.ts` for prefix submit, dependsOn chaining, await terminal task, archive cleanup, and single-active guard.
+5. GREEN: implement `src/orchestrator/harden-dag-manager.ts` as a thin lifecycle wrapper.
+6. REFACTOR: verify Manager does not contain prompt, session, confidence, or convergence logic.
+7. RED: add failing executor tests in `tests/orchestrator/harden-executors.test.ts` for reviewer-owned convergence, reviewer-owned 3-rejection counts, executor disposition parsing, session reuse, and high/medium/low confidence behavior.
+8. GREEN: implement `src/orchestrator/harden-executors.ts` and confidence parsing support.
+9. REFACTOR: keep executors independent from `SchedulerLoop` and keep orchestrator out of 3-rejection ownership.
+10. RED: add failing orchestration tests in `tests/harden/orchestration.test.ts` and `tests/commands/harden-drg-async.test.ts` proving one round can contain up to 5 cycles and every executor report is followed by reviewer verification.
+11. GREEN: replace `runAdversarialLoop` with `runDrgAdversarialLoop` in `src/commands/harden.ts` and preserve `formatHardenResult` output.
+12. REFACTOR: remove old simple/standard divergent execution paths while keeping complexity skip behavior and output compatibility tests green.
 
 ## Execution Strategy
 
 ### Parallel Execution Waves
 
-Wave 1 (no dependencies):
-- T1: Extend SchedulerLoop with prefix helpers
-- T2: Create HardenDagManager
-- T3: Add confidence support to harden prompts and utils
+Wave 1: T1 and T3 write independent RED tests for scheduler prefix APIs and confidence contracts.
 
-Wave 2 (depends on Wave 1):
-- T4: Implement DRG harden-reviewer / harden-executor executors
-- T5: Rewrite runAdversarialLoop → async DRG orchestrator
+Wave 2: T2 and T4 implement scheduler prefix APIs and confidence contracts after their RED tests.
 
-Wave 3 (depends on Wave 2):
-- T6: Register executors in plugin bootstrap
-- T7: Integration tests and regression verification
+Wave 3: T5 and T7 write RED tests for HardenDagManager and harden executors after supporting contracts exist.
+
+Wave 4: T6 and T8 implement HardenDagManager and harden executors after their tests.
+
+Wave 5: T9 and T11 write RED tests for command orchestration and plugin registration after Manager/executor contracts exist.
+
+Wave 6: T10 and T12 implement command orchestration and plugin registration.
+
+Wave 7: T13 adds cross-module round/cycle integration coverage after orchestration and registration are wired.
+
+Wave 8: T14 runs final verification and quality-gate readiness instruction after all implementation and tests are complete.
 
 ### Dependency Matrix
 
 | Task | Blocked By | Blocks |
 |------|------------|--------|
-| T1 | — | T2, T4 |
-| T2 | T1 | T5 |
-| T3 | — | T4, T5 |
-| T4 | T1, T3 | T5, T6 |
-| T5 | T2, T3, T4 | T6, T7 |
-| T6 | T4, T5 | T7 |
-| T7 | T5, T6 | — |
+| T1 Scheduler Prefix RED Tests | — | T2 |
+| T2 Scheduler Prefix APIs | T1 | T5, T6, T10 |
+| T3 Confidence RED Tests | — | T4 |
+| T4 Confidence Contracts | T3 | T7, T8, T10 |
+| T5 Manager RED Tests | T2 | T6 |
+| T6 Harden DAG Manager | T2, T5 | T9, T10, T13 |
+| T7 Executor RED Tests | T4 | T8 |
+| T8 Harden Executors | T4, T7 | T9, T10, T11, T12, T13 |
+| T9 Orchestration RED Tests | T6, T8 | T10 |
+| T10 DRG Harden Orchestrator | T2, T4, T6, T8, T9 | T12, T13, T14 |
+| T11 Registration RED Tests | T8 | T12 |
+| T12 Plugin Registration | T8, T10, T11 | T13, T14 |
+| T13 Round/Cycle Integration | T6, T8, T10, T12 | T14 |
+| T14 Final Verification | T10, T12, T13 | — |
+
+### Complexity Budget
+
+- Task count: 14
+- Same-wave maximum: 2 tasks
+- Estimated execution units: 18
+- Budget verdict: acceptable for a medium-large orchestration refactor.
 
 ## Tasks
 
-- [ ] 1. Extend SchedulerLoop with prefix-based operations (Agent: quick | Parallel: yes)
-  - Add `listTasksByPrefix(prefix: string): SchedulerTask[]` to `SchedulerLoop` that filters `this.dagEngine.listTasks()` by `task.id.startsWith(prefix)`.
-  - Add `cancelTasksByPrefix(prefix: string): string[]` that iterates matched tasks and calls `this.cancelTask(task.id)`, returning cancelled IDs.
-  - Add `areAllTasksTerminal(prefix: string): boolean` that checks whether every task with the prefix is in a terminal status (`succeeded`, `failed`, `cancelled`, `blocked`).
-  - **Files**: `src/orchestrator/scheduler-loop.ts`
-  - **Verification**: `npm test -- tests/orchestrator/scheduler-loop.test.ts` passes (add new test cases for the three new methods).
-
-- [ ] 2. Create HardenDagManager for isolated DAG lifecycle (Agent: quick | Parallel: yes)
-  - Create `src/orchestrator/harden-dag-manager.ts` exporting `HardenDagManager`.
-  - Constructor accepts `scheduler: SchedulerLoop`.
-  - `createHardenDag(feature: string): { dagId: string; prefix: string }`:
-    - Generates `dagId = randomUUID()`, prefix = `harden-${dagId}-`.
-    - Enforce at-most-one-active rule: if any existing task ID starts with `harden-` and is non-terminal, throw `Error('A harden DAG is already running')`.
-    - Store `activeDagId` internally.
-  - `submitReviewerTask(round: number, payload: ReviewerTaskPayload): string`:
-    - Calls `scheduler.submitTask({ type: 'harden-reviewer', payload, dependsOn: previousTaskId ? [previousTaskId] : undefined })`.
-    - Returns task ID.
-  - `submitExecutorTask(round: number, payload: ExecutorTaskPayload, dependsOn: string[]): string`.
-  - `awaitCompletion(prefix: string, pollIntervalMs = 500): Promise<void>`:
-    - Polls `scheduler.areAllTasksTerminal(prefix)` until true or timeout (configurable, default 30 min).
-  - `archiveAndDestroy(prefix: string): void`:
-    - Calls `scheduler.cancelTasksByPrefix(prefix)` for any non-terminal tasks.
-    - Clears internal `activeDagId`.
-  - **Files**: `src/orchestrator/harden-dag-manager.ts`
-  - **Verification**: `npm test -- tests/orchestrator/harden-dag-manager.test.ts` passes.
-
-- [ ] 3. Add confidence-level support to harden prompts and utilities (Agent: quick | Parallel: yes)
-  - Update `buildReviewerPrompt` in `src/commands/harden.ts`:
-    - Instruct reviewer to output `Confidence: high | medium | low` for every finding.
-    - Include confidence semantics: high = clear contract violation with direct evidence; medium = likely issue but some inference required; low = potential concern, weak evidence.
-  - Update `classifyFindings` in `src/utils/harden-utils.ts` to parse the `Confidence:` line and populate `finding.confidence`.
-  - Update `filterExecutorFindings` in `src/commands/harden.ts`:
-    - Always include `high` confidence findings.
-    - Include `medium`/`low` only if `finding.disposition === 'must_fix'` AND no explicit `executorAllowed: false`.
-    - Preserve existing taxonomy exclusions (`contract_divergence`, `missing_evidence`).
-  - **Files**: `src/commands/harden.ts`, `src/utils/harden-utils.ts`
-  - **Verification**: `npm test -- tests/utils/harden-utils.test.ts` and `npm test -- tests/commands/harden.test.ts` pass.
-
-- [ ] 4. Implement DRG harden-reviewer and harden-executor executors (Agent: quick | Parallel: no)
-  - Create `src/orchestrator/harden-executors.ts` exporting two `ExecutorFunction`s.
-  - `hardenReviewerExecutor`:
-    - Receives `task.payload` containing: `sessionID` (reviewer session ID or undefined), `planSummary`, `diffStr`, `priorFindings`, `fixReport`, `round`, `maxRounds`, `rejectedCounts` (Record<findingKey, number>).
-    - If `sessionID` is undefined, lazily creates a new reviewer session via `createHardenSession` (reuse existing utility from `src/commands/harden.ts`, or extract to shared helper).
-    - Builds reviewer prompt, runs agent task via `runAgentTask`, classifies findings.
-    - Applies 3-rejection rule: for each finding whose key exists in `rejectedCounts` with count ≥ 3, drop it from the report.
-    - Decides convergence:
-      - If `round >= maxRounds` → converged = true, reason = `max_rounds_reached`.
-      - If no actionable findings and no ambiguous findings → converged = true, reason = `no_findings`.
-      - Else → converged = false.
-    - Stores result: `{ sessionID, findings, converged, reason, rejectedCounts }`.
-  - `hardenExecutorExecutor`:
-    - Receives `task.payload` containing: `sessionID` (executor session ID or undefined), `findings`, `planSummary`, `filePaths`.
-    - Lazily creates executor session if needed.
-    - Builds executor prompt, runs agent task, parses dispositions.
-    - Returns result: `{ sessionID, dispositions, fixReport, codeChanges }`.
-  - **Files**: `src/orchestrator/harden-executors.ts`
-  - **Verification**: `npm test -- tests/orchestrator/harden-executors.test.ts` passes.
-
-- [ ] 5. Rewrite `runAdversarialLoop` into async DRG orchestrator (Agent: deep | Parallel: no)
-  - In `src/commands/harden.ts`, replace `runAdversarialLoop` with `runDrgAdversarialLoop`.
-  - New flow:
-    1. Instantiate `HardenDagManager` with global `getSchedulerLoop()`.
-    2. `manager.createHardenDag(sanitizedFeature)`.
-    3. Submit initial reviewer task (round 1, no prior findings).
-    4. Loop (max `maxRounds` iterations):
-       a. Wait for the latest reviewer task to succeed via polling `scheduler.getTask(reviewerTaskId)`.
-       b. Read result: `findings`, `converged`, `reason`, `rejectedCounts`, `sessionID`.
-       c. If `converged` → break loop, build final `HardenResult`.
-       d. Filter executor findings by confidence/disposition.
-       e. Submit executor task depending on the reviewer task.
-       f. Wait for executor task to succeed.
-       g. Read executor result: `dispositions`, `fixReport`, `sessionID`.
-       h. Update `rejectedCounts`: for each finding with verdict `reject`, increment count; for `accept`/`partial`, reset count.
-       i. Submit next reviewer task with updated payload (chain `dependsOn` to executor task).
-    5. After loop, call `manager.archiveAndDestroy(prefix)`.
-    6. Return `FormattedHardenResult` compatible with existing `formatHardenResult`.
-  - Preserve existing token counting, trace entries, diff scoping, and complexity grading.
-  - **Files**: `src/commands/harden.ts`
-  - **Verification**: `npm test -- tests/commands/harden.test.ts` passes.
-
-- [ ] 6. Register harden executors in plugin bootstrap (Agent: quick | Parallel: no)
-  - In `src/index.ts`, after `current-promotion` executor registration:
-    - Conditionally import `src/orchestrator/harden-executors.ts`.
-    - Register `harden-reviewer` and `harden-executor` executors on `schedulerLoop` if not already present.
-  - **Files**: `src/index.ts`
-  - **Verification**: `npm test -- tests/index.test.ts` or existing plugin init tests pass.
-
-- [ ] 7. Integration tests and regression verification (Agent: quick | Parallel: no)
-  - Add `tests/orchestrator/harden-dag-integration.test.ts`:
-    - Mock `SchedulerLoop` and `DagEngine`.
-    - Verify a full 1-round reviewer→executor→reviewer flow reaches convergence.
-    - Verify 3-rejection rule causes finding to be dropped.
-    - Verify max-rounds termination.
-    - Verify only-one-harden-DAG-at-a-time enforcement.
-  - Run full test suite: `npm test`.
-  - Run TypeScript type check: `npx tsc --noEmit`.
-  - **Files**: `tests/orchestrator/harden-dag-integration.test.ts`
-  - **Verification**: `npm test` passes with no failures; `npx tsc --noEmit` has zero errors.
-
-After formal implementation is complete and Full Quality Gate admission criteria are met, invoke the openflow-quality-gate skill. The skill decides whether harden is required and performs evidence-aware verify. Do not claim completion until the quality gate reports readiness. For casual coding or low-risk edits, use lightweight verification instead.
-
-
----
-## Verification Phase
-
-### Security Checks
-- **Secret Scan**: Check for accidentally committed secrets
-- **Vulnerability Scan**: Run dependency vulnerability check
-
-### Quality Checks
-- **Lint Check**: Run linter
-- **Type Check**: Run type checker
-- **Test Suite**: Run all tests
-
-### Final Verification Authority
-
-**After all implementation tasks are complete, invoke `openflow-quality-gate` as the final readiness authority.**
-
-The quality gate performs:
-- Adversarial hardening assessment (risk-based)
-- Evidence collection and verification
-- Readiness classification (`Ready`, `ReadyWithDocUpdates`, `NotReady`, `NeedsDecision`)
-
-Do not claim completion until `openflow-quality-gate` returns `Ready` or `ReadyWithDocUpdates`.
-
-### Failure Handling
-- Quality failure: fix implementation and rerun verification.
-- Security failure: block archive until fixed.
-- Consistency failure: sync docs and implementation, then rerun verification.
-
-> Auto-generated by OpenFlow. `openflow-quality-gate` is the final verification authority.
-
----
-## Plan Budget Warning
-
-> This plan exceeds recommended task density. The warning is non-blocking —
-> implementation may proceed, but consider splitting into smaller waves.
-
-- **Same-wave tasks**: 7 (recommended max: 4)
-- **Estimated execution units**: 13 (recommended max: 20)
-
-**Suggestion**: Split large waves across multiple `/openflow-implement` invocations
-or reduce per-wave task count to keep execution feedback loops short.
+- [ ] 1. T1 Scheduler Prefix RED Tests (Agent: quick TDD; Wave: 1; Files: `tests/orchestrator/scheduler-loop.test.ts`; Acceptance: failing tests cover `idPrefix`, prefix list, prefix cancel, and unrelated task preservation; Verify: `npm test -- tests/orchestrator/scheduler-loop.test.ts`.)
+- [ ] 2. T2 Scheduler Prefix APIs (Agent: quick implementation; Wave: 2; Files: `src/orchestrator/scheduler-loop.ts`; Acceptance: `idPrefix`, `listTasksByPrefix`, and `cancelTasksByPrefix` pass T1 without changing `DagEngine` semantics; Verify: `npm test -- tests/orchestrator/scheduler-loop.test.ts`.)
+- [ ] 3. T3 Confidence RED Tests (Agent: quick TDD; Wave: 1; Files: `tests/utils/harden-utils.test.ts`, `tests/harden/findings.test.ts`; Acceptance: failing tests cover `Confidence: high|medium|low`, high routing, medium/low disposition, and executor-forbidden taxonomy; Verify: `npm test -- tests/utils/harden-utils.test.ts tests/harden/findings.test.ts`.)
+- [ ] 4. T4 Confidence Contracts (Agent: quick implementation; Wave: 2; Files: `src/utils/harden-utils.ts`, `src/commands/harden.ts`; Acceptance: confidence parsing and executor routing pass T3 while quality-gate logic remains unchanged; Verify: `npm test -- tests/utils/harden-utils.test.ts tests/harden/findings.test.ts`.)
+- [ ] 5. T5 Manager RED Tests (Agent: quick TDD; Wave: 3; Files: `tests/orchestrator/harden-dag-manager.test.ts`; Acceptance: failing tests cover prefix submit, `dependsOn` chaining, `awaitTask`, archive cleanup, and one-active-DAG guard; Verify: `npm test -- tests/orchestrator/harden-dag-manager.test.ts`.)
+- [ ] 6. T6 Harden DAG Manager (Agent: quick implementation; Wave: 4; Files: `src/orchestrator/harden-dag-manager.ts`; Acceptance: Manager is a thin scheduler wrapper, all harden tasks use `idPrefix: prefix`, and Manager owns no prompt/session/convergence logic; Verify: `npm test -- tests/orchestrator/harden-dag-manager.test.ts`.)
+- [ ] 7. T7 Executor RED Tests (Agent: implementation TDD; Wave: 3; Files: `tests/orchestrator/harden-executors.test.ts`; Acceptance: failing tests cover session reuse, result schemas, disposition parsing, reviewer-owned convergence, and reviewer-owned 3-rejection counts; Verify: `npm test -- tests/orchestrator/harden-executors.test.ts`.)
+- [ ] 8. T8 Harden Executors (Agent: implementation; Wave: 4; Files: `src/orchestrator/harden-executors.ts`; Acceptance: reviewer executor owns 3-rejection state, executor cannot end loop, both executors return session ID/report/tokens/results schemas; Verify: `npm test -- tests/orchestrator/harden-executors.test.ts`.)
+- [ ] 9. T9 Orchestration RED Tests (Agent: deep TDD; Wave: 5; Files: `tests/harden/orchestration.test.ts`, `tests/commands/harden-drg-async.test.ts`; Acceptance: failing tests prove one round has up to 5 cycles and every executor report is followed by reviewer verification; Verify: `npm test -- tests/harden/orchestration.test.ts tests/commands/harden-drg-async.test.ts`.)
+- [ ] 10. T10 DRG Harden Orchestrator (Agent: deep implementation; Wave: 6; Files: `src/commands/harden.ts`; Acceptance: `runDrgAdversarialLoop` uses global scheduler, outer rounds, inner cycles, reviewer-only termination, cleanup in `finally`, and compatible `FormattedHardenResult`; Verify: `npm test -- tests/harden/orchestration.test.ts tests/commands/harden-drg-async.test.ts`.)
+- [ ] 11. T11 Registration RED Tests (Agent: quick TDD; Wave: 5; Files: `tests/index.test.ts`, `tests/index-runtime-registration.test.ts`; Acceptance: failing tests expect global scheduler registration of `harden-reviewer` and `harden-executor` without duplicate scheduler creation; Verify: `npm test -- tests/index.test.ts tests/index-runtime-registration.test.ts`.)
+- [ ] 12. T12 Plugin Registration (Agent: quick implementation; Wave: 6; Files: `src/index.ts`; Acceptance: plugin registers harden executors after `current-promotion`, reuses existing scheduler, and leaves quality-gate command wiring unchanged; Verify: `npm test -- tests/index.test.ts tests/index-runtime-registration.test.ts`.)
+- [ ] 13. T13 Round/Cycle Integration (Agent: test implementation; Wave: 7; Files: `tests/harden/orchestration.test.ts`, `tests/commands/harden-drg-async.test.ts`, `tests/orchestrator/harden-dag-manager.test.ts`, `tests/orchestrator/harden-executors.test.ts`; Acceptance: tests prove max 5 cycles, reviewer termination authority, no orchestrator rejected-count updates, harden prefix IDs, and archive cleanup; Verify: `npm test -- tests/harden/orchestration.test.ts tests/commands/harden-drg-async.test.ts tests/orchestrator/harden-dag-manager.test.ts tests/orchestrator/harden-executors.test.ts`.)
+- [ ] 14. T14 Final Verification and Quality Gate (Agent: QA; Wave: 8; Files: `package.json`, `package-lock.json`, touched source/test files; Acceptance: typecheck, full tests, audit, output compatibility, and scope review pass; Verify: `npx tsc --noEmit && npm test && npm audit --audit-level=high`; Quality Gate: invoke openflow-quality-gate after formal implementation and do not claim completion until readiness.)

@@ -16,6 +16,7 @@ import { createToolAfterHook } from './hooks/tool-after.js'
 import { createImplementationObserver } from './hooks/implementation-observer.js'
 import { OPENFLOW_TOOL_COMMANDS } from './commands/manifest.js'
 import { SchedulerLoop, type StopOptions } from './orchestrator/index.js'
+import { createHardenReviewerExecutor, createHardenExecutorExecutor } from './orchestrator/harden-executors.js'
 import { currentPromotionExecutor } from './phases/archive/current-promotion-executor.js'
 import { defaultConfig } from './types.js'
 
@@ -118,6 +119,14 @@ export const OpenFlowPlugin: OpenCodePlugin = async (ctx: PluginInput) => {
     ...ctx,
     config,
     enhancedPlans: new Set(),
+  }
+
+  // Register harden executors (after openflowCtx is available)
+  if (!schedulerLoop.hasExecutor('harden-reviewer')) {
+    schedulerLoop.registerExecutor('harden-reviewer', createHardenReviewerExecutor(openflowCtx))
+  }
+  if (!schedulerLoop.hasExecutor('harden-executor')) {
+    schedulerLoop.registerExecutor('harden-executor', createHardenExecutorExecutor(openflowCtx))
   }
 
   logger.info('Plugin initialized', {

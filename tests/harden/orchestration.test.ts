@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleHarden } from '../../src/commands/harden.js'
+import * as indexModule from '../../src/index.js'
 import { defaultConfig, type OpenFlowContext } from '../../src/types.js'
 
 function createContext(directory: string, overrides?: Partial<OpenFlowContext['config']>, client: unknown = {}): OpenFlowContext {
@@ -60,6 +61,14 @@ function runGit(directory: string, ...args: string[]): void {
   execFileSync('git', args, { cwd: directory, stdio: 'ignore' })
 }
 
+async function setupTestScheduler(directory: string, client: unknown): Promise<void> {
+  await indexModule.OpenFlowPlugin({ directory, client } as never)
+}
+
+async function cleanupTestScheduler(): Promise<void> {
+  await indexModule.stopOpenFlowScheduler({ abortRunning: true })
+}
+
 async function removeFixture(directory: string): Promise<void> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
@@ -73,6 +82,10 @@ async function removeFixture(directory: string): Promise<void> {
 }
 
 describe('harden orchestration - independent sessions per round', () => {
+  afterEach(async () => {
+    await cleanupTestScheduler()
+  })
+
   test('one harden run creates at least coordinator and reviewer sessions (>= 2)', async () => {
     const directory = await createGitFixture('single-session')
     try {
@@ -97,6 +110,7 @@ describe('harden orchestration - independent sessions per round', () => {
       }
       
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
       await handleHarden(ctx, 'feature-a')
       
       // New behavior: Coordinator session + independent Reviewer session = at least 2
@@ -127,12 +141,13 @@ describe('harden orchestration - independent sessions per round', () => {
             const sessionId = `harden-session-${createCallCount}`
             return { id: sessionId }
           },
-          prompt: async () => {
+          prompt: async (options: unknown) => {
             // Capture which session was active at prompt time
             // In new behavior: each role gets its own session, so the prompt
             // is sent to the session that was most recently created for that role.
+            const optionsRecord = options as { path?: { id?: string } }
             sessionPromptMap.push({
-              sessionId: `harden-session-${createCallCount}`,
+              sessionId: optionsRecord.path?.id ?? `harden-session-${createCallCount}`,
               promptIndex: promptIndex,
             })
             const text = responses[promptIndex] ?? 'NO_FINDINGS'
@@ -150,6 +165,7 @@ describe('harden orchestration - independent sessions per round', () => {
       }
       
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
       await handleHarden(ctx, 'feature-a')
       
       // New behavior: Reviewer and Executor prompts are sent to DIFFERENT session IDs
@@ -200,6 +216,7 @@ describe('harden orchestration - independent sessions per round', () => {
       }
       
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
       await handleHarden(ctx, 'feature-a')
       
       // Should have at least 2 sessions: Coordinator + Reviewer
@@ -243,6 +260,7 @@ describe('harden orchestration - independent sessions per round', () => {
       }
       
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
       await handleHarden(ctx, 'feature-a')
       
       for (const payload of capturedPayloads) {
@@ -273,6 +291,7 @@ describe('harden orchestration - independent sessions per round', () => {
       }
       
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
       const result = await handleHarden(ctx, 'feature-a')
       
       // Result should contain harden trace information
@@ -307,6 +326,7 @@ describe('harden orchestration - independent sessions per round', () => {
       }
       
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
       await handleHarden(ctx, 'feature-a')
       
       // New behavior: Even without agent switching support, should create
@@ -341,11 +361,12 @@ describe('harden orchestration - independent sessions per round', () => {
       }
       
       const ctx = createContext(directory, undefined, client)
+      await setupTestScheduler(directory, client)
       await handleHarden(ctx, 'feature-a')
       
       // At least one prompt should have specified agent in body
       const hasAgentSpecified = capturedBodies.some(body => 
-        body.agent === 'oracle' || body.agent === 'deep'
+        body.agent === 'harden-reviewer' || body.agent === 'harden-executor'
       )
       expect(hasAgentSpecified).toBe(true)
     } finally {

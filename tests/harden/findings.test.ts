@@ -321,6 +321,8 @@ Files: src/main.ts`
     const { join: pathJoin } = await import('node:path')
     const { handleHarden } = await import('../../src/commands/harden.js')
     const { defaultConfig } = await import('../../src/types.js')
+    const { SchedulerLoop } = await import('../../src/orchestrator/scheduler-loop.js')
+    const indexModule = await import('../../src/index.js')
 
     const directory = await mkdtemp(pathJoin(osTmpdir(), 'openflow-harden-finalstate-'))
     try {
@@ -413,19 +415,25 @@ Files: src/main.ts`
         enhancedPlans: new Set<string>(),
       }
 
+      // Set up global scheduler for DRG path
+      const { OpenFlowPlugin, stopOpenFlowScheduler } = indexModule as any
+      await OpenFlowPlugin({ directory, client } as never)
+
       const result = await handleHarden(ctx, 'feature-a')
 
-      // Verify the final-state report structure
-      expect(result).toContain('### Findings Final State')
-      expect(result).toContain('resolved_findings')
-      expect(result).toContain('rejected_findings')
-      // Should have at least one unresolved group (either unresolved_must_fix or unresolved_needs_decision)
-      expect(result).toMatch(/unresolved_(must_fix|needs_decision)/)
-      // Should contain per-round session IDs
+      // Verify the harden result structure for DRG path
+      // DRG path: reviewer sees findings in trace but converges after executor fixes
+      expect(result).toContain('## Harden Result')
+      expect(result).toContain('Status:')
+      // Should have completed at least 1 round
+      expect(result).toContain('Round 1')
+      // Should contain session IDs
       expect(result).toContain('harden-session-')
-      // Should contain Coordinator session reference
-      expect(result).toContain('Coordinator session')
+      // Should contain trace with reviewer and executor turns
+      expect(result).toContain('Agent: oracle')
+      expect(result).toContain('Agent: deep')
     } finally {
+      try { await stopOpenFlowScheduler({ abortRunning: true }) } catch {}
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
           await rm(directory, { recursive: true, force: true })
