@@ -6,51 +6,44 @@ layout: doc
 
 ## 这一阶段做什么
 
-阶段三覆盖 Quality Gate 与 Archive 两个节点。质量门是 AI 自动调用的内部验证机制，用明确检查替代“看起来没问题”的主观判断，并给出 Ready、ReadyWithDocUpdates、NotReady 或 NeedsDecision 等就绪分类。
+前两个阶段完成了设计和实现，但"代码写完了"不等于"做完了"。这一阶段回答两个问题：**怎么确认真的做对了**，然后**把成果正式收尾**。
 
-归档会把验证通过的工作冻结为历史记录，同时把仍然有效的事实提升到当前文档中。“完成”在这里是明确的工程状态：代码、文档、验证和追溯都达到可检查标准，而不是一句口头声明。
+### 质量门：用证据证明做对了，而不是靠感觉
+
+AI 说"我做完了"，你不能直接信。质量门就是替你把关的验证环节——它会跑检查、看证据、评估风险，然后给出一个明确的结论。
+
+你不需要手动触发质量门，AI 实现完成后会自动调用它。
+
+### 归档：正式收尾，把知识存下来
+
+归档做三件事：
+
+1. **冻结历史**：把这次变更的全部文档（设计、行为、计划）存到 `docs/archive/`，之后不可修改。
+2. **更新当前事实**：把仍然有效的设计事实提升到 `docs/current/`，让后续任务知道系统当前是什么状态。
+3. **生成追溯映射**：生成 `implementation-mapper.md`，把需求对应到具体的文件、函数和符号。
+
+做完这一步，才算 OpenFlow 意义上的"完成"。
+
+::: warning 为什么必须归档？
+如果你的实现是在 Git Worktree 隔离环境中进行的，代码变更还在独立分支上，并没有合并到主项目。归档时会自动完成代码合并——跳过归档意味着你的代码不会生效。
+:::
 
 ## 操作步骤
 
-```mermaid
-flowchart TD
-  A[实现完成] --> B[AI 自动调用 openflow-quality-gate]
-  B --> C{就绪分类}
-  C -- NotReady --> D[处理阻塞项后重新验证]
-  C -- NeedsDecision --> E[人工决策]
-  C -- ReadyWithDocUpdates --> F[确认文档更新]
-  C -- Ready --> G[/openflow-archive feature]
-  F --> G
-  D --> B
-  E --> B
-  G --> H[冻结 docs/archive/YYYY-MM-DD-feature/]
-  G --> I[更新 docs/current/]
-  G --> J[生成或更新 implementation-mapper.md]
+你只需要做一件事：
 
-  class A,B,F,G,H,I,J main
-  class C,D,E optional
-
-  classDef main fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
-  classDef optional fill:#f5f5f5,stroke:#9e9e9e,stroke-width:2px,color:#9e9e9e,stroke-dasharray: 5 5
-  classDef success fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#2e7d32
+```text
+/openflow-archive 添加用户资料页
 ```
 
-1. **自动进入质量门**：AI 实现完成后会调用 `openflow-quality-gate`。
-2. **查看就绪分类**：根据 Ready、ReadyWithDocUpdates、NotReady、NeedsDecision 判断下一步。
-3. **执行归档**：达到 Ready 后运行 `/openflow-archive <feature>`。
-4. **确认归档内容**：检查冻结内容、当前文档提升和需求到代码的映射。
+如果质量门还没通过，归档会被自动驳回，AI 会告诉你哪里还需要处理。修好之后再重新运行归档就行。
 
-## ⚠️ 必须检查的文档
+归档完成后，你可以在以下位置确认结果：
 
-- **质量报告**：如果返回 NotReady，查看阻塞项并处理，修复后重新运行质量门。
-- **归档目录 `docs/archive/YYYY-MM-DD-feature/`**：确认冻结内容正确，能够代表本次变更的最终状态。
-- **`implementation-mapper.md`**：检查需求到代码的追溯映射是否完整。
-- **`docs/current/` 更新**：确认仍然有效的事实已被正确提升，后续 Feature 能扫描到这些内容。
+- `docs/archive/{日期}-{需求名}/` — 冻结的历史记录
+- `docs/archive/{日期}-{需求名}/implementation-mapper.md` — 需求到代码的追溯映射
+- `docs/current/` — 更新后的当前系统事实
 
-## 常见场景
+到这里，一次完整的 OpenFlow 工作流就结束了。下一次变更会从阶段一重新开始，但 `docs/current/` 中沉淀的事实会让起点比上次更高。
 
-- **NotReady**：先处理质量报告中的阻塞项，完成后重新触发 quality-gate。
-- **NeedsDecision**：需要人工给出明确决策，不能由 AI 擅自跳过。
-- **归档后**：`docs/current/` 中的事实已经更新，下次 Feature 会把它们作为现有约束扫描。
-
-返回：[使用指南概览](./)。
+返回：[使用指南概览 →](./)

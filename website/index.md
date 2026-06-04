@@ -8,17 +8,17 @@ hero:
   actions:
     - theme: brand
       text: 10 分钟上手
-      link: /getting-started/quickstart
+      link: /介绍/quickstart
     - theme: alt
       text: 了解设计哲学
-      link: /introduction/
+      link: /介绍/
 
 features:
   - title: 先问边界，再写代码
     details: 不急于生成代码。通过头脑风暴和苏格拉底式对话，先把问题定义清楚、约束标记明白，才允许 AI 动手。Feature 工作流确保每一次变更都有据可依。
     icon: 🎯
   - title: 证据门控，不是口头完成
-    details: 'AI 说“做完了”不算数。质量门要求 lint、typecheck、test 全部通过，行为证据必须新鲜有效，高风险变更还要经过对抗性硬化审查，才能拿到 Ready 判定。'
+    details: 'AI 说“做完了”不算数。质量门要求 lint、typecheck、test 全部通过，行为证据必须新鲜有效，高风险变更还要经过代码加固审查，才能拿到通过判定。'
     icon: 🛡️
   - title: 需求到代码，永久追溯
     details: 每个归档特性生成 implementation-mapper.md——需求精确映射到文件、函数、符号。从此不再困惑「这段代码为什么存在」，新成员也能快速理解历史决策。
