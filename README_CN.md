@@ -10,9 +10,9 @@ OpenFlow 是 AI 驱动开发的治理层。它不是先问"怎么写"，而是�
 
 **完整文档：[https://fastknifes.github.io/openflow/](https://fastknifes.github.io/openflow/)**
 
-- 手动安装：[https://fastknifes.github.io/openflow/tutorial/installation](https://fastknifes.github.io/openflow/tutorial/installation)
-- LLM 自动安装：[https://fastknifes.github.io/openflow/tutorial/installation-for-agents](https://fastknifes.github.io/openflow/tutorial/installation-for-agents)
-- 快速上手：[https://fastknifes.github.io/openflow/tutorial/quickstart](https://fastknifes.github.io/openflow/tutorial/quickstart)
+- 手动安装：[https://fastknifes.github.io/openflow/介绍/quickstart](https://fastknifes.github.io/openflow/介绍/quickstart)
+- LLM 自动安装：[https://fastknifes.github.io/openflow/介绍/quickstart](https://fastknifes.github.io/openflow/介绍/quickstart)
+- 快速上手：[https://fastknifes.github.io/openflow/使用指南/tutorial-phase1](https://fastknifes.github.io/openflow/使用指南/tutorial-phase1)
 
 ## 快速安装
 
@@ -20,7 +20,7 @@ OpenFlow 是 AI 驱动开发的治理层。它不是先问"怎么写"，而是�
 
 ```
 Install and configure OpenFlow by following the instructions here:
-https://fastknifes.github.io/openflow/tutorial/installation-for-agents
+https://fastknifes.github.io/openflow/介绍/quickstart
 ```
 
 手动安装：
