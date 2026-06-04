@@ -10,12 +10,12 @@ OpenFlow 的命令负责推进正式工作流，Skill 负责在合适时机增�
 
 ```mermaid
 flowchart LR
-    A[init] --> B[brainstorm]
-    B --> C[feature]
-    C --> D[writing-plan]
-    D --> E[implement]
-    E --> F[quality-gate]
-    F --> G[archive]
+    A[初始化] --> B[头脑风暴]
+    B --> C[需求]
+    C --> D[开发计划]
+    D --> E[实施]
+    E --> F[质量门]
+    F --> G[归档]
 
     classDef main fill:#eef6ff,stroke:#2563eb,color:#1e3a8a,stroke-width:1.5px;
     classDef success fill:#ecfdf5,stroke:#16a34a,color:#14532d,stroke-width:1.5px;
@@ -28,17 +28,18 @@ flowchart LR
 | 命令 | 类型 | 说明 | 用法 |
 |------|------|------|------|
 | `/openflow-init` | 命令 | 初始化项目，生成 AGENTS.md | `/openflow-init` |
-| `/openflow-feature` | 命令 | 创建 Feature 设计 | `/openflow-feature 添加用户资料页` |
+| `/openflow-feature` | 命令 | 创建需求设计 | `/openflow-feature 添加用户资料页` |
 | `/openflow-writing-plan` | 命令 | 生成开发计划 | `/openflow-writing-plan 用户资料页` |
 | `/openflow-implement` | 命令 | 执行开发计划 | `/openflow-implement 用户资料页` |
-| `/openflow-archive` | 命令 | 归档完成的特性 | `/openflow-archive 用户资料页` |
-| `/openflow-status` | 命令 | 查看活跃特性状态 | `/openflow-status` |
+| `/openflow-archive` | 命令 | 归档完成的需求 | `/openflow-archive 用户资料页` |
+| `/openflow-change` | 命令 | 需求中途变更 | `/openflow-change 用户资料页 "把头像改成方形裁剪"` |
+| `/openflow-status` | 命令 | 查看活跃需求状态 | `/openflow-status` |
 | `/openflow-config` | 命令 | 查看/更新配置 | `/openflow-config` |
 | `/openflow-migrate-docs` | 命令 | 迁移已有文档 | `/openflow-migrate-docs` |
 | `openflow-brainstorm` | Skill | 头脑风暴（自然语言或按名调用） | `openflow-brainstorm` |
 | `openflow-quality-gate` | Skill | 质量门（AI 自动调用） | AI 在实现后自动调用 |
 | `openflow-tdd` | Skill | TDD 指导（AI 自动调用） | AI 在计划或实现阶段自动调用 |
-| `openflow-harden` | Skill | 对抗性硬化审查 | `openflow-harden` |
+| `openflow-harden` | Skill | 代码加固审查 | `openflow-harden` |
 
 ## 详细说明
 
@@ -50,11 +51,11 @@ flowchart LR
 /openflow-init
 ```
 
-它通常会生成或刷新 `AGENTS.md`，写入 `docs/current/`、`docs/decisions/`、`docs/changes/`、`docs/archive/` 等目录的使用规则。已有 `AGENTS.md` 时，OpenFlow 会尽量保留项目原有说明并补充 OpenFlow 导航约定。
+它通常会生成或刷新 `AGENTS.md`，写入 `docs/current/`、`docs/decisions/`、`docs/changes/`、`docs/archive/` 等目录的使用规则。
 
 ### `/openflow-feature`
 
-创建一个 Feature 设计，用于把模糊需求变成可实施的正式文档。
+创建一个需求设计，用于把模糊想法变成可实施的正式文档。
 
 ```text
 /openflow-feature 添加用户资料页
@@ -64,13 +65,13 @@ AI 会先读取当前有效事实和架构决策，再通过对话澄清目标�
 
 ### `/openflow-writing-plan`
 
-根据已确认的 Feature 文档生成开发计划。
+根据已确认的需求文档生成开发计划。
 
 ```text
 /openflow-writing-plan 用户资料页
 ```
 
-计划会把工作拆成可执行任务，标明目标文件、依赖关系、验证方式和执行约束。启用 TDD 时，计划阶段会加入测试优先或测试补强要求。更多测试相关能力可参考 [TDD 亮点](/使用指南/highlights/tdd)。
+计划会把工作拆成可执行任务，标明目标文件、依赖关系、验证方式和执行约束。启用 TDD 时，计划阶段会加入测试优先或测试补强要求。更多测试相关能力可参考 [TDD](/使用指南/highlights/tdd)。
 
 ### `/openflow-implement`
 
@@ -84,23 +85,33 @@ OpenFlow 会创建实现运行记录，传递约束包，并在实现完成后�
 
 ### `/openflow-archive`
 
-归档已完成并通过验证的 Feature。
+归档已完成并通过验证的需求。
 
 ```text
 /openflow-archive 用户资料页
 ```
 
-归档会把变更工作区中的文档冻结到 `docs/archive/`，并根据配置把仍然有效的事实提升到 `docs/current/`。这一步用于形成“完成记录”和“当前事实”的清晰分界。
+归档会把变更工作区中的文档冻结到 `docs/archive/`，并根据配置把仍然有效的事实提升到 `docs/current/`。归档时还会合并 Git Worktree 中的代码变更到主分支。
+
+### `/openflow-change`
+
+需求中途变更，在不丢失已有上下文的情况下调整范围。
+
+```text
+/openflow-change 用户资料页 "把头像改成方形裁剪，同时增加昵称字段"
+```
+
+要求先更新设计文档，再改代码。已归档的需求不能变更。详情见[需求变更](/使用指南/change-request)。
 
 ### `/openflow-status`
 
-查看当前活跃 Feature、计划、实现运行和可能存在的待处理事项。
+查看当前活跃需求、计划、实现运行和可能存在的待处理事项。
 
 ```text
 /openflow-status
 ```
 
-当你不确定项目中有哪些未归档工作，或需要接手他人未完成的 Feature 时，优先使用这个命令。
+当你不确定项目中有哪些未归档工作，或需要接手他人未完成的需求时，优先使用这个命令。
 
 ### `/openflow-config`
 
@@ -124,13 +135,13 @@ AI 会读取现有文档，将当前有效事实放入 `docs/current/`，将长�
 
 ### `openflow-brainstorm`
 
-用于正式 Feature 之前的头脑风暴。
+用于正式需求之前的头脑风暴。
 
 ```text
-openflow-brainstorm
+/openflow-brainstorm 我觉得用户反馈系统不太好，但不确定是改流程、改界面、还是加个新功能。
 ```
 
-它适合需求还不清晰、方案需要比较、范围需要拆分的阶段。Brainstorm 不直接写入正式 Feature 文档，而是帮助整理问题、约束、备选方案和非目标。讨论成熟后，可进入 `/openflow-feature`。
+它适合需求还不清晰、方案需要比较、范围需要拆分的阶段。头脑风暴不直接写入正式需求文档，而是帮助整理问题、约束、备选方案和非目标。讨论成熟后，可进入 `/openflow-feature`。
 
 ### `openflow-quality-gate`
 
@@ -142,14 +153,14 @@ openflow-brainstorm
 
 TDD 指导 Skill，通常由 AI 在计划或核心逻辑实现阶段自动调用。
 
-它会根据任务复杂度和验收标准决定是否要求先写测试、补充测试夹具、增加失败用例，或把验证步骤写入实施计划。
+它会根据任务复杂度决定是否在关键节点要求先写测试。OpenFlow 不做全量 TDD，只在算法、数据模型、业务规则、状态机等核心节点注入测试要求。详情见[TDD](/使用指南/highlights/tdd)。
 
 ### `openflow-harden`
 
-对抗性硬化审查 Skill，用攻击者或严格审查者视角检查方案与实现。
+代码加固审查 Skill，用严格审查者视角检查方案与实现。
 
 ```text
 openflow-harden
 ```
 
-它适合高风险变更、安全敏感代码、复杂边界条件或质量门要求升级审查的场景。审查会提出可验证的问题，并要求实现方修复或给出有证据的反驳。
+它适合高风险变更、安全敏感代码、复杂边界条件或质量门要求升级审查的场景。审查会围绕行为违规、规格违规、意图偏差、契约分歧、回归风险、证据缺失六个维度展开。详情见[代码加固](/使用指南/highlights/harden)。

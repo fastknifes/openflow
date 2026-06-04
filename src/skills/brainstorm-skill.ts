@@ -53,10 +53,19 @@ Once enough understanding is established, present the emerging design:
 - **Present incrementally.** Share one section at a time and ask whether it looks right before continuing.
 - **YAGNI ruthlessly.** Remove anything that is not needed right now. If the user asks for something extra, question whether it is necessary for the first iteration.
 
+## Automatic Context Preservation
+
+As the brainstorm conversation progresses, stable context (problems, decisions, constraints, non-goals) is **automatically extracted and saved** into a brainstorm context packet. This happens silently in the background — you do not need to interrupt the conversation to trigger it.
+
+- **When a packet is saved or updated**, briefly disclose it to the user in a single sentence (e.g. "Context packet updated with 5 items.") without breaking the flow of discussion.
+- **Do not require the user to manually copy** long summaries or re-type decisions when transitioning to the feature workflow. The packet carries that context forward.
+- The packet is stored in \`.sisyphus/brainstorm/context-packets/\` and can be picked up by \`/openflow-feature\` later.
+
 ## Boundaries
 
-- This skill is **conversational only**. It does not create files, run commands, or manage workflow state.
-- It does not replace \`/openflow-feature\`. It prepares the user to run that command with clearer intent.
+- This skill is **conversational only**. It does not generate \`design.md\`, \`behavior.md\`, \`plan.md\`, or any other formal workflow documents.
+- It does not create files, run commands, or manage workflow state (beyond the automatic context packet).
+- It does not replace \`/openflow-feature\`. It prepares the user to run that command with clearer intent and a preserved context packet.
 - It does not perform code review, testing, or verification. Those belong to other OpenFlow phases.
 - If the user asks to generate design documents, transition them to the feature workflow.
 
@@ -66,6 +75,7 @@ When exploration reaches a point where the user wants formal documents:
 
 - Summarize the key decisions and constraints that emerged from the discussion.
 - Suggest running \`/openflow-feature <name>\` with a brief description of what was decided.
+- If a context packet was saved during the brainstorm, mention that the feature workflow can pick up the preserved context — the user does not need to re-state everything.
 - The feature workflow will ask its own structured questions — the brainstorm context helps the user answer them efficiently.
 `,
   }

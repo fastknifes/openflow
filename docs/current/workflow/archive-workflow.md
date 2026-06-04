@@ -88,15 +88,9 @@ flowchart TD
    - 系统按已归档状态处理，不重复创建新的归档周期。
 16. 系统检测 archive mode。
 17. archive mode 可能是：
-    - `feature`。
-    - `issue`。
-    - `mixed`。
-    - `ad-hoc`。
-   如果是 `ad-hoc` mode：
-   - archive 不要求已有 feature readiness。
-   - archive 不执行 planned workflow 的 readiness、harden、doc update confirmation 或 legacy drift 阻断。
-   - archive 只围绕临时 issue 说明生成并归档 `issue-clarification.md` / `issue-resolution.md`。
-   - report 中必须显示 `Archive mode: ad-hoc`，并标明 ad-hoc issue clarification 产物。
+   - `feature`。
+   - `issue`。
+   - `mixed`。
 18. 系统定位源文件：
    - change workspace。
    - change plan。
@@ -253,12 +247,7 @@ flowchart TD
 | staging 原子化 | `buildStagingArchiveDir()` + `fs.rename()` | 仍先 staging 再 rename |
 | current promotion | `buildPromotionSuggestions()` / `applyPromotionSuggestions()` | 仍受 `auto_promote_current` 控制 |
 | worktree cleanup | `removeWorktree()` | derived worktree 仍 commit/merge/cleanup |
-| 分阶段 archive 入口 | `src/phases/archive/index.ts` | planned/ad-hoc 都通过同一 pipeline 汇总结果 |
-| archive 上下文解析 | `src/phases/archive/resolve.ts` | ad-hoc mode 可构造无 readiness 的 ArchiveContext |
-| archive 校验 | `src/phases/archive/validate.ts` | planned 执行 quality-gate blockers；ad-hoc 跳过 readiness/harden/drift |
-| issue/ad-hoc 产物 | `src/phases/archive/issue.ts` | ad-hoc 生成 issue clarification 与 issue resolution |
-| archive report | `src/phases/archive/report.ts` | report 显示 ad-hoc mode 与 ad-hoc issue artifacts |
 
 ## 10. 漂移风险提示
 
-如果 archive readiness 规则、ImplementationRun 状态名、accepted known issues 处理、doc update confirmation、current promotion、worktree merge/cleanup、ad-hoc archive 产物或 archive artifact 文件名变化，本文件必须同步更新。重点检查 `src/commands/archive.ts`、`src/phases/archive/index.ts`、`src/phases/archive/resolve.ts`、`src/phases/archive/validate.ts`、`src/phases/archive/issue.ts`、`src/phases/archive/report.ts`、`src/utils/acceptance-state.ts`、`src/utils/implementation-worktree.ts`。
+如果 archive readiness 规则、ImplementationRun 状态名、accepted known issues 处理、doc update confirmation、current promotion、worktree merge/cleanup 或 archive artifact 文件名变化，本文件必须同步更新。重点检查 `src/commands/archive.ts`、`src/phases/archive/index.ts`、`src/utils/acceptance-state.ts`、`src/utils/implementation-worktree.ts`。

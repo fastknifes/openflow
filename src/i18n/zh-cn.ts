@@ -7,7 +7,7 @@ export const zhCN: I18nResource = {
 
   // ── Commands: verify ──
   'commands.verify.acceptedFailuresMessage':
-    '已接受当前失败项；如需恢复严格验证，请修复失败检查后重新运行 /openflow-verify。',
+    '已接受当前失败项；如需恢复严格验证，请修复失败检查后重新运行质量门 (openflow-quality-gate)。',
 
   // ── Signals: closure ──
   'signals.closure.strong': [

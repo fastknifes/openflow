@@ -1,0 +1,31 @@
+bun test v1.3.6 (d530ed99)
+
+tests\phases\archive\collect.test.ts:
+(pass) collectArchiveArtifacts > copies planned design and plan into staging [31.00ms]
+(pass) collectArchiveArtifacts > ad-hoc mode generates issue artifacts
+(pass) collectArchiveArtifacts > planned collection without design leaves staging without design.md [16.00ms]
+(pass) collectArchiveArtifacts > issue mode copies clarification and generates resolution
+
+tests\phases\archive\issue.test.ts:
+(pass) archive issue artifacts > writeIssueResolution generates issue-resolution from clarification sections [16.00ms]
+(pass) archive issue artifacts > generateAdHocIssueArtifacts writes clarification and resolution
+
+tests\phases\archive\validate.test.ts:
+(pass) validateArchive > planned mode + readiness=Ready + no issues allows archive
+(pass) validateArchive > planned mode + readiness=NotReady blocks archive with readiness blocker
+(pass) validateArchive > planned mode + harden unresolved must-fix blocks archive with harden blocker
+(pass) validateArchive > planned mode + doc update not confirmed blocks archive with doc_update blocker
+(pass) validateArchive > ad-hoc mode + no readiness allows archive
+(pass) validateArchive > ad-hoc mode + no readiness/harden/drift checks does not produce readiness or harden blockers
+(pass) validateArchive > planned mode + skipQualityGateChecks=true allows archive even when readiness=NotReady
+(pass) validateArchive > planned mode + drift items + drift_check enabled blocks with drift blocker
+(pass) validateArchive > implementation run with root mismatch blocks with root_mismatch blocker
+(pass) validateArchive > planned mode + quality gate applicability not eligible blocks with applicability blocker
+(pass) validateArchive > planned mode + dirty implementation state blocks with implementation_state blocker [16.00ms]
+(pass) validateArchive > planned mode + security verification failure blocks with security blocker
+(pass) validateArchive > implementation run with non-ready status blocks with run_status blocker
+
+ 19 pass
+ 0 fail
+ 42 expect() calls
+Ran 19 tests across 3 files. [161.00ms]

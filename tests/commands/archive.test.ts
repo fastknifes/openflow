@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test, mock, beforeEach } from 'bun:test'
+
 import { handleArchive } from '../../src/commands/archive.js'
 import { defaultConfig, type AcceptanceState, type OpenFlowContext, VerifyReadinessStatus } from '../../src/types.js'
 import { join } from 'node:path'
@@ -157,7 +158,12 @@ async function setupPostHocIssueArchiveFixture(
   }
 }
 
-async function createImplementationRun(ctx: OpenFlowContext, feature: string, status: 'running' | 'ready_for_archive' | 'archived') {
+async function createImplementationRun(
+  ctx: OpenFlowContext,
+  feature: string,
+  status: 'running' | 'ready_for_archive' | 'archived',
+  options?: Pick<Parameters<typeof implementationRunStore.createRun>[1], 'worktree' | 'worktreeKind' | 'containerMode'>,
+) {
   return implementationRunStore.createRun(ctx, {
     feature,
     sessionID: `session-${feature}`,
@@ -167,7 +173,9 @@ async function createImplementationRun(ctx: OpenFlowContext, feature: string, st
     backend: 'opencode',
     backendCommand: 'Use OpenCode native build agent',
     status,
-    containerMode: 'session',
+    containerMode: options?.containerMode ?? 'session',
+    ...(options?.worktree ? { worktree: options.worktree } : {}),
+    ...(options?.worktreeKind ? { worktreeKind: options.worktreeKind } : {}),
     eventsPath: join('.sisyphus', 'openflow', 'events', `${feature}.jsonl`),
     observationsPath: join('.sisyphus', 'openflow', 'observations', `${feature}.jsonl`),
   })
@@ -733,6 +741,17 @@ describe('archive command', () => {
     const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
     const run = await createImplementationRun(ctx, feature, 'ready_for_archive')
 
+    // Confirm the archive run before attempting archive
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+      archiveRunConfirmationStatus: 'confirmed',
+      archiveRunConfirmedAt: '2026-04-21T00:01:00.000Z',
+    })
+
     const result = await handleArchive(ctx, feature)
 
     expect(result).toContain('Archive Complete')
@@ -745,6 +764,42 @@ describe('archive command', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'archive_completed', runID: run.runID, feature }))
 
     await rm(testDir, { recursive: true, force: true })
+  })
+
+  test('blocks ready derived worktree implementation run when archive root mismatches', async () => {
+    const feature = 'implementation-run-root-mismatch'
+    const testDir = join(process.cwd(), '.test-archive-implementation-run-root-mismatch')
+    const worktreeDir = join(process.cwd(), '.test-archive-implementation-run-root-mismatch-worktree')
+    const ctx = await setupReadinessArchiveFixture(testDir, feature, { readiness: VerifyReadinessStatus.Ready })
+    await rm(worktreeDir, { recursive: true, force: true })
+    await mkdir(worktreeDir, { recursive: true })
+    const run = await createImplementationRun(ctx, feature, 'ready_for_archive', {
+      containerMode: 'worktree',
+      worktreeKind: 'derived',
+      worktree: worktreeDir,
+    })
+
+    await saveAcceptanceState(testDir, {
+      feature,
+      phase: 'acceptance',
+      phaseStartedAt: '2026-04-21T00:00:00.000Z',
+      pendingDocUpdates: [],
+      readiness: VerifyReadinessStatus.Ready,
+      archiveRunConfirmationStatus: 'confirmed',
+      archiveRunConfirmedAt: '2026-04-21T00:01:00.000Z',
+    })
+
+    const result = await handleArchive(ctx, feature)
+
+    expect(result).toContain('Archive Blocked — Root Mismatch')
+    expect(result).toContain('Expected Root')
+    expect(result).toContain('.test-archive-implementation-run-root-mismatch-worktree')
+    expect(result).toContain('.test-archive-implementation-run-root-mismatch')
+    expect((await implementationRunStore.getRun(ctx, run.runID))?.status).toBe('ready_for_archive')
+    await expect(access(join(testDir, 'docs', 'archive', feature))).rejects.toBeDefined()
+
+    await rm(testDir, { recursive: true, force: true })
+    await rm(worktreeDir, { recursive: true, force: true })
   })
 
   test('SC-011 red phase: archive waits for explicit confirmation after ready_for_archive', async () => {
@@ -1709,7 +1764,7 @@ Enforce synchronous cache invalidation barrier after write commit.
     // The message must reference the stale feature
     expect(result).toContain(`**${staleFeature}**`)
     // The stale-feature state should still exist (we don't overwrite it)
-    expect(result).toContain('/openflow-verify')
+    expect(result).toContain('openflow-quality-gate')
 
     const acceptanceStateAfter = await loadAcceptanceState(testDir)
     expect(acceptanceStateAfter?.feature).toBe(staleFeature)
@@ -1767,7 +1822,7 @@ Enforce synchronous cache invalidation barrier after write commit.
     // The message must reference the stale feature
     expect(result).toContain(`**${staleFeature}**`)
     // The stale acceptance state should remain unchanged (still belongs to stale-feature)
-    expect(result).toContain('/openflow-verify')
+    expect(result).toContain('openflow-quality-gate')
 
     const acceptanceStateAfter = await loadAcceptanceState(testDir)
     expect(acceptanceStateAfter?.feature).toBe(staleFeature)

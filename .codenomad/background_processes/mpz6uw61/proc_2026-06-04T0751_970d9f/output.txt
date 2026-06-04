@@ -1,0 +1,19 @@
+bun test v1.3.6 (d530ed99)
+
+tests\phases\archive\collect.test.ts:
+(pass) collectArchiveArtifacts > copies planned design and plan into staging [15.00ms]
+(pass) collectArchiveArtifacts > ad-hoc mode generates issue artifacts [32.00ms]
+(pass) collectArchiveArtifacts > planned collection without design leaves staging without design.md
+(pass) collectArchiveArtifacts > issue mode copies clarification and generates resolution [31.00ms]
+
+tests\phases\archive\finalize.test.ts:
+(pass) finalizeArchive > renames staging directory into final archive directory [15.00ms]
+(pass) finalizeArchive > staging failure cleans staging and leaves final absent [16.00ms]
+(pass) finalizeArchive > auto_promote_current=false suggests but does not apply current promotion [16.00ms]
+(pass) finalizeArchive > auto_promote_current=true applies current promotion with sync fallback [31.00ms]
+(pass) finalizeArchive > cleanupStaging removes failed staging directory
+
+ 9 pass
+ 0 fail
+ 21 expect() calls
+Ran 9 tests across 2 files. [385.00ms]

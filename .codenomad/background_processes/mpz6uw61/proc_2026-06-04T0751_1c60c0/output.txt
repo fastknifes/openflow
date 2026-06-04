@@ -1,0 +1,169 @@
+bun test v1.3.6 (d530ed99)
+
+tests\commands\archive.test.ts:
+(pass) archive command > returns disabled message when archive is disabled
+(pass) archive command > throws when feature is missing [15.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "req-feature",
+}
+ENOENT: no such file or directory, open 'F:\ai-code\openflow\.test-archive-requirements\docs\archive\2026-06-04-req-feature\prd.md'
+    path: "F:\\ai-code\\openflow\\.test-archive-requirements\\docs\\archive\\2026-06-04-req-feature\\prd.md",
+ syscall: "open",
+   errno: -2,
+    code: "ENOENT"
+
+(fail) archive command > archives requirements documents when they exist [47.00ms]
+(pass) archive command > deduplicates file changes across recent builds [63.00ms]
+(pass) archive command > cleans builds older than keep window [62.00ms]
+(pass) archive command > copies pre-existing implementation-mapper.md from changes workspace [94.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "trace-feature",
+}
+(pass) archive command > copies implementation-mapper.md with traceability content from changes workspace [62.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "behavior-evidence-feature",
+}
+(pass) archive command > copies behavior evidence implementation-mapper.md from changes workspace [63.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "cleanup-feature",
+}
+617 |     const resolvedChangeWorkspace = await resolveChangeDir(testDir, 'cleanup-feature')
+618 | 
+619 |     await handleArchive(ctx, 'cleanup-feature')
+620 | 
+621 |     const archiveDir = await resolveArchiveDir(testDir, 'cleanup-feature')
+622 |     await expect(access(join(archiveDir, 'design.md'))).resolves.toBeNull()
+                                                                       ^
+error: 
+
+Expected promise that resolves
+Received promise that rejected: Promise { <rejected> }
+
+      at <anonymous> (F:\ai-code\openflow\tests\commands\archive.test.ts:622:66)
+(fail) archive command > removes archived docs/changes workspace content after successful archive [31.00ms]
+(pass) archive command > preserves docs/changes workspace when archive is blocked before completion [47.00ms]
+(pass) archive command > rejects archive when readiness is not_ready [47.00ms]
+(pass) archive command > rejects archive when readiness needs_decision [31.00ms]
+(pass) archive command > accepts archive when readiness is ready [94.00ms]
+(pass) archive command > blocks archive when implementation run is not ready for archive [47.00ms]
+(pass) archive command > archives ready implementation run and records archive event [93.00ms]
+(pass) archive command > SC-011 red phase: archive proceeds when ready_for_archive status exists [79.00ms]
+(pass) archive command > archives normally when no implementation run exists [93.00ms]
+(pass) archive command > accepts archive when readiness is ready_with_doc_updates [110.00ms]
+(pass) archive command > blocks archive when latest quality gate was not_applicable [62.00ms]
+(pass) archive command > blocks archive when latest quality gate had limited context [63.00ms]
+(pass) archive command > blocks archive when implementation state is dirty [47.00ms]
+(pass) archive command > blocks archive when implementation state is stale [31.00ms]
+(pass) archive command > blocks archive when implementation state is blocked [47.00ms]
+(pass) archive command > allows archive when implementation state is verified [62.00ms]
+(pass) archive command > allows archive when verify passed and accepted known issues are recorded in harden summary [78.00ms]
+(pass) archive command > blocks archive when harden summary still contains unresolved must-fix findings [63.00ms]
+(pass) archive command > blocks archive with explicit reason when harden summary requires decision [47.00ms]
+(pass) archive command > blocks archive when ready_with_doc_updates confirmation is declined [47.00ms]
+(pass) archive command > proceeds with warning when readiness is undefined for legacy acceptance state [62.00ms]
+(pass) archive command > does not delete docs/current source documents after archive [63.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "promo-feature",
+}
+1146 |       },
+1147 |     }
+1148 | 
+1149 |     const result = await handleArchive(ctx, 'promo-feature')
+1150 |     expect(result).toContain('Current Promotion')
+1151 |     expect(result).toContain('applied: 12')
+                          ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "applied: 12"
+Received: "## Archive Complete\n\n**Feature**: promo-feature\n**Archived**: 2026-06-04T07:51:38.643Z\n**Files Changed**: 0\n\n### Contents\n- Design documents: ✅\n- Requirements documents: ✅\n- Plan: ❌\n- Implementation mapper: ❌\n- Behavior document: ✅\n- Acceptance changes: ❌\n- Known issues accepted: ❌\n- Archive mode: ad-hoc\n\n### Location\nF:\\\\ai-code\\\\openflow\\\\.test-archive-current-promotion\\\\docs\\\\archive\\\\2026-06-04-promo-feature\n\n### Archived Files\n\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-promotion\\\\docs\\\\archive\\\\2026-06-04-promo-feature/design.md` - Design document (if exists)\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-promotion\\\\docs\\\\archive\\\\2026-06-04-promo-feature/prd.md` - Requirements / PRD document (if exists)\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-promotion\\\\docs\\\\archive\\\\2026-06-04-promo-feature/plan.md` - Execution plan snapshot (if exists)\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-promotion\\\\docs\\\\archive\\\\2026-06-04-promo-feature/issue-clarification.md` - Generated ad-hoc issue clarification\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-promotion\\\\docs\\\\archive\\\\2026-06-04-promo-feature/issue-resolution.md` - Generated ad-hoc issue resolution\n\n\n### Verification\n- completion verification pending: ✅ no\n\n\n\n\n\n### ⚠️ Source Cleanup Skipped\nSource workspace files were **not** deleted because the archive safety gate failed (archive files not verified on disk, or worktree commit/merge failed). The `docs/changes/` directory is preserved. You can safely re-run archive or clean up manually.\n\n\n### Current Promotion\n- suggestions: 0\n- auto apply: enabled\n- applied: 0\n- no ADD/UPDATE/REMOVE actions suggested\n\n### Next Step\n\nThis feature workflow is complete. To start a new change cycle, run:\n\n```\n/openflow-feature <new-feature-name>\n```\n\nOr describe a problem in natural conversation to investigate an issue.\n"
+
+      at <anonymous> (F:\ai-code\openflow\tests\commands\archive.test.ts:1151:20)
+(fail) archive command > applies current promotion by default and falls back to direct migration when no match exists [31.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "synth-feature",
+}
+1197 |       },
+1198 |     }
+1199 | 
+1200 |     const result = await handleArchive(ctx, 'synth-feature')
+1201 |     expect(result).toContain('Current Promotion')
+1202 |     expect(result).toContain('applied: 6')
+                          ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "applied: 6"
+Received: "## Archive Complete\n\n**Feature**: synth-feature\n**Archived**: 2026-06-04T07:51:38.687Z\n**Files Changed**: 1\n\n### Contents\n- Design documents: ✅\n- Requirements documents: ❌\n- Plan: ❌\n- Implementation mapper: ❌\n- Behavior document: ✅\n- Acceptance changes: ❌\n- Known issues accepted: ❌\n- Archive mode: ad-hoc\n\n### Location\nF:\\\\ai-code\\\\openflow\\\\.test-archive-current-synthesis\\\\docs\\\\archive\\\\2026-06-04-synth-feature\n\n### Archived Files\n\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-synthesis\\\\docs\\\\archive\\\\2026-06-04-synth-feature/design.md` - Design document (if exists)\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-synthesis\\\\docs\\\\archive\\\\2026-06-04-synth-feature/prd.md` - Requirements / PRD document (if exists)\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-synthesis\\\\docs\\\\archive\\\\2026-06-04-synth-feature/plan.md` - Execution plan snapshot (if exists)\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-synthesis\\\\docs\\\\archive\\\\2026-06-04-synth-feature/issue-clarification.md` - Generated ad-hoc issue clarification\n- `F:\\\\ai-code\\\\openflow\\\\.test-archive-current-synthesis\\\\docs\\\\archive\\\\2026-06-04-synth-feature/issue-resolution.md` - Generated ad-hoc issue resolution\n\n\n### Verification\n- completion verification pending: ✅ no\n\n\n\n\n\n### ⚠️ Source Cleanup Skipped\nSource workspace files were **not** deleted because the archive safety gate failed (archive files not verified on disk, or worktree commit/merge failed). The `docs/changes/` directory is preserved. You can safely re-run archive or clean up manually.\n\n\n### Current Promotion\n- suggestions: 0\n- auto apply: enabled\n- applied: 0\n- no ADD/UPDATE/REMOVE actions suggested\n\n### Next Step\n\nThis feature workflow is complete. To start a new change cycle, run:\n\n```\n/openflow-feature <new-feature-name>\n```\n\nOr describe a problem in natural conversation to investigate an issue.\n"
+
+      at <anonymous> (F:\ai-code\openflow\tests\commands\archive.test.ts:1202:20)
+(fail) archive command > synthesizes a matching historical current design doc during archive promotion [47.00ms]
+(pass) archive command > archives issue-only workspace with issue-resolution and keeps unconfirmed governance candidate pending [62.00ms]
+(pass) archive command > archives issue-only workspace without design or plan and preserves preexisting issue-resolution [63.00ms]
+(pass) archive command > archives post-hoc issue readiness without design or issue clarification [62.00ms]
+(pass) archive command > blocks post-hoc issue archive when readiness is not_ready [47.00ms]
+(pass) archive command > generates post-hoc issue promotion candidate when pending doc updates exist [47.00ms]
+(pass) archive command > promotes confirmed issue governance candidate into docs/decisions [78.00ms]
+(pass) archive command > pauses archive when drift is detected and drift_check is enabled [31.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "target-feature",
+}
+(pass) archive command > stale not_ready from a different feature does not block archive of the requested feature [63.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "target-no-verify",
+}
+(pass) archive command > stale ready from a different feature does not auto-allow archive of the requested feature [47.00ms]
+[OpenFlow] [orchestrator] WARNING: skipping source workspace cleanup — safety gate failed {
+  feature: "my-real-feature",
+}
+(pass) archive command > strips OpenFlow command tokens from archive feature parameter [47.00ms]
+(pass) archive command > rollback on mid-pipeline failure leaves no partial archive and preserves source workspace [46.00ms]
+(pass) archive command > issue-only archive preserves pre-existing current docs when archive has no design/prd [47.00ms]
+
+tests\phases\archive\collect.test.ts:
+(pass) collectArchiveArtifacts > copies planned design and plan into staging
+(pass) collectArchiveArtifacts > ad-hoc mode generates issue artifacts [16.00ms]
+(pass) collectArchiveArtifacts > planned collection without design leaves staging without design.md
+(pass) collectArchiveArtifacts > issue mode copies clarification and generates resolution [15.00ms]
+
+tests\phases\archive\current-promotion.test.ts:
+(pass) buildPromotionSuggestions > should NOT generate REMOVE suggestions when archive sources are missing but current docs exist [16.00ms]
+
+tests\phases\archive\finalize.test.ts:
+(pass) finalizeArchive > renames staging directory into final archive directory [15.00ms]
+(pass) finalizeArchive > staging failure cleans staging and leaves final absent [16.00ms]
+(pass) finalizeArchive > auto_promote_current=false suggests but does not apply current promotion [16.00ms]
+(pass) finalizeArchive > auto_promote_current=true applies current promotion with sync fallback [15.00ms]
+(pass) finalizeArchive > cleanupStaging removes failed staging directory
+
+tests\phases\archive\implementation-mapper-guardian.test.ts:
+(pass) generateImplementationMapper with guardianEvidence > output contains Drift Guardian Evidence section when guardianEvidence is provided [16.00ms]
+(pass) generateImplementationMapper with guardianEvidence > output contains autoRepairs count
+(pass) generateImplementationMapper with guardianEvidence > output contains pendingAmbiguities count [15.00ms]
+(pass) generateImplementationMapper with guardianEvidence > output does NOT contain Guardian section when guardianEvidence is absent
+
+tests\phases\archive\report.test.ts:
+(pass) formatArchiveReport > planned success report contains completion header, feature name, and feature mode
+(pass) formatArchiveReport > ad-hoc report contains completion header, ad-hoc mode, and ad-hoc issue clarification artifact
+(pass) formatArchiveReport > blocked report via formatBlockerMessage returns blocker message
+
+tests\phases\archive\resolve.test.ts:
+(pass) resolveArchiveContext > uses ad-hoc mode when acceptance state belongs to another feature [31.00ms]
+
+tests\phases\archive\validate.test.ts:
+(pass) validateArchive > planned mode + readiness=Ready + no issues allows archive
+(pass) validateArchive > planned mode + readiness=NotReady blocks archive with readiness blocker
+(pass) validateArchive > planned mode + harden unresolved must-fix blocks archive with harden blocker
+(pass) validateArchive > planned mode + doc update not confirmed blocks archive with doc_update blocker
+(pass) validateArchive > ad-hoc mode + no readiness allows archive
+(pass) validateArchive > ad-hoc mode + no readiness/harden/drift checks does not produce readiness or harden blockers
+(pass) validateArchive > planned mode + skipQualityGateChecks=true allows archive even when readiness=NotReady
+
+4 tests failed:
+(fail) archive command > archives requirements documents when they exist [47.00ms]
+(fail) archive command > removes archived docs/changes workspace content after successful archive [31.00ms]
+(fail) archive command > applies current promotion by default and falls back to direct migration when no match exists [31.00ms]
+(fail) archive command > synthesizes a matching historical current design doc during archive promotion [47.00ms]
+
+ 65 pass
+ 4 fail
+ 229 expect() calls
+Ran 69 tests across 8 files. [2.97s]

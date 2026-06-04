@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ToolContext } from '@opencode-ai/plugin/tool'
 import { defaultConfig, type ImplementationRun, type OpenFlowContext } from '../../src/types.js'
@@ -64,8 +64,13 @@ async function readEvents(ctx: OpenFlowContext, run: ImplementationRun): Promise
   return content.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>)
 }
 
+async function readObservations(ctx: OpenFlowContext, run: ImplementationRun): Promise<string[]> {
+  const content = await readFile(join(ctx.directory, run.observationsPath), 'utf8')
+  return content.trim().split('\n')
+}
+
 describe('implementation backend handoff', () => {
-  test('omo detected calls session.prompt with /start-work and records backend_started', async () => {
+  test('omo detected calls session.prompt with enriched context and records backend_started', async () => {
     const root = join(TEST_ROOT, 'omo')
     await rm(root, { recursive: true, force: true })
     await mkdir(join(root, '.sisyphus', 'plans'), { recursive: true })
@@ -78,17 +83,31 @@ describe('implementation backend handoff', () => {
 
     const result = await handoffToBackend(ctx, run, createToolContext())
 
-    expect(result).toEqual({ success: true, backend: 'omo', command: '/start-work openflow-implement-workflow' })
-    expect(calls).toEqual([
-      {
-        path: { id: 'session-1' },
-        body: { parts: [{ type: 'text', text: '/start-work openflow-implement-workflow' }] },
-      },
-    ])
+    const expectedCommand = [
+      '/start-work openflow-implement-workflow',
+      '',
+      'OpenFlow Implementation Context:',
+      `- runID: ${run.runID}`,
+      '- feature: openflow-implement-workflow',
+      `- executionRoot: ${root}`,
+      '- worktree: (none)',
+      '- planPath: .sisyphus/plans/openflow-implement-workflow.md',
+      '- containerMode: session',
+      '- mustUseExistingImplementationRun: true',
+    ].join('\n')
+    expect(result).toEqual({ success: true, backend: 'omo', command: expectedCommand })
+    expect(calls).toHaveLength(1)
+    const callArg = calls[0] as { body: { parts: Array<{ type: string; text: string }> } }
+    const promptText = callArg.body.parts[0].text
+    expect(promptText).toContain('runID: ' + run.runID)
+    expect(promptText).toContain('executionRoot: ' + root)
+    expect(promptText).toContain('worktree: (none)')
+    expect(promptText).toContain('planPath: .sisyphus/plans/openflow-implement-workflow.md')
+    expect(promptText).toContain('containerMode: session')
+    expect(promptText).toContain('mustUseExistingImplementationRun: true')
     const updated = await implementationRunStore.getRun(ctx, run.runID)
     expect(updated?.status).toBe('running')
     expect(updated?.backend).toBe('omo')
-    expect(updated?.backendCommand).toBe('/start-work openflow-implement-workflow')
     const events = await readEvents(ctx, run)
     expect(events[0]?.type).toBe('backend_started')
     expect(events[0]?.backend).toBe('omo')
@@ -96,7 +115,7 @@ describe('implementation backend handoff', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  test('no omo returns OpenCode build agent handoff metadata', async () => {
+  test('no omo returns OpenCode build agent handoff metadata with implementation context observation', async () => {
     const root = join(TEST_ROOT, 'opencode')
     await rm(root, { recursive: true, force: true })
     const calls: unknown[] = []
@@ -114,6 +133,15 @@ describe('implementation backend handoff', () => {
     expect(updated?.status).toBe('running')
     expect(updated?.backend).toBe('opencode')
     expect(updated?.backendCommand).toBe('opencode build')
+    const observations = await readObservations(ctx, run)
+    expect(observations.length).toBeGreaterThanOrEqual(2)
+    expect(observations[0]).toContain('Backend started: opencode (opencode build)')
+    const contextLine = observations[1]
+    expect(contextLine).toContain('Implementation context:')
+    expect(contextLine).toContain(`runID=${run.runID}`)
+    expect(contextLine).toContain('feature=openflow-implement-workflow')
+    expect(contextLine).toContain('planPath=.sisyphus/plans/openflow-implement-workflow.md')
+    expect(contextLine).toContain('containerMode=session')
 
     await rm(root, { recursive: true, force: true })
   })

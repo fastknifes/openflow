@@ -12,14 +12,13 @@ import type {
   HardenTraceEntry,
   OpenFlowContext,
 } from '../types.js'
-import { compressInput, gradeComplexity } from '../utils/harden-utils.js'
+import { classifyFindings, compressInput, gradeComplexity } from '../utils/harden-utils.js'
 import { normalizeFinding } from '../utils/harden-ledger.js'
+import { computeChangedFilesSet, computeDiffHash, hasMaterialChange } from '../utils/harden-diff.js'
 import { escapeMarkdown, sanitizeFeatureName } from '../utils/security.js'
 import { findActiveFeature } from '../utils/feature-resolver.js'
 import { appendOmittedDiffManifest, extractDiffBlockPaths, scopeDiffToFeature } from '../utils/diff-scope.js'
 import { logger } from '../utils/logger.js'
-import { HardenDagManager } from '../orchestrator/harden-dag-manager.js'
-import { getSchedulerLoop } from '../index.js'
 
 interface HardenArgs {
   full?: boolean
@@ -61,23 +60,10 @@ interface DiffScopeContext {
   archiveDir: string
 }
 
-interface ReviewerTurnResult {
-  sessionID: string
-  text: string
-  tokens: number
-  findings: HardenFinding[]
-  converged: boolean
-  reason: string
-  rejectedCounts: Record<string, number>
-}
-
-interface ExecutorTurnResult {
-  sessionID: string
-  text: string
-  tokens: number
-  dispositions: Array<{ findingId: string; verdict: string; rationale: string }>
-  fixReport: string
-  codeChanges: string
+interface ParsedExecutorDisposition {
+  verdict: HardenExecutorVerdict
+  rationale: string
+  fixSummary?: string
 }
 
 interface HardenFindingFinalState extends HardenFinding {
@@ -89,22 +75,27 @@ interface HardenFindingFinalState extends HardenFinding {
   rebuttalFinalResponse?: string
 }
 
-type FindingsFinalStateGroup = 'resolved_findings' | 'rejected_findings' | 'unresolved_must_fix' | 'unresolved_needs_decision'
+type FindingsFinalStateGroup = 'resolved_findings' | 'rejected_findings' | 'unresolved_must_fix' | 'unresolved_needs_decision' | 'accepted_known_issues'
 
 let activeModels: { reviewerModel?: string; executorModel?: string } = {}
 
 const REVIEWER_SYSTEM_PROMPT = `## System Role
 You are the OpenFlow Harden Reviewer.
-Judge the implementation ONLY against the design document.
-DO NOT propose new features. ONLY evaluate whether implementation matches design.
-If design doc is silent, mark as design_ambiguity, not bug.`
+Judge implementation against the approved contract, not preference.
+Contract source priority is: decisions > current > behavior > design > plan > request > diff > implementation.
+DO NOT propose new features. ONLY evaluate whether implementation matches the highest-priority applicable contract source.
+If contract intent is inferable from higher-priority context, mark intent_gap and include confidence/alignment evidence.
+If contract intent is not inferable, mark missing_evidence or intent_gap with needs_decision.
+Never approve implementation-driven contract divergence or ask the Executor to silently update docs.`
 
 const EXECUTOR_SYSTEM_PROMPT = `## System Role
 You are the OpenFlow Harden Executor.
 For each finding, give verdict: accept | reject | partial.
 If accept/partial, provide minimal fix.
 If reject, explain why with design doc or code logic evidence.
-Do NOT refactor, do NOT add new features, do NOT modify files outside scope.`
+Fix only implementation findings explicitly allowed for executor repair.
+Do NOT refactor, do NOT add new features, do NOT modify files outside scope.
+Do NOT modify docs to resolve intent gaps, and do NOT approve or normalize contract divergence.`
 
 export async function handleHarden(
   ctx: OpenFlowContext,
@@ -185,9 +176,86 @@ Total tokens consumed: 0
 Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); complexity graded as trivial.`
   }
 
-  // === All complexity modes (simple + standard) now use DRG async loop ===
-  logger.info('harden', 'entering DRG adversarial mode', { feature: sanitizedFeature, maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds })
-  const coordinatorSessionID = await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`, currentSessionID)
+  if (complexity === 'simple' && !args?.full) {
+    logger.info('harden', 'entering simple mode', { feature: sanitizedFeature })
+    const coordinatorSessionID = currentSessionID ?? await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`)
+    const reviewerSessionID = await createHardenSession(ctx, sanitizedFeature, 'Harden Round 1/1 - Reviewer', coordinatorSessionID)
+    const reviewerPrompt = buildReviewerPrompt(planSummary, reviewerDiffStr)
+    const trace: FormattedHardenTraceEntry[] = []
+    const review = await runAgentTask(
+      ctx,
+      reviewerSessionID,
+      'oracle',
+      REVIEWER_SYSTEM_PROMPT,
+      reviewerPrompt,
+      activeModels.reviewerModel,
+    )
+    const grouped = classifyFindings(review.text, designLookup.paths)
+    const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
+    trace.push(buildTraceEntry(1, 'oracle', review, inferReviewerStopReasonCandidate(grouped)))
+    const executorFindings = filterExecutorFindings(findings)
+    const executorSessionID = await createHardenSession(ctx, sanitizedFeature, 'Harden Round 1/1 - Executor', coordinatorSessionID)
+    const execution = await runAgentTask(
+      ctx,
+      executorSessionID,
+      'deep',
+      EXECUTOR_SYSTEM_PROMPT,
+      buildExecutorPrompt(executorFindings, planSummary, collectScopedFilePaths(executorFindings, diffStr)),
+      activeModels.executorModel,
+    )
+    const dispositions = parseExecutorDisposition(execution.text, executorFindings)
+    applyExecutorDispositions(executorFindings, dispositions)
+    trace.push(buildTraceEntry(1, 'deep', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'disposition_reported'))
+
+    // Simple mode: one-time rebuttal for rejected findings (no multi-round repair loop)
+    const rebuttalResult = await runRejectedFindingRebuttals(
+      ctx,
+      sanitizedFeature,
+      coordinatorSessionID,
+      1,
+      1,
+      ctx.config.harden.maxArgumentRoundsPerFinding,
+      executorFindings,
+      dispositions,
+      planSummary,
+      trace,
+    )
+    const combinedFixReport = [execution.text, rebuttalResult.report].filter(part => part.trim()).join('\n\n')
+    const hasUnresolvedRebuttal = rebuttalResult.needsHuman
+
+    const status = grouped.ambiguous.length > 0
+      ? 'needs_human'
+      : hasUnresolvedRebuttal
+        ? 'needs_human'
+        : grouped.actionable.length > 0
+          ? 'needs_human'
+          : findings.length > 0
+            ? 'pass_with_risks'
+            : 'pass'
+
+    return formatHardenResult({
+      status,
+      rounds: [{ round: 1, findings, fixReport: combinedFixReport || execution.text }],
+      budgetConsumed: review.tokens + execution.tokens + rebuttalResult.tokens,
+      totalTokensConsumed: review.tokens + execution.tokens + rebuttalResult.tokens,
+      summary: summarizeReviewOutcome(findings, grouped.actionable.length, grouped.ambiguous.length, grouped.nonBlocking.length),
+      stopReason: grouped.ambiguous.length > 0
+        ? 'review_inconclusive'
+        : hasUnresolvedRebuttal
+          ? 'rebuttal_unresolved'
+          : grouped.actionable.length > 0
+            ? 'actionable_findings'
+            : findings.length > 0
+              ? 'non_blocking_only'
+              : 'no_findings',
+      sessionID: coordinatorSessionID,
+      coordinatorSessionId: coordinatorSessionID,
+      trace,
+    })
+  }
+
+  logger.info('harden', 'entering standard adversarial mode', { feature: sanitizedFeature, maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds })
+  const coordinatorSessionID = currentSessionID ?? await createHardenSession(ctx, sanitizedFeature, `Harden: ${sanitizedFeature}`)
   const diffScopeContext: DiffScopeContext = {
     directory: ctx.directory,
     sanitizedFeature,
@@ -199,12 +267,13 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
     archiveDir: ctx.config.paths.archive,
   }
 
-  const result = await runDrgAdversarialLoop(
+  const result = await runAdversarialLoop(
     ctx,
     planSummary,
     diffScopeContext,
     {
       maxRounds: args?.maxRounds ?? ctx.config.harden.maxRounds,
+      maxArgumentRoundsPerFinding: ctx.config.harden.maxArgumentRoundsPerFinding,
       mode: args?.mode ?? 'standard',
     },
     coordinatorSessionID,
@@ -214,204 +283,257 @@ Summary: feature too simple for harden (${escapeMarkdown(sanitizedFeature)}); co
   return formatHardenResult(result)
 }
 
-
-export async function runDrgAdversarialLoop(
+async function runAdversarialLoop(
   ctx: OpenFlowContext,
   planSummary: string,
   diffScopeContext: DiffScopeContext,
-  args: { maxRounds: number; maxCyclesPerRound?: number; mode: string },
+  args: { maxRounds: number; maxArgumentRoundsPerFinding: number; mode: string },
   coordinatorSessionID: string,
   sanitizedFeature: string,
 ): Promise<FormattedHardenResult> {
-  void ctx
-  const scheduler = getSchedulerLoop()
-  if (scheduler === undefined) {
-    throw new Error('OpenFlow harden DRG loop requires an active scheduler.')
-  }
-
-  const manager = new HardenDagManager(scheduler)
-  manager.createHardenDag(sanitizedFeature)
-
-  const normalizedRounds = normalizeMaxRounds(args.maxRounds)
-  const normalizedCycles = normalizeMaxCyclesPerRound(args.maxCyclesPerRound)
-  const maxRounds = normalizedRounds.rounds
-  const maxCyclesPerRound = normalizedCycles.cycles
-  const warnings = [normalizedRounds.warning, normalizedCycles.warning].filter((warning): warning is string => Boolean(warning))
-
-  let reviewerSessionID: string | undefined
-  let executorSessionID: string | undefined
-  const allRounds: HardenRoundResult[] = []
+  const rounds: HardenRoundResult[] = []
   const trace: FormattedHardenTraceEntry[] = []
-  let totalTokens = 0
+  const findingCounts = new Map<string, number>()
+  let totalTokensConsumed = 0
+  let priorFindings: HardenFinding[] = []
+  let fixReport = ''
+  let nonBlockingRounds = 0
+  const reviewContext = compressInput(planSummary, 16000)
 
-  try {
-    for (let round = 1; round <= maxRounds; round++) {
-      logger.info('harden', 'starting DRG harden round', { round, maxRounds, maxCyclesPerRound, mode: args.mode })
-      const freshScopedDiff = readScopedReviewerDiff(diffScopeContext)
-      let rollingDiff = compressInput(freshScopedDiff.reviewerDiff, 24000)
-      const reviewerPrompt = buildReviewerPrompt(planSummary, rollingDiff)
-      const reviewerTaskId = manager.submitReviewerTask(round, {
-        agent: 'harden-reviewer',
-        sessionID: reviewerSessionID,
-        title: `Harden Round ${round}/${maxRounds} - Reviewer`,
-        systemPrompt: REVIEWER_SYSTEM_PROMPT,
-        userPrompt: reviewerPrompt,
+  for (let round = 1; round <= args.maxRounds; round++) {
+    logger.info('harden', 'starting harden round', { round, maxRounds: args.maxRounds })
+    const freshScopedDiff = readScopedReviewerDiff(diffScopeContext)
+    const rollingDiff = compressInput(freshScopedDiff.reviewerDiff, 24000)
+    const reviewerPrompt = buildReviewerPrompt(reviewContext, rollingDiff, priorFindings, fixReport)
+    const reviewerSessionID = await createHardenSession(
+      ctx,
+      sanitizedFeature,
+      `Harden Round ${round}/${args.maxRounds} - Reviewer`,
+      coordinatorSessionID,
+    )
+    const review = await runAgentTask(
+      ctx,
+      reviewerSessionID,
+      'oracle',
+      REVIEWER_SYSTEM_PROMPT,
+      reviewerPrompt,
+      activeModels.reviewerModel,
+    )
+    totalTokensConsumed += review.tokens
+
+    const grouped = classifyFindings(review.text, [])
+    logger.info('harden', 'reviewer completed', {
+      round,
+      actionableCount: grouped.actionable.length,
+      ambiguousCount: grouped.ambiguous.length,
+      nonBlockingCount: grouped.nonBlocking.length,
+    })
+    const findings = [...grouped.actionable, ...grouped.ambiguous, ...grouped.nonBlocking]
+    trace.push(buildTraceEntry(round, 'oracle', review, inferReviewerStopReasonCandidate(grouped)))
+
+    if (grouped.ambiguous.length > 0 && grouped.actionable.length === 0 && !containsExecutorReviewableLevel(review.text)) {
+      rounds.push({ round, findings })
+      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'review_inconclusive', totalTokensConsumed })
+      return {
+        status: 'needs_human',
+        rounds,
+        budgetConsumed: totalTokensConsumed,
+        totalTokensConsumed,
+        summary: `reviewer reported ${grouped.ambiguous.length} design ambiguity finding(s) in round ${round}.`,
+        stopReason: 'review_inconclusive',
+        sessionID: coordinatorSessionID,
+        coordinatorSessionId: coordinatorSessionID,
+        trace,
+      }
+    }
+
+    if (grouped.actionable.length === 0 && grouped.ambiguous.length === 0 && grouped.nonBlocking.length === 0) {
+      rounds.push({ round, findings: [] })
+      const finalStateGroups = groupFinalFindingStates(rounds)
+      const hasUnresolvedFindings = finalStateGroups.unresolved_must_fix.length > 0 || finalStateGroups.unresolved_needs_decision.length > 0
+      logger.info('harden', 'harden loop terminated', {
         round,
-        maxRounds,
-        parentSessionID: coordinatorSessionID,
-        feature: sanitizedFeature,
-        model: activeModels.reviewerModel,
-        mode: args.mode,
+        status: hasUnresolvedFindings ? 'needs_human' : 'pass',
+        stopReason: hasUnresolvedFindings ? 'review_inconclusive' : 'no_findings',
+        totalTokensConsumed,
       })
-      const reviewerTask = await manager.awaitTask(reviewerTaskId)
-      if (reviewerTask.status !== 'succeeded') {
-        throw new Error(`Harden reviewer task ${reviewerTaskId} ended with status ${reviewerTask.status}`)
-      }
-      let reviewerResult = reviewerTask.result as unknown as ReviewerTurnResult
-      reviewerSessionID = reviewerResult.sessionID
-      totalTokens += reviewerResult.tokens
-      trace.push(buildTraceEntry(round, 'oracle', reviewerResult, reviewerResult.reason))
-
-      if (reviewerResult.converged) {
-        allRounds.push({ round, findings: reviewerResult.findings })
-        const status = reviewerResult.reason === 'non_blocking_only'
-          ? 'pass_with_risks'
-          : reviewerResult.reason === 'review_inconclusive'
-            ? 'needs_human'
-            : 'pass'
-        return {
-          status,
-          rounds: allRounds,
-          budgetConsumed: totalTokens,
-          totalTokensConsumed: totalTokens,
-          summary: warnings.concat(`reviewer converged in round ${round}: ${reviewerResult.reason}.`).join(' '),
-          stopReason: reviewerResult.reason,
-          sessionID: coordinatorSessionID,
-          coordinatorSessionId: coordinatorSessionID,
-          trace,
-        }
-      }
-
-      let roundFindings = reviewerResult.findings
-      let roundFixReport = ''
-      let roundStopReason = reviewerResult.reason
-
-      for (let cycle = 1; cycle <= maxCyclesPerRound; cycle++) {
-        logger.info('harden', 'starting DRG harden cycle', { round, cycle, maxCyclesPerRound })
-        const executorPrompt = buildExecutorPrompt(roundFindings, planSummary, collectScopedFilePaths(roundFindings, freshScopedDiff.diff))
-        const executorTaskId = manager.submitExecutorTask(round, {
-          agent: 'harden-executor',
-          sessionID: executorSessionID,
-          title: `Harden Round ${round}/${maxRounds} - Executor Cycle ${cycle}/${maxCyclesPerRound}`,
-          systemPrompt: EXECUTOR_SYSTEM_PROMPT,
-          userPrompt: executorPrompt,
-          round,
-          cycle,
-          maxRounds,
-          maxCyclesPerRound,
-          parentSessionID: coordinatorSessionID,
-          feature: sanitizedFeature,
-          model: activeModels.executorModel,
-          mode: args.mode,
-          findings: roundFindings,
-          reviewerSessionID,
-          priorReviewerText: reviewerResult.text,
-        })
-        const executorTask = await manager.awaitTask(executorTaskId)
-        if (executorTask.status !== 'succeeded') {
-          throw new Error(`Harden executor task ${executorTaskId} ended with status ${executorTask.status}`)
-        }
-        const executorResult = executorTask.result as unknown as ExecutorTurnResult
-        executorSessionID = executorResult.sessionID
-        totalTokens += executorResult.tokens
-        roundFixReport = executorResult.fixReport || executorResult.text
-        trace.push(buildTraceEntry(round, 'deep', executorResult, containsExecutorFailureSignal(executorResult.text) ? 'executor_failure_signal' : 'fix_applied'))
-
-        const verificationDiff = readScopedReviewerDiff(diffScopeContext)
-        rollingDiff = compressInput(verificationDiff.reviewerDiff, 24000)
-        const verificationPrompt = buildReviewerPrompt(planSummary, rollingDiff, roundFindings, executorResult.text)
-        const verificationTaskId = manager.submitReviewerTask(round, {
-          agent: 'harden-reviewer',
-          sessionID: reviewerSessionID,
-          title: `Harden Round ${round}/${maxRounds} - Reviewer Verification Cycle ${cycle}/${maxCyclesPerRound}`,
-          systemPrompt: REVIEWER_SYSTEM_PROMPT,
-          userPrompt: verificationPrompt,
-          round,
-          cycle,
-          maxRounds,
-          maxCyclesPerRound,
-          parentSessionID: coordinatorSessionID,
-          feature: sanitizedFeature,
-          model: activeModels.reviewerModel,
-          mode: args.mode,
-          priorExecutorText: executorResult.text,
-          executorSessionID,
-        })
-        const verificationTask = await manager.awaitTask(verificationTaskId)
-        if (verificationTask.status !== 'succeeded') {
-          throw new Error(`Harden reviewer verification task ${verificationTaskId} ended with status ${verificationTask.status}`)
-        }
-        reviewerResult = verificationTask.result as unknown as ReviewerTurnResult
-        reviewerSessionID = reviewerResult.sessionID
-        totalTokens += reviewerResult.tokens
-        roundFindings = reviewerResult.findings
-        roundStopReason = reviewerResult.reason
-        trace.push(buildTraceEntry(round, 'oracle', reviewerResult, reviewerResult.reason))
-
-        if (reviewerResult.converged) break
-      }
-
-      allRounds.push({ round, findings: roundFindings, fixReport: roundFixReport })
-
-      if (reviewerResult.converged) {
-        const status = roundStopReason === 'non_blocking_only'
-          ? 'pass_with_risks'
-          : roundStopReason === 'review_inconclusive'
-            ? 'needs_human'
-            : 'pass'
-        return {
-          status,
-          rounds: allRounds,
-          budgetConsumed: totalTokens,
-          totalTokensConsumed: totalTokens,
-          summary: warnings.concat(`reviewer converged in round ${round}: ${roundStopReason}.`).join(' '),
-          stopReason: roundStopReason,
-          sessionID: coordinatorSessionID,
-          coordinatorSessionId: coordinatorSessionID,
-          trace,
-        }
+      return {
+        status: hasUnresolvedFindings ? 'needs_human' : 'pass',
+        rounds,
+        budgetConsumed: totalTokensConsumed,
+        totalTokensConsumed,
+        summary: hasUnresolvedFindings
+          ? `reviewer found no new issues after ${round} round(s), but prior executor dispositions remain unresolved.`
+          : `reviewer found no actionable issues after ${round} round(s).`,
+        stopReason: hasUnresolvedFindings ? 'review_inconclusive' : 'no_findings',
+        sessionID: coordinatorSessionID,
+        coordinatorSessionId: coordinatorSessionID,
+        trace,
       }
     }
 
-    return {
-      status: 'max_rounds_reached',
-      rounds: allRounds,
-      budgetConsumed: totalTokens,
-      totalTokensConsumed: totalTokens,
-      summary: warnings.concat(`maximum rounds reached (${maxRounds}) without convergence.`).join(' '),
-      stopReason: 'max_rounds_reached',
-      sessionID: coordinatorSessionID,
-      coordinatorSessionId: coordinatorSessionID,
+    if (grouped.actionable.length === 0 && !containsExecutorReviewableLevel(review.text)) {
+      nonBlockingRounds += 1
+      rounds.push({ round, findings })
+
+      if (nonBlockingRounds >= 2) {
+        logger.info('harden', 'harden loop terminated', { round, status: 'pass_with_risks', stopReason: 'non_blocking_only', totalTokensConsumed })
+        return {
+          status: 'pass_with_risks',
+          rounds,
+          budgetConsumed: totalTokensConsumed,
+          totalTokensConsumed,
+          summary: 'two consecutive rounds reported only non-blocking or design-ambiguity findings.',
+          stopReason: 'non_blocking_only',
+          sessionID: coordinatorSessionID,
+          coordinatorSessionId: coordinatorSessionID,
+          trace,
+        }
+      }
+
+      priorFindings = findings
+      fixReport = 'No blocking fixes applied; reviewer reported only non-blocking issues.'
+      continue
+    }
+
+    nonBlockingRounds = 0
+    const executorFindings = filterExecutorFindings(findings)
+    const currentFindingKeys = [...new Set(grouped.actionable.map(finding => normalizeFinding(finding)))]
+    for (const existingKey of [...findingCounts.keys()]) {
+      if (!currentFindingKeys.includes(existingKey)) {
+        findingCounts.delete(existingKey)
+      }
+    }
+
+    const repeatedKeys: string[] = []
+    for (const key of currentFindingKeys) {
+      findingCounts.set(key, (findingCounts.get(key) ?? 0) + 1)
+      if ((findingCounts.get(key) ?? 0) >= 2) {
+        repeatedKeys.push(key)
+      }
+    }
+
+    const filePaths = collectScopedFilePaths(executorFindings, freshScopedDiff.diff)
+    const beforeDiffSnapshot = readGitDiff(ctx.directory)
+    const beforeHash = computeDiffHash(beforeDiffSnapshot)
+    const beforeFiles = computeChangedFilesSet(beforeDiffSnapshot)
+    const executorPrompt = buildExecutorPrompt(executorFindings, reviewContext, filePaths)
+    const executorSessionID = await createHardenSession(
+      ctx,
+      sanitizedFeature,
+      `Harden Round ${round}/${args.maxRounds} - Executor`,
+      coordinatorSessionID,
+    )
+    const execution = await runAgentTask(
+      ctx,
+      executorSessionID,
+      'deep',
+      EXECUTOR_SYSTEM_PROMPT,
+      executorPrompt,
+      activeModels.executorModel,
+    )
+    totalTokensConsumed += execution.tokens
+    trace.push(buildTraceEntry(round, 'deep', execution, containsExecutorFailureSignal(execution.text) ? 'executor_failure_signal' : 'fix_applied'))
+    const dispositions = parseExecutorDisposition(execution.text, executorFindings)
+    applyExecutorDispositions(executorFindings, dispositions)
+    const rebuttalResult = await runRejectedFindingRebuttals(
+      ctx,
+      sanitizedFeature,
+      coordinatorSessionID,
+      round,
+      args.maxRounds,
+      args.maxArgumentRoundsPerFinding,
+      executorFindings,
+      dispositions,
+      reviewContext,
       trace,
+    )
+    totalTokensConsumed += rebuttalResult.tokens
+    const combinedFixReport = [execution.text, rebuttalResult.report].filter(part => part.trim()).join('\n\n')
+    const afterDiffSnapshot = readGitDiff(ctx.directory)
+    const afterHash = computeDiffHash(afterDiffSnapshot)
+    const afterFiles = computeChangedFilesSet(afterDiffSnapshot)
+    const materialChange = hasMaterialChange(beforeHash, afterHash, beforeFiles, afterFiles)
+
+    if (containsExecutorFailureSignal(execution.text)) {
+      rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
+      if (!materialChange) {
+        logger.info('harden', 'harden loop terminated', { round, status: 'executor_blocked', stopReason: 'executor_blocked', totalTokensConsumed })
+        return {
+          status: 'executor_blocked',
+          rounds,
+          budgetConsumed: totalTokensConsumed,
+          totalTokensConsumed,
+          summary: `executor reported a blocking failure in round ${round} without producing a material change.`,
+          stopReason: 'executor_blocked',
+          sessionID: coordinatorSessionID,
+          coordinatorSessionId: coordinatorSessionID,
+          trace,
+        }
+      }
+
+      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'executor_failure_signal', totalTokensConsumed })
+      return {
+        status: 'needs_human',
+        rounds,
+        budgetConsumed: totalTokensConsumed,
+        totalTokensConsumed,
+        summary: `executor reported a blocking failure in round ${round}.`,
+        stopReason: 'executor_failure_signal',
+        sessionID: coordinatorSessionID,
+        coordinatorSessionId: coordinatorSessionID,
+        trace,
+      }
     }
-  } finally {
-    manager.archiveAndDestroy()
+
+    if (repeatedKeys.length > 0 && !materialChange) {
+      rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
+      logger.info('harden', 'harden loop terminated', { round, status: 'review_inconclusive', stopReason: 'repeated_finding_no_material_fix', totalTokensConsumed })
+      return {
+        status: 'review_inconclusive',
+        rounds,
+        budgetConsumed: totalTokensConsumed,
+        totalTokensConsumed,
+        summary: `same finding repeated at least twice by round ${round} and executor produced no material change.`,
+        stopReason: 'repeated_finding_no_material_fix',
+        sessionID: coordinatorSessionID,
+        coordinatorSessionId: coordinatorSessionID,
+        trace,
+      }
+    }
+
+    rounds.push({ round, findings, fixReport: combinedFixReport || execution.text })
+
+    if (rebuttalResult.needsHuman) {
+      logger.info('harden', 'harden loop terminated', { round, status: 'needs_human', stopReason: 'review_inconclusive', totalTokensConsumed })
+      return {
+        status: 'needs_human',
+        rounds,
+        budgetConsumed: totalTokensConsumed,
+        totalTokensConsumed,
+        summary: `executor rejection remained unresolved after rebuttal in round ${round}.`,
+        stopReason: 'review_inconclusive',
+        sessionID: coordinatorSessionID,
+        coordinatorSessionId: coordinatorSessionID,
+        trace,
+      }
+    }
+    priorFindings = findings
+    fixReport = combinedFixReport || execution.text
   }
-}
 
-function normalizeMaxRounds(requested: number): { rounds: number; warning?: string } {
-  const DEFAULT = 1, MAX_CEILING = 10
-  if (requested < 1) return { rounds: DEFAULT, warning: `maxRounds=${requested} < 1, reset to ${DEFAULT}` }
-  if (requested > MAX_CEILING) return { rounds: MAX_CEILING, warning: `maxRounds=${requested} > ${MAX_CEILING}, clamped to ${MAX_CEILING}` }
-  return { rounds: requested }
-}
-
-function normalizeMaxCyclesPerRound(requested: number | undefined): { cycles: number; warning?: string } {
-  const DEFAULT = 5, MAX_CEILING = 5
-  if (requested === undefined) return { cycles: DEFAULT }
-  if (requested < 1) return { cycles: DEFAULT, warning: `maxCyclesPerRound=${requested} < 1, reset to ${DEFAULT}` }
-  if (requested > MAX_CEILING) return { cycles: MAX_CEILING, warning: `maxCyclesPerRound=${requested} > ${MAX_CEILING}, clamped to ${MAX_CEILING}` }
-  return { cycles: requested }
+  logger.info('harden', 'harden loop terminated', { round: args.maxRounds, status: 'max_rounds_reached', stopReason: 'max_rounds_reached', totalTokensConsumed })
+  return {
+    status: 'max_rounds_reached',
+    rounds,
+    budgetConsumed: totalTokensConsumed,
+    totalTokensConsumed,
+    summary: `maximum rounds reached (${args.maxRounds}) without convergence.`,
+    stopReason: 'max_rounds_reached',
+    sessionID: coordinatorSessionID,
+    coordinatorSessionId: coordinatorSessionID,
+    trace,
+  }
 }
 
 function buildReviewerPrompt(
@@ -432,9 +554,13 @@ function buildReviewerPrompt(
   return [
     'You are the OpenFlow harden reviewer.',
     '',
-    'Judge the implementation ONLY against the design document summary below.',
-    'DO NOT propose new features or requirements. ONLY evaluate whether the implementation matches the design document.',
-    'If the design doc is silent on an issue, mark it as design_ambiguity, not as a bug.',
+    'Judge the implementation against the approved contract summary below.',
+    'Use contract source priority: decisions > current > behavior > design > plan > request > diff > implementation.',
+    'DO NOT propose new features or requirements. ONLY evaluate whether implementation matches the highest-priority applicable contract source.',
+    'If approved behavior is contradicted by implementation, mark behavior_violation.',
+    'If contract intent is missing but inferable, mark intent_gap and include confidence plus implementation alignment in Evidence.',
+    'If implementation changes the approved contract instead of implementing it, mark contract_divergence and do not route it as executor-fixable.',
+    'If evidence is insufficient, mark missing_evidence instead of guessing.',
     '',
     '## Design Document Summary',
     planSummary,
@@ -451,16 +577,20 @@ function buildReviewerPrompt(
     fixReportBlock,
     '',
     '## Finding Levels',
-    '- blocking_bug: implementation is clearly broken or unsafe relative to the design.',
-    '- spec_violation: implementation contradicts an explicit design statement.',
+    '- behavior_violation: implementation contradicts approved behavior or the highest-priority contract source; executor-fixable.',
+    '- intent_gap: contract coverage is missing but intent may be inferred; high/medium aligned means doc update, high/medium misaligned means implementation fix, low/unknown/conflicting needs decision.',
+    '- contract_divergence: implementation or proposed fix changes the approved contract; needs human decision, not executor docs edit.',
     '- regression_risk: likely to break documented behavior or compatibility.',
-    '- test_gap: missing validation for documented behavior but not proven broken.',
-    '- design_ambiguity: design doc is unclear or incomplete for the observed case.',
+    '- missing_evidence: reviewer cannot cite enough contract or implementation evidence; needs decision/evidence.',
+    '- blocking_bug: legacy synonym for implementation-blocking behavior_violation; keep accepted for backward compatibility.',
+    '- spec_violation: legacy synonym; classify as behavior_violation when implementation fix is clear, otherwise contract_divergence or missing_evidence.',
+    '- test_gap: legacy non-blocking missing validation for documented behavior but not proven broken.',
+    '- design_ambiguity: legacy ambiguity; prefer intent_gap or missing_evidence for new findings.',
     '- style_or_preference: purely stylistic or optional preference.',
     '',
     '## Required Output Format',
     'Repeat the following block once per finding:',
-    'Level: <one of the six levels>',
+    'Level: <one of the finding levels above>',
     'Description: <concise finding>',
     'Evidence: <must include file paths and exact supporting detail>',
     'Files: <comma-separated file paths>',
@@ -474,6 +604,15 @@ function buildExecutorPrompt(
   planSummary: string,
   filePaths: string[],
 ): string {
+  if (actionableFindings.length === 0) {
+    return [
+      'You are the OpenFlow harden executor.',
+      '',
+      'No executor-fixable implementation findings were provided.',
+      'Do not modify files. Report verdict: reject with rationale: no implementation fix is allowed for doc updates, missing evidence, or contract divergence.',
+    ].join('\n')
+  }
+
   const findingsBlock = actionableFindings.map((finding, index) => [
     `${index + 1}. Level: ${finding.level}`,
     `Description: ${finding.description}`,
@@ -486,7 +625,8 @@ function buildExecutorPrompt(
   return [
     'You are the OpenFlow harden executor.',
     '',
-    'Fix ONLY the issues listed above. Do NOT refactor, do NOT add new features, do NOT modify files outside the listed scope.',
+    'Fix ONLY the implementation issues listed above. Do NOT refactor, do NOT add new features, do NOT modify files outside the listed scope.',
+    'Do NOT edit documentation, approve contract divergence, or convert needs-decision findings into implementation changes.',
     '',
     '## Actionable Findings',
     findingsBlock,
@@ -504,19 +644,338 @@ function buildExecutorPrompt(
   ].join('\n')
 }
 
+export function filterExecutorFindings(findings: HardenFinding[]): HardenFinding[] {
+  return findings.filter(finding => {
+    const metadata = finding as HardenFinding & { executorAllowed?: boolean; taxonomy?: string; decision?: string }
+    if (metadata.executorAllowed === false) return false
+    if (metadata.decision && metadata.decision !== 'fix_implementation') return false
+    if (metadata.taxonomy === 'contract_divergence' || metadata.taxonomy === 'missing_evidence') return false
+    return finding.disposition === 'must_fix'
+  })
+}
+
+function parseExecutorDisposition(
+  executionText: string,
+  findings: HardenFinding[],
+): Map<string, ParsedExecutorDisposition> {
+  const result = new Map<string, ParsedExecutorDisposition>()
+  if (findings.length === 0) return result
+
+  const text = executionText.trim()
+  const explicitVerdicts = [...text.matchAll(/\bverdict\s*:\s*(accept|reject|partial)\b/giu)]
+  if (explicitVerdicts.length === 0) {
+    const verdict: HardenExecutorVerdict = /\bverdict\s*:\s*reject\b|\breject(?:ed|s)?\b/iu.test(text) ? 'reject' : 'accept'
+    for (const finding of findings) {
+      result.set(findingKey(finding), {
+        verdict,
+        rationale: text || (verdict === 'accept' ? 'Executor accepted the finding.' : 'Executor rejected the finding.'),
+      })
+    }
+    return result
+  }
+
+  const records = splitExecutorDispositionRecords(text)
+  for (const record of records) {
+    const verdict = extractExecutorVerdict(record)
+    if (!verdict) continue
+
+    const findingDescription = extractDispositionField(record, 'finding')
+    const disposition: ParsedExecutorDisposition = {
+      verdict,
+      rationale: extractDispositionField(record, 'rationale') || record.trim(),
+      ...(extractDispositionField(record, 'fix') ? { fixSummary: extractDispositionField(record, 'fix') } : {}),
+    }
+
+    const matchedFinding = findingDescription
+      ? findMatchingFinding(findingDescription, findings)
+      : records.length === 1 && findings.length === 1
+        ? findings[0]
+        : undefined
+
+    if (matchedFinding) {
+      result.set(findingKey(matchedFinding), disposition)
+    }
+  }
+
+  if (result.size === 0 && explicitVerdicts[0]?.[1]) {
+    const verdict = normalizeExecutorVerdict(explicitVerdicts[0][1])
+    const disposition: ParsedExecutorDisposition = {
+      verdict,
+      rationale: extractDispositionField(text, 'rationale') || text,
+      ...(extractDispositionField(text, 'fix') ? { fixSummary: extractDispositionField(text, 'fix') } : {}),
+    }
+    for (const finding of findings) result.set(findingKey(finding), disposition)
+  }
+
+  return result
+}
+
+function splitExecutorDispositionRecords(text: string): string[] {
+  const pipeRecords = text.split('\n').flatMap(line => line.split(/(?=\bverdict\s*:\s*(?:accept|reject|partial)\b)/giu))
+  const records = pipeRecords.map(record => record.trim()).filter(record => /\bverdict\s*:/iu.test(record))
+  return records.length > 0 ? records : [text]
+}
+
+function extractExecutorVerdict(text: string): HardenExecutorVerdict | undefined {
+  const match = text.match(/\bverdict\s*:\s*(accept|reject|partial)\b/iu)
+  return match?.[1] ? normalizeExecutorVerdict(match[1]) : undefined
+}
+
+function normalizeExecutorVerdict(value: string): HardenExecutorVerdict {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'reject') return 'reject'
+  if (normalized === 'partial') return 'partial'
+  return 'accept'
+}
+
+function extractDispositionField(text: string, field: string): string {
+  const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`(?:^|\\||\\n)\\s*${escapedField}\\s*:\\s*([\\s\\S]*?)(?=\\s*(?:\\||\\n)\\s*(?:verdict|finding|fix|rationale|evidence|final_verdict)\\s*:|$)`, 'iu')
+  return pattern.exec(text)?.[1]?.trim() ?? ''
+}
+
+function findMatchingFinding(description: string, findings: HardenFinding[]): HardenFinding | undefined {
+  const normalizedDescription = normalizeMatchText(description)
+  return findings.find(finding => normalizeMatchText(finding.description) === normalizedDescription)
+    ?? findings.find(finding => normalizeMatchText(finding.description).includes(normalizedDescription) || normalizedDescription.includes(normalizeMatchText(finding.description)))
+}
+
+function normalizeMatchText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/gu, ' ').trim()
+}
+
+function applyExecutorDispositions(
+  findings: HardenFinding[],
+  dispositions: Map<string, ParsedExecutorDisposition>,
+): void {
+  for (const finding of findings) {
+    const disposition = dispositions.get(findingKey(finding))
+    if (!disposition) continue
+
+    const finalFinding = finding as HardenFindingFinalState
+    finalFinding.executorVerdict = disposition.verdict
+    finalFinding.executorRationale = disposition.rationale
+    if (disposition.fixSummary) finalFinding.executorFixSummary = disposition.fixSummary
+
+    if (disposition.verdict === 'reject') {
+      finalFinding.status = 'dismissed'
+      finalFinding.disposition = 'false_positive'
+      finalFinding.finalStateGroup = 'rejected_findings'
+      continue
+    }
+
+    if (disposition.verdict === 'partial') {
+      finalFinding.status = 'needs_decision'
+      finalFinding.finalStateGroup = finding.disposition === 'must_fix'
+        ? 'unresolved_must_fix'
+        : 'unresolved_needs_decision'
+      continue
+    }
+
+    finalFinding.status = 'fixed'
+    finalFinding.finalStateGroup = 'resolved_findings'
+  }
+}
+
+async function runRejectedFindingRebuttals(
+  ctx: OpenFlowContext,
+  sanitizedFeature: string,
+  coordinatorSessionID: string,
+  round: number,
+  maxRounds: number,
+  maxArgumentRoundsPerFinding: number,
+  findings: HardenFinding[],
+  dispositions: Map<string, ParsedExecutorDisposition>,
+  planSummary: string,
+  trace: FormattedHardenTraceEntry[],
+): Promise<{ tokens: number; report: string; needsHuman: boolean }> {
+  let tokens = 0
+  let needsHuman = false
+  const reportParts: string[] = []
+  const rejectedFindings = findings.filter(finding => dispositions.get(findingKey(finding))?.verdict === 'reject')
+  logger.debug('harden', 'starting rejected finding rebuttals', { round, rejectedCount: rejectedFindings.length })
+
+  for (const finding of rejectedFindings) {
+    const disposition = dispositions.get(findingKey(finding))
+    if (!disposition) continue
+
+    const reviewerRebuttalSessionID = await createHardenSession(
+      ctx,
+      sanitizedFeature,
+      `Harden Round ${round}/${maxRounds} - Reviewer Rebuttal`,
+      coordinatorSessionID,
+    )
+    const reviewerRebuttal = await runAgentTask(
+      ctx,
+      reviewerRebuttalSessionID,
+      'oracle',
+      REVIEWER_SYSTEM_PROMPT,
+      buildReviewerRebuttalPrompt(finding, disposition, planSummary),
+      activeModels.reviewerModel,
+    )
+    tokens += reviewerRebuttal.tokens
+    trace.push(buildTraceEntry(round, 'oracle', reviewerRebuttal, 'reviewer_rebuttal'))
+    reportParts.push(`Reviewer rebuttal (${reviewerRebuttalSessionID}): ${reviewerRebuttal.text}`)
+
+    const finalFinding = finding as HardenFindingFinalState
+    const reviewerDecision = parseReviewerRebuttalDecision(reviewerRebuttal.text)
+    if (reviewerDecision === 'accept') {
+      finalFinding.status = 'dismissed'
+      finalFinding.disposition = 'false_positive'
+      finalFinding.finalStateGroup = 'rejected_findings'
+      continue
+    }
+
+    if (reviewerDecision !== 'challenge' || maxArgumentRoundsPerFinding <= 1) {
+      markFindingNeedsDecision(finalFinding, reviewerRebuttal.text, '')
+      needsHuman = true
+      continue
+    }
+
+    const executorRebuttalSessionID = await createHardenSession(
+      ctx,
+      sanitizedFeature,
+      `Harden Round ${round}/${maxRounds} - Executor Rebuttal`,
+      coordinatorSessionID,
+    )
+    const executorRebuttal = await runAgentTask(
+      ctx,
+      executorRebuttalSessionID,
+      'deep',
+      EXECUTOR_SYSTEM_PROMPT,
+      buildExecutorRebuttalPrompt(finding, disposition, reviewerRebuttal.text, planSummary),
+      activeModels.executorModel,
+    )
+    tokens += executorRebuttal.tokens
+    trace.push(buildTraceEntry(round, 'deep', executorRebuttal, 'executor_rebuttal'))
+    reportParts.push(`Executor rebuttal (${executorRebuttalSessionID}): ${executorRebuttal.text}`)
+
+    const finalVerdict = parseExecutorFinalRebuttalVerdict(executorRebuttal.text)
+    if (finalVerdict === 'accept') {
+      finalFinding.status = 'fixed'
+      finalFinding.executorVerdict = 'accept'
+      finalFinding.executorRationale = executorRebuttal.text
+      finalFinding.finalStateGroup = 'resolved_findings'
+      continue
+    }
+
+    markFindingNeedsDecision(finalFinding, reviewerRebuttal.text, executorRebuttal.text)
+    needsHuman = true
+  }
+
+  return { tokens, report: reportParts.join('\n\n'), needsHuman }
+}
+
+function buildReviewerRebuttalPrompt(
+  finding: HardenFinding,
+  disposition: ParsedExecutorDisposition,
+  planSummary: string,
+): string {
+  return [
+    'The Executor rejected this finding. Decide whether the rejection is valid against the design.',
+    '',
+    '## Finding',
+    formatFindingForPrompt(finding),
+    '',
+    '## Executor Rejection Rationale',
+    disposition.rationale,
+    '',
+    '## Design Document Summary',
+    compressInput(planSummary, 8000),
+    '',
+    'Respond with exactly one of:',
+    '- accept — if the Executor rejection is valid.',
+    '- challenge: <new design/code evidence> — if the finding still stands.',
+  ].join('\n')
+}
+
+function buildExecutorRebuttalPrompt(
+  finding: HardenFinding,
+  disposition: ParsedExecutorDisposition,
+  reviewerChallenge: string,
+  planSummary: string,
+): string {
+  return [
+    'The Reviewer challenged your rejection. Provide a final verdict for this finding.',
+    '',
+    '## Finding',
+    formatFindingForPrompt(finding),
+    '',
+    '## Original Rejection Rationale',
+    disposition.rationale,
+    '',
+    '## Reviewer Challenge',
+    reviewerChallenge,
+    '',
+    '## Design Document Summary',
+    compressInput(planSummary, 8000),
+    '',
+    'Required output: final_verdict: accept | reject',
+    'Then include rationale: <reason>.',
+  ].join('\n')
+}
+
+function formatFindingForPrompt(finding: HardenFinding): string {
+  return [
+    `Level: ${finding.level}`,
+    `Description: ${finding.description}`,
+    `Evidence: ${finding.evidence || 'No additional evidence provided.'}`,
+    `Files: ${finding.files.join(', ') || 'Unspecified'}`,
+  ].join('\n')
+}
+
+function parseReviewerRebuttalDecision(text: string): 'accept' | 'challenge' | 'unclear' {
+  const trimmed = text.trim()
+  if (/^NO_FINDINGS$/iu.test(trimmed)) return 'accept'
+  if (/^accept\b/iu.test(trimmed)) return 'accept'
+  if (/^challenge\b/iu.test(trimmed) || /\bchallenge\s*:/iu.test(trimmed)) return 'challenge'
+  return 'unclear'
+}
+
+function parseExecutorFinalRebuttalVerdict(text: string): HardenExecutorVerdict {
+  const match = text.match(/\b(?:final_verdict|verdict)\s*:\s*(accept|reject|partial)\b/iu)
+  return match?.[1] ? normalizeExecutorVerdict(match[1]) : 'reject'
+}
+
+function markFindingNeedsDecision(
+  finding: HardenFindingFinalState,
+  challenge: string,
+  finalResponse: string,
+): void {
+  finding.level = 'design_ambiguity'
+  finding.status = 'needs_decision'
+  finding.disposition = 'needs_decision'
+  finding.finalStateGroup = 'unresolved_needs_decision'
+  finding.rebuttalChallenge = challenge
+  finding.rebuttalFinalResponse = finalResponse
+}
+
+function containsExecutorReviewableLevel(reviewText: string): boolean {
+  return /(?:^|\n)\s*Level\s*:\s*(?:behavior_violation|blocking_bug|spec_violation|regression_risk)\b/iu.test(reviewText)
+}
+
 function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFinalStateGroup, HardenFindingFinalState[]> {
   const groups: Record<FindingsFinalStateGroup, HardenFindingFinalState[]> = {
     resolved_findings: [],
     rejected_findings: [],
     unresolved_must_fix: [],
     unresolved_needs_decision: [],
+    accepted_known_issues: [],
   }
   const seen = new Set<string>()
 
   for (const round of rounds) {
     for (const finding of round.findings) {
       const finalFinding = finding as HardenFindingFinalState
-      if (!finalFinding.executorVerdict || !finalFinding.finalStateGroup) continue
+      if (!finalFinding.executorVerdict || !finalFinding.finalStateGroup) {
+        if (finalFinding.disposition === 'accepted_known_issue') {
+          finalFinding.finalStateGroup = 'accepted_known_issues'
+        } else if (isDecisionRequiredFinding(finalFinding)) {
+          finalFinding.finalStateGroup = 'unresolved_needs_decision'
+        } else {
+          continue
+        }
+      }
 
       const key = findingKey(finalFinding)
       if (seen.has(key)) continue
@@ -526,6 +985,12 @@ function groupFinalFindingStates(rounds: HardenRoundResult[]): Record<FindingsFi
   }
 
   return groups
+}
+
+function isDecisionRequiredFinding(finding: HardenFindingFinalState): boolean {
+  return finding.status === 'needs_decision'
+    || finding.disposition === 'needs_decision'
+    || finding.disposition === 'design_divergence'
 }
 
 function hasFinalFindingStates(groups: Record<FindingsFinalStateGroup, HardenFindingFinalState[]>): boolean {
@@ -539,6 +1004,7 @@ function formatFindingsFinalState(rounds: HardenRoundResult[]): string {
   const orderedGroups: FindingsFinalStateGroup[] = [
     'resolved_findings',
     'rejected_findings',
+    'accepted_known_issues',
     'unresolved_must_fix',
     'unresolved_needs_decision',
   ]
@@ -574,6 +1040,7 @@ function formatFinalFindingLine(
 
 function defaultDispositionForGroup(group: FindingsFinalStateGroup): string {
   if (group === 'rejected_findings') return 'false_positive'
+  if (group === 'accepted_known_issues') return 'accepted_known_issue'
   if (group === 'unresolved_needs_decision') return 'needs_decision'
   return 'must_fix'
 }
@@ -581,6 +1048,7 @@ function defaultDispositionForGroup(group: FindingsFinalStateGroup): string {
 function defaultStatusForGroup(group: FindingsFinalStateGroup): HardenFindingStatus {
   if (group === 'resolved_findings') return 'fixed'
   if (group === 'rejected_findings') return 'dismissed'
+  if (group === 'accepted_known_issues') return 'confirmed'
   return 'needs_decision'
 }
 
@@ -696,7 +1164,7 @@ async function createHardenSession(
   }
 }
 
-export async function runAgentTask(
+async function runAgentTask(
   ctx: OpenFlowContext,
   sessionID: string,
   agent: 'oracle' | 'deep',
@@ -870,6 +1338,25 @@ function buildPlanSummary(planContent: string, designContent: string): string {
   return sections.join('\n\n')
 }
 
+function summarizeReviewOutcome(
+  findings: HardenFinding[],
+  actionableCount: number,
+  ambiguousCount: number,
+  nonBlockingCount: number,
+): string {
+  if (findings.length === 0) {
+    return 'reviewer found no issues.'
+  }
+
+  return `${actionableCount} actionable, ${ambiguousCount} design ambiguity, ${nonBlockingCount} non-blocking finding(s) reported.`
+}
+
+function inferReviewerStopReasonCandidate(grouped: ReturnType<typeof classifyFindings>): string {
+  if (grouped.ambiguous.length > 0) return 'design_ambiguity'
+  if (grouped.actionable.length === 0 && grouped.nonBlocking.length === 0) return 'no_findings'
+  if (grouped.actionable.length === 0) return 'non_blocking_only'
+  return 'actionable_findings'
+}
 
 function buildTraceEntry(
   round: number,
@@ -906,9 +1393,6 @@ function formatHardenResult(result: FormattedHardenResult): string {
   const sessionBlock = result.sessionID
     ? `\nSession: ${escapeMarkdown(result.sessionID)}`
     : ''
-  const coordinatorSessionBlock = result.coordinatorSessionId
-    ? `\nCoordinator session: ${escapeMarkdown(result.coordinatorSessionId)}`
-    : ''
   const traceBlock = result.trace && result.trace.length > 0
     ? '\nTrace:\n' + result.trace.map((entry) => {
         const text = escapeMarkdown(entry.result.slice(0, 200) || '(empty result)')
@@ -923,7 +1407,7 @@ Status: ${result.status}
 Stop reason: ${escapeMarkdown(result.stopReason ?? 'unknown')}
 Rounds: ${result.rounds.length}
 Total tokens consumed: ${result.totalTokensConsumed ?? result.budgetConsumed}
-Summary: ${escapeMarkdown(result.summary)}${sessionBlock}${coordinatorSessionBlock}${traceBlock}${roundBlocks}${finalStateBlock}`
+Summary: ${escapeMarkdown(result.summary)}${sessionBlock}${traceBlock}${roundBlocks}${finalStateBlock}`
 }
 
 function toProjectRelativePath(projectDir: string, filePath: string): string {

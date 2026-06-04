@@ -19,13 +19,9 @@ export const BrainstormContextPacketSchema = z.object({
   version: z.number().int().positive(),
   featureHint: z.string().min(1),
   sourceSessionID: z.string().min(1),
-  createdAt: z.string().datetime().or(z.string().min(1)),
-  updatedAt: z.string().datetime().or(z.string().min(1)),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
   items: z.array(ExtractedItemSchema).optional(),
-  rawMessages: z.array(z.object({
-    role: z.enum(['user', 'assistant']),
-    content: z.string(),
-  })).optional(),
 })
 
 // --- Inferred types ---
@@ -67,11 +63,11 @@ export function isStale(packet: BrainstormContextPacket): boolean {
 }
 
 function getPacketDir(projectDir: string): string {
-  return createSafePath(projectDir, '.openflow', PACKETS_SUBDIR)
+  return createSafePath(projectDir, '.sisyphus', PACKETS_SUBDIR)
 }
 
 function getPacketPath(projectDir: string, id: string): string {
-  return createSafePath(projectDir, '.openflow', PACKETS_SUBDIR, `${id}.json`)
+  return createSafePath(projectDir, '.sisyphus', PACKETS_SUBDIR, `${id}.json`)
 }
 
 // --- Storage operations ---
@@ -81,11 +77,7 @@ export async function readPacket(projectDir: string, id: string): Promise<ReadPa
     const filePath = getPacketPath(projectDir, id)
     const raw = await fs.readFile(filePath, 'utf-8')
     const parsed: unknown = JSON.parse(raw)
-
-    // Upgrade legacy brainstorm summary format (decisions/constraints/nonGoals)
-    // to BrainstormContextPacket format
-    const upgraded = upgradeLegacyFormat(parsed)
-    const result = BrainstormContextPacketSchema.safeParse(upgraded)
+    const result = BrainstormContextPacketSchema.safeParse(parsed)
 
     if (!result.success) {
       return {
@@ -99,105 +91,6 @@ export async function readPacket(projectDir: string, id: string): Promise<ReadPa
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: message, skipped: true }
-  }
-}
-
-/**
- * Upgrade legacy brainstorm summary format to BrainstormContextPacket.
- *
- * Legacy format has: id, created, topic, decisions[], constraints[], nonGoals[], featureDocs
- * New format needs: id, version, featureHint, sourceSessionID, createdAt, updatedAt, items[]
- */
-function upgradeLegacyFormat(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object') return raw
-  const record = raw as Record<string, unknown>
-
-  // If it already has version and sourceSessionID, it's likely v2 format
-  if (typeof record.version === 'number' && typeof record.sourceSessionID === 'string') {
-    return raw
-  }
-
-  // Check for legacy markers: has 'decisions' or 'constraints' but no 'version'
-  if (!Array.isArray(record.decisions) && !Array.isArray(record.constraints)) {
-    return raw
-  }
-
-  const id = typeof record.id === 'string' ? record.id : 'unknown'
-  const created = typeof record.created === 'string' ? record.created : new Date().toISOString()
-  const topic = typeof record.topic === 'string' ? record.topic : id
-
-  const items: ExtractedItem[] = []
-
-  // Convert decisions to items
-  if (Array.isArray(record.decisions)) {
-    for (const decision of record.decisions) {
-      if (!decision || typeof decision !== 'object') continue
-      const d = decision as Record<string, unknown>
-      const topicPart = typeof d.topic === 'string' ? `${d.topic}: ` : ''
-      const decisionPart = typeof d.decision === 'string' ? d.decision : ''
-      const rationalePart = typeof d.rationale === 'string' ? ` (理由: ${d.rationale})` : ''
-      if (decisionPart) {
-        items.push({
-          type: 'decision',
-          content: `${topicPart}${decisionPart}${rationalePart}`,
-          confidence: 'high',
-          source: 'user',
-          confirmedBy: 'legacy-brainstorm',
-        })
-      }
-    }
-  }
-
-  // Convert constraints to items
-  if (Array.isArray(record.constraints)) {
-    for (const constraint of record.constraints) {
-      if (typeof constraint === 'string' && constraint.trim()) {
-        items.push({
-          type: 'constraint',
-          content: constraint.trim(),
-          confidence: 'high',
-          source: 'user',
-          confirmedBy: 'legacy-brainstorm',
-        })
-      }
-    }
-  }
-
-  // Convert nonGoals to items
-  if (Array.isArray(record.nonGoals)) {
-    for (const nonGoal of record.nonGoals) {
-      if (typeof nonGoal === 'string' && nonGoal.trim()) {
-        items.push({
-          type: 'nonGoal',
-          content: nonGoal.trim(),
-          confidence: 'high',
-          source: 'user',
-          confirmedBy: 'legacy-brainstorm',
-        })
-      }
-    }
-  }
-
-  // Convert topic to a problem item so it flows into model.problemStatement
-  // via applyConfirmedHarvestToRequirementModel's 'problem' switch case
-  if (topic && topic !== id) {
-    items.unshift({
-      type: 'problem',
-      content: topic,
-      confidence: 'high',
-      source: 'user',
-      confirmedBy: 'legacy-brainstorm',
-    })
-  }
-
-  return {
-    id,
-    version: 1,
-    featureHint: topic,
-    sourceSessionID: `legacy-${id}`,
-    createdAt: created.includes('T') ? created : `${created}T00:00:00.000Z`,
-    updatedAt: created.includes('T') ? created : `${created}T00:00:00.000Z`,
-    items,
   }
 }
 

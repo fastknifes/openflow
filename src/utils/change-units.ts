@@ -11,7 +11,14 @@ const DEFAULT_CHANGE_UNITS_INDEX_PATH = '.sisyphus/change-units.json'
 const DEFAULT_CHANGES_DIR = 'docs/changes'
 
 function getTodayDirPrefix(): string {
-  return new Date().toISOString().split('T')[0] ?? new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const shanghaiDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now)
+  return shanghaiDate
 }
 
 function buildDatedDirName(feature: string, datePrefix = getTodayDirPrefix()): string {

@@ -13,6 +13,16 @@ export interface ConvergenceDecision {
   rationale?: string | undefined
 }
 
+type DimensionState = 'answered' | 'inferred' | 'missing'
+type Materiality = 'high' | 'medium' | 'low'
+
+interface DimensionStatus {
+  id: FeatureQuestionId
+  state: DimensionState
+  materiality: Materiality
+  reason: string
+}
+
 const QUESTION_BY_ID = new Map<FeatureQuestionId, FeatureQuestion>(QUESTIONS.map((question) => [question.id, question]))
 
 export function evaluateFeatureConvergence(session: FeatureSession, latestInput?: string): ConvergenceDecision {
@@ -35,17 +45,17 @@ export function evaluateFeatureConvergence(session: FeatureSession, latestInput?
     }
   }
 
-  const problemClear = hasText(session.answers.problem) || hasText(session.sourceIntent)
-  const boundaryClear = hasText(session.answers.scope) || session.skippedQuestionIds.includes('scope')
-  const outcomeClear = hasText(session.answers.constraints)
-    || hasText(session.answers.priority)
-    || session.skippedQuestionIds.includes('constraints')
-    || (hasText(session.sourceIntent) && boundaryClear)
-  const inferredOutcomeAssumptions = hasText(session.sourceIntent) && boundaryClear && !hasText(session.answers.constraints) && !hasText(session.answers.priority)
+  const dimensions = assessDimensions(session)
+  const problemClear = isClear(dimensions.problem)
+  const boundaryClear = isClear(dimensions.scope)
+  const outcomeClear = isClear(dimensions.constraints) || isClear(dimensions.priority)
+  const inferredOutcomeAssumptions = dimensions.constraints.state === 'inferred' && !hasText(session.answers.constraints) && !hasText(session.answers.priority)
     ? ['Expected outcome is inferred from the source intent and should be revisited if implementation needs a sharper success criterion.']
     : []
+  const questionStatus = selectNextQuestion(dimensions, session)
+  const question = questionStatus ? QUESTION_BY_ID.get(questionStatus.id) : undefined
 
-  if (problemClear && boundaryClear && outcomeClear) {
+  if (problemClear && boundaryClear && outcomeClear && !question) {
     return {
       kind: 'ready_to_generate',
       knownFacts,
@@ -55,7 +65,6 @@ export function evaluateFeatureConvergence(session: FeatureSession, latestInput?
     }
   }
 
-  const question = selectNextQuestion(session, problemClear, boundaryClear, outcomeClear)
   return {
     kind: 'ask_next',
     knownFacts,
@@ -63,7 +72,7 @@ export function evaluateFeatureConvergence(session: FeatureSession, latestInput?
     pendingConfirmations: question ? [...pendingConfirmations, question.question] : pendingConfirmations,
     question,
     rationale: question
-      ? 'This is the one missing decision most likely to change the generated design.'
+      ? questionStatus?.reason ?? 'This is the one missing decision most likely to change the generated design.'
       : 'No useful follow-up question remains.',
   }
 }
@@ -89,35 +98,120 @@ function collectKnownFacts(session: FeatureSession): string[] {
   return [
     session.sourceIntent ? `Source intent: ${session.sourceIntent}` : '',
     session.answers.problem ? `Problem: ${session.answers.problem}` : '',
+    session.answers['target-users'] ? `Target users: ${session.answers['target-users']}` : '',
     session.answers.scope ? `Scope: ${session.answers.scope}` : '',
     session.answers.priority ? `Priority: ${session.answers.priority}` : '',
     session.answers.constraints ? `Constraints: ${session.answers.constraints}` : '',
   ].filter(Boolean)
 }
 
+function assessDimensions(session: FeatureSession): Record<FeatureQuestionId, DimensionStatus> {
+  const sourceIntent = session.sourceIntent?.trim() ?? ''
+  const featureText = [session.feature, session.featureTitle, sourceIntent].filter(Boolean).join(' ')
+  const featureLooksUserFacing = hasUserFacingSignals(featureText)
+  const featureLooksRisky = hasRiskSignals(featureText)
+
+  return {
+    problem: statusFor(
+      'problem',
+      session.answers.problem,
+      sourceIntent ? 'inferred' : 'missing',
+      'The problem statement decides what the generated design optimizes for.',
+      'high',
+    ),
+    'target-users': statusFor(
+      'target-users',
+      session.answers['target-users'],
+      featureLooksUserFacing ? 'missing' : 'inferred',
+      featureLooksUserFacing
+        ? 'Target users can change UX, permissions, wording, and observable behavior.'
+        : 'Target users are inferred from the current feature context and are unlikely to change the first design draft.',
+      featureLooksUserFacing ? 'medium' : 'low',
+    ),
+    scope: statusFor(
+      'scope',
+      session.answers.scope,
+      inferScopeState(session),
+      'Scope determines whether this is additive, an enhancement, a refactor, or a workflow change.',
+      'high',
+    ),
+    priority: statusFor(
+      'priority',
+      session.answers.priority,
+      featureLooksRisky ? 'missing' : 'inferred',
+      featureLooksRisky
+        ? 'Priority is needed because this feature appears to involve risk, compatibility, performance, or delivery trade-offs.'
+        : 'Priority is not the next design-shaping gap for this feature.',
+      featureLooksRisky ? 'medium' : 'low',
+    ),
+    constraints: statusFor(
+      'constraints',
+      session.answers.constraints,
+      sourceIntent && isClear(statusFor('scope', session.answers.scope, inferScopeState(session), '', 'high')) ? 'inferred' : 'missing',
+      sourceIntent
+        ? 'Constraints can be inferred for a draft from the source intent, but should remain an assumption unless confirmed.'
+        : 'A key constraint is needed to keep the design bounded and testable.',
+      'medium',
+    ),
+  }
+}
+
+function statusFor(
+  id: FeatureQuestionId,
+  answer: string | undefined,
+  fallbackState: DimensionState,
+  reason: string,
+  materiality: Materiality,
+): DimensionStatus {
+  return {
+    id,
+    state: hasText(answer) ? 'answered' : fallbackState,
+    materiality,
+    reason,
+  }
+}
+
+function inferScopeState(session: FeatureSession): DimensionState {
+  if (session.skippedQuestionIds.includes('scope')) return 'inferred'
+  const searchable = [session.feature, session.featureTitle, session.sourceIntent].filter(Boolean).join(' ')
+  return hasScopeSignals(searchable) ? 'inferred' : 'missing'
+}
+
 function selectNextQuestion(
+  dimensions: Record<FeatureQuestionId, DimensionStatus>,
   session: FeatureSession,
-  problemClear: boolean,
-  boundaryClear: boolean,
-  outcomeClear: boolean,
-): FeatureQuestion | undefined {
-  if (!problemClear && !session.skippedQuestionIds.includes('problem')) {
-    return QUESTION_BY_ID.get('problem')
-  }
+): DimensionStatus | undefined {
+  const priority: FeatureQuestionId[] = ['problem', 'scope', 'target-users', 'constraints', 'priority']
 
-  if (!boundaryClear && !session.skippedQuestionIds.includes('scope')) {
-    return QUESTION_BY_ID.get('scope')
-  }
-
-  if (!outcomeClear && !session.skippedQuestionIds.includes('constraints')) {
-    return QUESTION_BY_ID.get('constraints')
+  for (const id of priority) {
+    const status = dimensions[id]
+    if (!status || session.skippedQuestionIds.includes(id)) continue
+    if (status.state === 'answered' || status.state === 'inferred') continue
+    if (status.materiality === 'low') continue
+    return status
   }
 
   return undefined
 }
 
+function isClear(status: DimensionStatus): boolean {
+  return status.state === 'answered' || status.state === 'inferred'
+}
+
 function hasText(value?: string): boolean {
   return Boolean(value?.trim())
+}
+
+function hasScopeSignals(value: string): boolean {
+  return /(?:new[-\s]?feature|enhancement|refactor|workflow|新功能|增强|重构|流程|改造|优化)/iu.test(value)
+}
+
+function hasUserFacingSignals(value: string): boolean {
+  return /(?:用户|客户|管理员|开发者|使用者|权限|角色|界面|页面|交互|命令|customer|admin|operator|role|permission|ui|ux|frontend)/iu.test(value)
+}
+
+function hasRiskSignals(value: string): boolean {
+  return /(?:risk|compat|performance|security|migration|deadline|rollback|风险|兼容|性能|安全|迁移|期限|回滚|取舍|trade[-\s]?off)/iu.test(value)
 }
 
 function withDefaultAssumption(assumptions: string[]): string[] {

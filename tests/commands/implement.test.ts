@@ -128,7 +128,7 @@ describe.serial('handleImplement', () => {
   })
 
   describe('duplicate run prevention', () => {
-    test('returns duplicate error when active run exists', async () => {
+    test('returns resume message when active run exists', async () => {
       const testDir = uniqueTestDir('dup')
       const runsDir = join(testDir, '.sisyphus', 'openflow', 'runs', 'dup-feature')
       try {
@@ -154,7 +154,7 @@ describe.serial('handleImplement', () => {
         const ctx = createContext({ directory: testDir })
         const result = await handleImplement(ctx, 'dup-feature', undefined, createToolContext(testDir, 'test-session-dup'))
 
-        expect(result).toContain('Duplicate Blocked')
+        expect(result).toContain('Implementation Run — Resumed')
         expect(result).toContain('run_existing-001')
       } finally {
         await cleanupDir(testDir)

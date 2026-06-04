@@ -6,50 +6,102 @@ layout: doc
 
 ## 这一阶段做什么
 
-阶段一覆盖 Brainstorm 与 Feature 两个节点。头脑风暴是纯对话式探索，用来拆解想法、发现边界和澄清目标；它不生成正式文档，也不要求你一开始就提供完整需求。
+这一阶段的目标是：**在写代码之前，先把要做什么想清楚、说清楚、写下来。**
 
-当想法足够清晰后，Feature 会成为第一个产生正式文档的阶段，输出 `design.md` 与 `behavior.md`。这一阶段的核心目的，是把模糊意图收敛为可验证的设计契约，让后续计划和实现有明确依据。
+OpenFlow 提供两个工具来完成这件事：头脑风暴（Brainstorm）和正式需求（Feature）。前者可选，后者必须。
+
+### 头脑风暴：目标还不清楚时用
+
+头脑风暴是纯对话，不生成任何正式文档。它适合你只有一个模糊方向、但还没想清楚具体要做什么的场景。
+
+> 打个比方：你想去旅游，但还没想好去哪、去几天、预算多少。这时候需要的是探索和比较，而不是立刻订机票。
+>
+> 在项目里，类似的情况是："我觉得用户反馈系统不太好，但不确定是改流程、改界面、还是加个新功能。"——这时候用头脑风暴。
+
+当你对 AI 说"先 brainstorm"，它会通过对话帮你拆解想法、比较方案、缩小范围。
+
+### 正式需求：目标确定了，但怎么做还没定
+
+当方向已经明确——"我要做 X"——就该进入正式需求阶段了。这个阶段会产出两份正式文档：设计文档（`design.md`）和行为文档（`behavior.md`），作为后续所有工作的依据。
+
+> 继续刚才的比方：现在你决定了去日本东京，但要考虑怎么去、带什么、住哪里、行程怎么安排。目标已经确定，但方案还需要设计。
+>
+> 在项目里，类似的情况是："我要给应用加一个用户资料页。"——做什么已经清楚，但涉及哪些模块、有哪些约束、怎么验证做对了，这些需要正式设计。
 
 ## 操作步骤
 
 ```mermaid
 flowchart TD
-  A[自然语言提出 brainstorm] --> B[对话式探索]
-  B --> C{想法是否足够清晰}
+  A[想法还不清楚？] --> B[头脑风暴：对话式探索]
+  B --> C{方向是否明确}
   C -- 否 --> B
   C -- 是 --> D[/openflow-feature 描述]
-  D --> E[AI 每次只问一个问题收集事实]
-  E --> F[扫描 docs/current/ 与 docs/decisions/]
-  F --> G[生成 design.md]
-  F --> H[生成 behavior.md]
-  G --> I[用户检查设计契约]
-  H --> I
+  A -->|已经明确| D
+  D --> E[AI 逐步提问收集事实]
+  E --> F[扫描已有约束]
+  F --> G[生成 design.md 与 behavior.md]
+  G --> H[检查文档，确认无误]
 
-  class A,B,D,E,F,G,H,I main
-  class C optional
+  class A,C question
+  class B optional
+  class D,E,F,G,H main
 
-  classDef main fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
+  classDef question fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
   classDef optional fill:#f5f5f5,stroke:#9e9e9e,stroke-width:2px,color:#9e9e9e,stroke-dasharray: 5 5
-  classDef success fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#2e7d32
+  classDef main fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
 ```
 
-1. **头脑风暴**：直接用自然语言告诉 AI 你要 brainstorm，或调用 `openflow-brainstorm`。
-2. **过渡到 Feature**：当方向确定后运行 `/openflow-feature <描述>`。
-3. **收集事实**：AI 会逐步提问，并保持每次只问一个问题。
-4. **扫描现有约束**：AI 会检查 `docs/current/` 与 `docs/decisions/` 中的当前事实和全局决策。
-5. **生成文档**：确认后生成 `design.md` 与 `behavior.md`。
+### 第 1 步：起步
 
-## ⚠️ 必须检查的文档
+- **方向不明确**：运行 `/openflow-brainstorm` 并描述你的模糊想法，比如：
 
-- **`behavior.md`**：逐条确认 Given/When/Then 行为描述是否符合你的预期。
-- **`design.md`**：重点查看 Goals、Non-Goals、Design Constraints 是否准确表达目标、排除项和约束。
-- 如果 `behavior.md` 中出现函数名、变量名、类名、文件路径等实现细节，要求 AI 重写；行为文档只应描述用户可观察的结果。
-- 复杂需求建议让 AI review `design.md` 与 `behavior.md` 的约束充分性，确认没有遗漏关键边界。
+  ```text
+  /openflow-brainstorm 我觉得用户反馈系统不太好，但不确定是改流程、改界面、还是加个新功能。
+  ```
 
-## 常见场景
+  AI 会通过对话帮你梳理。
+- **方向已明确**：跳过头脑风暴，直接进入下一步。
 
-- **想法太大**：AI 会帮助拆分范围，把一次变更控制在可验证的边界内。
-- **需求不明确**：通过多轮对话继续澄清，不必急着进入正式 Feature。
-- **已有约束**：AI 会自动扫描 `docs/current/` 和 `docs/decisions/`，把当前事实与全局决策纳入设计。
+### 第 2 步：进入正式需求
 
-下一步：[阶段二：开发计划与实现](./tutorial-phase2)。
+```text
+/openflow-feature 添加用户资料页
+```
+
+运行后，AI 会：
+
+1. **逐步提问**：一次只问一个问题，帮你把目标、约束、非目标说清楚。
+2. **扫描已有约束**：自动读取 `docs/current/` 和 `docs/decisions/`，把项目的现有事实和架构决策纳入设计。
+3. **生成文档**：确认信息足够后，生成 `design.md` 和 `behavior.md`，通常保存在 `docs/changes/{日期}-{需求名}/`。
+
+### 第 3 步：检查文档
+
+::: danger 重要的事说三遍：检查文档！检查文档！检查文档！
+AI 生成的文档必须由你确认。这两份文档是后续所有工作的依据——开发计划照着它拆任务，质量门照着它验证，集成测试照着它写用例。
+:::
+
+**`design.md`**：重点看目标（Goals）、非目标（Non-Goals）和约束条件（Constraints）是否准确。
+
+**`behavior.md`**：这份文档是**专门写给人类看的**，也是后续集成测试的依据。逐条检查 Given/When/Then 行为描述是否符合你的预期。如果出现函数名、变量名、文件路径等实现细节，要求 AI 重写——行为文档只描述用户能看到的结果。
+
+如果需求比较复杂，可以让 AI 审查两份文档的约束是否充分，有没有遗漏关键边界。
+
+## 常见情况
+
+| 情况 | 怎么处理 |
+|---|---|
+| 想法太大，一次做不完 | AI 会帮你拆分范围，把一次变更控制在可验证的边界内 |
+| 头脑风暴后发现方向变了 | 正常现象，继续探索即可，头脑风暴不产生正式文档 |
+| 不确定要不要进正式需求 | 继续对话澄清，不用急着运行 `/openflow-feature` |
+| 项目已有文档和约束 | AI 会自动扫描并纳入设计，你不需要手动整理 |
+
+## 阶段产出
+
+完成这一阶段后，你的项目会多出：
+
+- `docs/changes/{日期}-{需求名}/design.md` — 设计文档
+- `docs/changes/{日期}-{需求名}/behavior.md` — 行为文档
+
+这两份文档是后续所有工作的依据：开发计划照着它拆任务，质量门照着它验证，归档照着它追溯。
+
+下一步：[阶段二：开发计划与实现 →](./tutorial-phase2)

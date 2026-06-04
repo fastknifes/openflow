@@ -39,18 +39,15 @@ const INTENT_KEYWORDS = {
 }
 
 const REQUEST_TYPES = new Set<RequestType>(['trivial', 'explicit', 'exploratory', 'open-ended', 'fix'])
-const DESIGN_DOC_PATTERNS = [
-  /^\d{8}-proposal\.md$/i,
-  /^\d{8}-design\.md$/i,
-  /^\d{8}-decisions\.md$/i,
-  /^proposal\.md$/i,
-  /^design\.md$/i,
-  /^decisions\.md$/i,
-]
+const DESIGN_MARKDOWN_PATTERNS = [/^\d{8}-design\.md$/i, /^design\.md$/i]
+const BEHAVIOR_MARKDOWN_PATTERNS = [/^\d{8}-behavior\.md$/i, /^behavior\.md$/i]
 const DEFAULT_STRONG_CLOSURE_SIGNALS = ['按这个做', '按这个方案推进', '生成正式文档', '就按这个方向', 'go with this', 'proceed with this', 'generate formal docs']
 const DEFAULT_WEAK_CLOSURE_SIGNALS = ['可以', '好', '确认', '没问题', 'done', 'looks good', 'approved']
 const ACTIVE_FEATURE_TTL_MS = 1000 * 60 * 60 * 6
 const RECENT_COMPLETION_TTL_MS = 1000 * 60 * 5
+const LOW_SIGNAL_CONTINUATION_PATTERNS = [
+  /^(?:继续|继续吧|继续生成|继续说|继续下去|好|好的|好吧|可以|确认|收到|ok|okay|yes|continue|go on|next|proceed)\s*[.!。！？?]*$/iu,
+]
 
 export interface ClosureDecision {
   isClosureReady: boolean
@@ -72,6 +69,34 @@ export interface TriggerDecision {
   shouldTrigger: boolean
   source: FeatureTriggerSource
   reason?: string | undefined
+}
+
+export interface FeatureSuggestionEligibility {
+  eligible: boolean
+  reason: string
+}
+
+export type OpenFlowNoticeKind =
+  | 'feature-suggestion'
+  | 'feature-closure-ready'
+  | 'completion-blocked'
+  | 'verification-suggested'
+  | 'command-result'
+  | 'feature-continuation'
+
+export interface OpenFlowNotice {
+  kind: OpenFlowNoticeKind
+  text: string
+  idempotencyKey?: string | undefined
+  placement?: 'prepend' | 'append' | undefined
+  ephemeral?: boolean | undefined
+}
+
+export interface OpenFlowNoticeMetadata {
+  openflow: true
+  kind: OpenFlowNoticeKind
+  idempotencyKey?: string | undefined
+  ephemeral: boolean
 }
 
 export function detectClosureReady(ctx: OpenFlowContext, message: string): ClosureDecision {
@@ -184,6 +209,9 @@ export function decideTrigger(
   message: string
 ): TriggerDecision {
   const metadata = extractIntentMetadata(input, output)
+  const hintedFeature = extractFeatureFromExplicitHint(metadata.featureHint)
+  const requirementFeature = extractFeatureFromRequirementText(message)
+  const candidateFeature = hintedFeature ?? requirementFeature
 
   if (ctx.config.feature.trigger_mode === 'never') {
     return { shouldTrigger: false, source: 'config', reason: 'feature trigger mode is never' }
@@ -191,17 +219,17 @@ export function decideTrigger(
 
   if (ctx.config.feature.trigger_mode === 'always') {
     return {
-      feature: extractFeature(metadata.featureHint) ?? extractFeature(message),
+      feature: candidateFeature,
       requestType: metadata.requestType,
-      shouldTrigger: true,
-      source: metadata.featureHint ? 'intent' : 'config',
-      reason: metadata.reason ?? 'feature trigger mode is always',
+      shouldTrigger: Boolean(candidateFeature),
+      source: hintedFeature ? 'intent' : 'config',
+      reason: metadata.reason ?? (candidateFeature ? 'feature trigger mode is always' : 'feature trigger mode is always but no feature candidate was derived'),
     }
   }
 
   if (metadata.shouldFeature === false) {
     return {
-      feature: extractFeature(metadata.featureHint),
+      feature: hintedFeature,
       requestType: metadata.requestType,
       shouldTrigger: false,
       source: 'intent',
@@ -211,15 +239,15 @@ export function decideTrigger(
 
   if (metadata.shouldFeature === true || metadata.requestType === 'open-ended') {
     return {
-      feature: extractFeature(metadata.featureHint) ?? extractFeature(message),
+      feature: candidateFeature,
       requestType: metadata.requestType ?? 'open-ended',
-      shouldTrigger: true,
+      shouldTrigger: Boolean(candidateFeature),
       source: 'intent',
-      reason: metadata.reason ?? 'intent gate marked request as open-ended',
+      reason: metadata.reason ?? (candidateFeature ? 'intent gate marked request as open-ended' : 'intent gate marked request as open-ended but no feature candidate was derived'),
     }
   }
 
-  const fallbackFeature = extractFeature(metadata.featureHint ?? message)
+  const fallbackFeature = hintedFeature ?? requirementFeature
   return {
     feature: fallbackFeature,
     shouldTrigger: Boolean(fallbackFeature),
@@ -229,25 +257,98 @@ export function decideTrigger(
   }
 }
 
-export function appendGuardMessage(output: Record<string, unknown>, text: string): void {
+export function assessFeatureSuggestionEligibility(message: string): FeatureSuggestionEligibility {
+  const trimmed = message.trim()
+
+  if (!trimmed) {
+    return { eligible: false, reason: 'message is empty' }
+  }
+
+  if (looksLikeDocPath(trimmed)) {
+    return { eligible: false, reason: 'message looks like a documentation path' }
+  }
+
+  if (/^##\s+OpenFlow:/iu.test(trimmed) || /<(?:system-reminder|auto-slash-command|command-message|omo_internal_initiator)\b/i.test(trimmed)) {
+    return { eligible: false, reason: 'message is an internal OpenFlow/runtime marker' }
+  }
+
+  if (/^OpenFlow command:\s*\/openflow-/iu.test(trimmed)) {
+    return { eligible: false, reason: 'message is an OpenFlow command echo' }
+  }
+
+  if (LOW_SIGNAL_CONTINUATION_PATTERNS.some(pattern => pattern.test(trimmed))) {
+    return { eligible: false, reason: 'message is a low-signal continuation reply' }
+  }
+
+  return { eligible: true, reason: 'message is eligible for feature suggestion evaluation' }
+}
+
+export function appendOpenFlowNotice(output: Record<string, unknown>, notice: OpenFlowNotice): boolean {
   const message = output.message as Record<string, unknown> | undefined
   const messageID = typeof message?.id === 'string' ? message.id : `msg_openflow-${randomUUID().replace(/-/g, '')}`
   const sessionID = typeof message?.sessionID === 'string' ? message.sessionID : 'openflow-session'
+  const idempotencyKey = notice.idempotencyKey ?? `${notice.kind}:${messageID}`
 
   if (!Array.isArray(output.parts)) {
     output.parts = []
   }
 
+  removeOpenFlowNotices(output, metadata => metadata.kind === notice.kind && metadata.idempotencyKey === idempotencyKey)
+
   const parts = output.parts as Part[]
-  parts.unshift({
+  const nextPart: Part = {
     id: `prt_openflow-${randomUUID().replace(/-/g, '')}`,
     sessionID,
     messageID,
     type: 'text',
-    text,
+    text: notice.text,
     synthetic: true,
-    metadata: { openflow: true },
+    metadata: {
+      openflow: true,
+      kind: notice.kind,
+      idempotencyKey,
+      ephemeral: notice.ephemeral ?? false,
+    },
+  }
+
+  if (notice.placement === 'append') {
+    parts.push(nextPart)
+  } else {
+    parts.unshift(nextPart)
+  }
+
+  return true
+}
+
+export function appendGuardMessage(output: Record<string, unknown>, text: string): void {
+  appendOpenFlowNotice(output, {
+    kind: 'command-result',
+    text,
+    ephemeral: false,
+    placement: 'prepend',
   })
+}
+
+export function removeOpenFlowNotices(
+  output: Record<string, unknown>,
+  predicate: (metadata: OpenFlowNoticeMetadata) => boolean,
+): number {
+  if (!Array.isArray(output.parts)) {
+    return 0
+  }
+
+  const parts = output.parts as Part[]
+  const keptParts = parts.filter((part) => {
+    const metadata = getOpenFlowNoticeMetadata(part)
+    return !metadata || !predicate(metadata)
+  })
+
+  const removed = parts.length - keptParts.length
+  if (removed > 0) {
+    output.parts = keptParts
+  }
+
+  return removed
 }
 
 export async function hasDesignDoc(ctx: OpenFlowContext, featureName: string): Promise<boolean> {
@@ -258,13 +359,18 @@ export async function hasDesignDoc(ctx: OpenFlowContext, featureName: string): P
 
     try {
       const stats = await fs.stat(candidatePath)
-      if (stats.isFile() && DESIGN_DOC_PATTERNS.some(pattern => pattern.test(path.basename(candidatePath)))) {
-        return true
+      if (stats.isFile() && DESIGN_MARKDOWN_PATTERNS.some(pattern => pattern.test(path.basename(candidatePath)))) {
+        const siblingEntries = await fs.readdir(path.dirname(candidatePath), { withFileTypes: true })
+        if (siblingEntries.some(entry => entry.isFile() && BEHAVIOR_MARKDOWN_PATTERNS.some(pattern => pattern.test(entry.name)))) {
+          return true
+        }
       }
       if (!stats.isDirectory()) continue
 
       const entries = await fs.readdir(candidatePath, { withFileTypes: true })
-      if (entries.some(entry => entry.isFile() && DESIGN_DOC_PATTERNS.some(pattern => pattern.test(entry.name)))) {
+      const hasDesign = entries.some(entry => entry.isFile() && DESIGN_MARKDOWN_PATTERNS.some(pattern => pattern.test(entry.name)))
+      const hasBehavior = entries.some(entry => entry.isFile() && BEHAVIOR_MARKDOWN_PATTERNS.some(pattern => pattern.test(entry.name)))
+      if (hasDesign && hasBehavior) {
         return true
       }
     } catch (error) {
@@ -355,11 +461,7 @@ async function loadAndCleanActiveFeatureIndex(projectDir: string): Promise<Activ
       }
 
       try {
-        const featureSession = JSON.parse(await fs.readFile(sessionFilePath, 'utf-8')) as Partial<PersistedFeatureSession>
-        if (featureSession.workflowState === 'completed') {
-          changed = true
-          continue
-        }
+        JSON.parse(await fs.readFile(sessionFilePath, 'utf-8')) as Partial<PersistedFeatureSession>
       } catch {
         changed = true
         continue
@@ -443,25 +545,21 @@ function normalizeRequestType(value: unknown): RequestType | undefined {
   return undefined
 }
 
-function extractFeature(value?: string): string | undefined {
+function extractFeatureFromRequirementText(value: string): string | undefined {
   if (!value) return undefined
   if (looksLikeDocPath(value)) return undefined
 
-  // 首先尝试模式匹配
   for (const pattern of REQUIREMENT_PATTERNS) {
     const match = value.match(pattern)
     if (match?.[1]) return sanitizeFeatureCandidate(resolveCommonFeatureAlias(match[1]) ?? match[1])
   }
 
-  // 启发式规则：如果包含特征关键词，尝试提取
   const hasFeatureKeyword = INTENT_KEYWORDS.feature.some(kw => value.includes(kw))
   const hasActionKeyword = INTENT_KEYWORDS.action.some(kw => value.includes(kw))
   const hasRequirementKeyword = INTENT_KEYWORDS.requirement.some(kw => value.includes(kw))
 
   if (hasFeatureKeyword || (hasActionKeyword && hasRequirementKeyword)) {
-    // 尝试从句子中提取第一个有意义的词组作为 feature 名称
     const words = value.split(/[\s,，。！？、]+/).filter(w => w.length > 0)
-    // 找到动作词后的第一个词
     for (let i = 0; i < words.length - 1; i++) {
       const currentWord = words[i]
       if (currentWord && INTENT_KEYWORDS.action.some(kw => currentWord.includes(kw))) {
@@ -471,12 +569,21 @@ function extractFeature(value?: string): string | undefined {
         }
       }
     }
-    // 如果没有找到，使用整个句子生成一个 feature 名称
     return sanitizeFeatureCandidate(value.substring(0, 30))
   }
 
-  // No requirement pattern or intent keywords matched — don't manufacture a feature slug
-  // But if the value looks like a clean feature name (no spaces, short), return it as-is
+  return undefined
+}
+
+function extractFeatureFromExplicitHint(value?: string): string | undefined {
+  if (!value) return undefined
+  if (looksLikeDocPath(value)) return undefined
+
+  const derivedFromRequirementText = extractFeatureFromRequirementText(value)
+  if (derivedFromRequirementText) {
+    return derivedFromRequirementText
+  }
+
   if (value.length <= 64 && !/\s/.test(value)) {
     return sanitizeFeatureCandidate(value)
   }
@@ -511,5 +618,26 @@ function sanitizeFeatureCandidate(value: string): string | undefined {
     } catch {
       return undefined
     }
+  }
+}
+
+function getOpenFlowNoticeMetadata(part: unknown): OpenFlowNoticeMetadata | undefined {
+  if (!part || typeof part !== 'object') return undefined
+
+  const rawPart = part as Record<string, unknown>
+  if (rawPart.synthetic !== true) return undefined
+
+  const metadata = rawPart.metadata
+  if (!metadata || typeof metadata !== 'object') return undefined
+
+  const rawMetadata = metadata as Record<string, unknown>
+  if (rawMetadata.openflow !== true) return undefined
+  if (typeof rawMetadata.kind !== 'string') return undefined
+
+  return {
+    openflow: true,
+    kind: rawMetadata.kind as OpenFlowNoticeKind,
+    idempotencyKey: typeof rawMetadata.idempotencyKey === 'string' ? rawMetadata.idempotencyKey : undefined,
+    ephemeral: rawMetadata.ephemeral === true,
   }
 }

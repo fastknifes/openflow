@@ -69,11 +69,8 @@ export interface AcceptanceConfig {
   drift_detection: boolean
 }
 
-export type WritingPlanMode = 'pyramid' | 'pattern' | 'mixed' | false
-
 export interface WritingPlanConfig {
   enabled: boolean
-  mode?: WritingPlanMode
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -435,7 +432,7 @@ export interface OpenFlowContext {
   enhancedPlans: Set<string>
 }
 
-export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed' | 'complete' | 'draft_blocked'
+export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'failed' | 'draft_blocked' | 'complete'
 
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
 
@@ -693,6 +690,7 @@ export type ImplementationRunStatus =
   | 'archiving'
   | 'archived'
   | 'blocked'
+  | 'failed'
   | 'cancelled'
 
 /** Backend type for implementation execution */
@@ -721,8 +719,6 @@ export interface ImplementationRun {
   branch?: string
   /** Base ref (git HEAD) when the worktree was created */
   baseRef?: string
-  /** Base branch name for merge operations */
-  baseBranch?: string
   /** Backend executing the run */
   backend: ImplementationBackend
   /** Command used to invoke the backend */
@@ -796,9 +792,8 @@ export interface AcceptanceState {
   postHocIssue?: boolean
   /** Implementation state for stateful quality guardrails */
   implementationState?: ImplementationStateMetadata
-  /** Confirmation status for archive run gating */
-  archiveRunConfirmationStatus?: 'confirmed' | 'declined'
-  /** Timestamp when archive run was confirmed */
+  /** Tracks whether the user has explicitly confirmed archive for a ready_for_archive implementation run */
+  archiveRunConfirmationStatus?: 'confirmed' | 'awaiting'
   archiveRunConfirmedAt?: string
 }
 

@@ -24,7 +24,6 @@ export function handleConfig(ctx: OpenFlowContext): string {
       "guardian_state": "${escapeMarkdown(config.paths.guardian_state)}"
     },
     "feature": {
-      "enabled": ${config.feature.enabled},
       "auto_trigger": ${config.feature.auto_trigger},
       "trigger_mode": "${escapeMarkdown(config.feature.trigger_mode)}"
     },

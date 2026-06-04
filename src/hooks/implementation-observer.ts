@@ -13,7 +13,7 @@ type ObserverHook = (input: HookInput, output: HookOutput) => Promise<void>
 type ObserverEventHook = (input: HookInput) => Promise<void>
 
 interface ImplementationEvent {
-  type: 'backend_started' | 'backend_failed' | 'backend_completed' | 'quality_gate_started' | 'quality_gate_completed'
+  type: 'backend_started' | 'backend_failed' | 'backend_completed' | 'quality_gate_started' | 'quality_gate_completed' | 'implementation_context_mismatch'
   runID: string
   sessionID: string
   timestamp: string
@@ -22,6 +22,8 @@ interface ImplementationEvent {
   command?: string
   result?: string
   error?: string
+  reason?: string
+  originalEventType?: string
 }
 
 export function createImplementationObserver(ctx: OpenFlowContext): {
@@ -57,6 +59,25 @@ export function createImplementationObserver(ctx: OpenFlowContext): {
     state.activeRuns.set(updated.sessionID, updated)
   }
 
+  async function recordMismatchEvent(
+    sessionID: string,
+    reason: string,
+    originalEventType: string,
+  ): Promise<void> {
+    const timestamp = new Date().toISOString()
+    const mismatchPath = resolveRunPath(ctx, path.join('.sisyphus', 'openflow', 'events', 'mismatch.jsonl'))
+    await fs.mkdir(path.dirname(mismatchPath), { recursive: true })
+    const entry: ImplementationEvent = {
+      type: 'implementation_context_mismatch',
+      runID: '',
+      sessionID,
+      reason,
+      originalEventType,
+      timestamp,
+    }
+    await fs.appendFile(mismatchPath, `${JSON.stringify(entry)}\n`, 'utf8')
+  }
+
   function getActiveRun(sessionID: string): ImplementationRun | undefined {
     return state.activeRuns.get(sessionID)
   }
@@ -66,10 +87,18 @@ export function createImplementationObserver(ctx: OpenFlowContext): {
     if (!sessionID) return
 
     const run = getActiveRun(sessionID)
-    if (!run) return
-
     const message = extractMessageText(output)
     if (!message) return
+
+    // Mismatch detection: backend/quality-gate events without active run
+    if (!run) {
+      if (message.includes('/start-work')) {
+        await recordMismatchEvent(sessionID, 'no_active_run', 'backend_started')
+      } else if (/quality[-\s]?gate|readiness/iu.test(message)) {
+        await recordMismatchEvent(sessionID, 'no_active_run', 'quality_gate_started')
+      }
+      return
+    }
 
     if (message.includes('/start-work')) {
       await recordEvent(run, { type: 'backend_started' }, 'starting_backend')
@@ -87,17 +116,41 @@ export function createImplementationObserver(ctx: OpenFlowContext): {
   }
 
   async function toolBeforeHook(input: HookInput, _output: HookOutput): Promise<void> {
+    const sessionID = readString(input.sessionID)
     const run = getRunForInput(input)
     const tool = readString(input.tool)
-    if (!run || !matchesBackendTool(run, tool)) return
+
+    if (!sessionID || !tool) return
+
+    if (!run) {
+      // Mismatch detection: backend tool call without active run
+      if (tool === 'task' || tool === 'start-work') {
+        await recordMismatchEvent(sessionID, 'no_active_run', 'backend_started')
+      }
+      return
+    }
+
+    if (!matchesBackendTool(run, tool)) return
 
     await recordEvent(run, withToolCall('backend_started', tool, readString(input.callID)), 'starting_backend')
   }
 
   async function toolAfterHook(input: HookInput, output: HookOutput): Promise<void> {
+    const sessionID = readString(input.sessionID)
     const run = getRunForInput(input)
     const tool = readString(input.tool)
-    if (!run || !matchesBackendTool(run, tool)) return
+
+    if (!sessionID || !tool) return
+
+    if (!run) {
+      // Mismatch detection: backend tool completion without active run
+      if (tool === 'task' || tool === 'start-work') {
+        await recordMismatchEvent(sessionID, 'no_active_run', extractError(output) ? 'backend_failed' : 'backend_completed')
+      }
+      return
+    }
+
+    if (!matchesBackendTool(run, tool)) return
 
     const error = extractError(output)
     if (error) {
@@ -109,9 +162,21 @@ export function createImplementationObserver(ctx: OpenFlowContext): {
   }
 
   async function commandBeforeHook(input: HookInput, _output: HookOutput): Promise<void> {
+    const sessionID = readString(input.sessionID)
     const run = getRunForInput(input)
     const command = readString(input.command)
-    if (!run || !isQualityGateCommand(command)) return
+
+    if (!command || !sessionID) return
+
+    if (!run) {
+      // Mismatch detection: quality gate command without active run
+      if (isQualityGateCommand(command)) {
+        await recordMismatchEvent(sessionID, 'no_active_run', 'quality_gate_started')
+      }
+      return
+    }
+
+    if (!isQualityGateCommand(command)) return
 
     await recordEvent(run, { type: 'quality_gate_started', command }, 'quality_gate_running')
   }
@@ -128,9 +193,19 @@ export function createImplementationObserver(ctx: OpenFlowContext): {
   async function eventHook(input: HookInput): Promise<void> {
     const sessionID = readString(input.sessionID)
     const run = sessionID ? getActiveRun(sessionID) : undefined
-    if (!run) return
 
     const type = readString(input.type) ?? readString(input.event)
+
+    if (!run) {
+      // Mismatch detection: backend events without active run
+      if (sessionID && (type === 'implementation.backend.failed' || type === 'backend_failed')) {
+        await recordMismatchEvent(sessionID, 'no_active_run', 'backend_failed')
+      } else if (sessionID && (type === 'implementation.backend.completed' || type === 'backend_completed')) {
+        await recordMismatchEvent(sessionID, 'no_active_run', 'backend_completed')
+      }
+      return
+    }
+
     if (type === 'implementation.backend.failed' || type === 'backend_failed') {
       const error = extractError(input)
       await recordEvent(run, error ? { type: 'backend_failed', error } : { type: 'backend_failed' }, 'blocked')

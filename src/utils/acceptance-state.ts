@@ -68,6 +68,8 @@ const FIELD_PREFIXES = {
   evidenceFreshnessRecordedAt: 'evidenceFreshnessRecordedAt:',
   evidenceFreshnessEvidenceChecks: 'evidenceFreshnessEvidenceChecks:',
   evidenceFreshnessEvidenceSummary: 'evidenceFreshnessEvidenceSummary:',
+  archiveRunConfirmationStatus: 'archiveRunConfirmationStatus:',
+  archiveRunConfirmedAt: 'archiveRunConfirmedAt:',
 } as const
 
 const PROMOTION_SUGGESTIONS_HEADER = '## Current Promotion Suggestions'
@@ -246,6 +248,15 @@ function parseStateFile(content: string): AcceptanceState | null {
       inPendingUpdates = false
     } else if (trimmed.startsWith(FIELD_PREFIXES.evidenceFreshnessEvidenceSummary)) {
       freshnessMeta.evidenceSummary = extractFieldValue(trimmed, FIELD_PREFIXES.evidenceFreshnessEvidenceSummary)
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.archiveRunConfirmationStatus)) {
+      const value = extractFieldValue(trimmed, FIELD_PREFIXES.archiveRunConfirmationStatus)
+      if (value === 'confirmed' || value === 'awaiting') {
+        result.archiveRunConfirmationStatus = value
+      }
+      inPendingUpdates = false
+    } else if (trimmed.startsWith(FIELD_PREFIXES.archiveRunConfirmedAt)) {
+      result.archiveRunConfirmedAt = extractFieldValue(trimmed, FIELD_PREFIXES.archiveRunConfirmedAt)
       inPendingUpdates = false
     } else if (trimmed === PENDING_UPDATES_HEADER) {
       inPendingUpdates = true
@@ -455,6 +466,12 @@ function parseStateFile(content: string): AcceptanceState | null {
   if (result.postHocIssue !== undefined) {
     state.postHocIssue = result.postHocIssue
   }
+  if (result.archiveRunConfirmationStatus) {
+    state.archiveRunConfirmationStatus = result.archiveRunConfirmationStatus
+  }
+  if (result.archiveRunConfirmedAt) {
+    state.archiveRunConfirmedAt = result.archiveRunConfirmedAt
+  }
   
   return state
 }
@@ -539,6 +556,8 @@ function serializeState(state: AcceptanceState): string {
   if (state.postHocIssue !== undefined) {
     lines.push(`${FIELD_PREFIXES.postHocIssue} ${state.postHocIssue}`)
   }
+  pushOptionalLine(lines, FIELD_PREFIXES.archiveRunConfirmationStatus, state.archiveRunConfirmationStatus)
+  pushOptionalLine(lines, FIELD_PREFIXES.archiveRunConfirmedAt, state.archiveRunConfirmedAt)
   pushOptionalLine(lines, FIELD_PREFIXES.mode, state.mode)
   pushOptionalLine(lines, FIELD_PREFIXES.issueSlug, state.issueSlug)
   pushOptionalLine(lines, FIELD_PREFIXES.rawIssue, state.rawIssue)
@@ -990,4 +1009,73 @@ export async function mergeLimitedContextState(
   } else {
     await createLimitedContextState(projectDir, filePath, sessionID)
   }
+}
+
+// ──────────────────────────────────────────────
+// Archive Run Confirmation Helpers
+// ──────────────────────────────────────────────
+
+/**
+ * Returns a human-readable label for the archive readiness state.
+ * Used by archive command to distinguish the "Awaiting Archive Confirmation"
+ * state from other workflow states.
+ */
+export function getArchiveRunStatusLabel(
+  runStatus: string | undefined,
+  acceptanceState: AcceptanceState | null,
+): string {
+  if (runStatus === 'ready_for_archive') {
+    const confirmed = acceptanceState?.archiveRunConfirmationStatus === 'confirmed'
+      && Boolean(acceptanceState?.archiveRunConfirmedAt)
+    return confirmed ? 'Ready for Archive (Confirmed)' : 'Awaiting Archive Confirmation'
+  }
+  if (runStatus === 'archived') {
+    return 'Archived'
+  }
+  if (runStatus === 'running') {
+    return 'Implementation Running'
+  }
+  return runStatus ?? 'No Run'
+}
+
+/**
+ * Checks whether the archive run confirmation has been explicitly granted.
+ */
+export function isArchiveRunConfirmed(state: AcceptanceState | null): boolean {
+  return state?.archiveRunConfirmationStatus === 'confirmed'
+    && Boolean(state.archiveRunConfirmedAt)
+}
+
+/**
+ * Marks the acceptance state as awaiting explicit archive confirmation.
+ */
+export async function setArchiveRunAwaitingConfirmation(
+  projectDir: string,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot set archive run awaiting: no active acceptance state')
+    return
+  }
+  state.archiveRunConfirmationStatus = 'awaiting'
+  delete state.archiveRunConfirmedAt
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Set archive run awaiting confirmation', { feature: state.feature })
+}
+
+/**
+ * Marks the acceptance state as confirmed for archive run.
+ */
+export async function confirmArchiveRun(
+  projectDir: string,
+): Promise<void> {
+  const state = await loadAcceptanceState(projectDir)
+  if (!state) {
+    logger.warn('Cannot confirm archive run: no active acceptance state')
+    return
+  }
+  state.archiveRunConfirmationStatus = 'confirmed'
+  state.archiveRunConfirmedAt = formatTimestamp()
+  await saveAcceptanceState(projectDir, state)
+  logger.info('Confirmed archive run', { feature: state.feature })
 }

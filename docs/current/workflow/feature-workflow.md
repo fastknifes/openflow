@@ -23,52 +23,29 @@ Feature 工作节点负责把一个“想做什么功能”的自然语言想法
 
 ```mermaid
 flowchart TD
-    A[/用户开始功能设计/] --> B[Phase 1: 初始化会话]
-    B --> B1[解析功能身份]
-    B1 --> B2{意图是否清楚?}
-    B2 -->|还不清楚| D[请用户补充功能想法或目标并结束本轮]
-    B2 -->|与当前会话不是同一个功能| E[提示在新会话中开始另一个功能并结束本轮]
-    B2 -->|已清楚| B3[加载/合并会话 + 绑定]
-    B3 --> C[Phase 2: 早期返回检查]
-    C --> C1{是否已有可复用的设计结果?}
-    C1 -->|有且本轮无新回答| H[展示已有设计结果并结束本轮]
-    C1 -->|没有| C2{是否有待处理的 harvest?}
-    C2 -->|有| R1[处理 harvest 选择并结束本轮]
-    C2 -->|没有| C3{是否需要恢复?}
-    C3 -->|需要| M[提示如何继续、恢复或重新开始并结束本轮]
-    C3 -->|不需要| F[Phase 3: Action 分发]
-    F --> F1{action?}
-    F1 -->|status / collect| I[handleCollectFlow]
-    F1 -->|generate| P[handleGenerateFlow]
-
-    I --> I1{是否补充了新信息?}
-    I1 -->|有| J[记录并保存 facts]
-    I1 -->|没有| K[评估 Design Readiness]
-    J --> K
-    K --> K1{信息是否足够?}
-    K1 -->|不够| O[追问下一个关键问题并结束本轮]
-    O -.下一轮.-> A
-    K1 -->|已足够| O2[提示可以调用 generate 并结束本轮]
-
-    P --> P1[评估 Readiness]
-    P1 --> P2{confidence?}
-    P2 -->|low| P3[阻止生成 + 追问问题并结束本轮]
-    P2 -->|medium + 未回答问题| P4[阻止生成 + 追问问题并结束本轮]
-    P2 -->|medium + 已跳过| P5[警告 + 继续生成]
-    P2 -->|high| P6[继续生成]
-    P5 --> Q
-    P6 --> Q
-    Q --> Q1{是否发现 harvest 候选?}
-    Q1 -->|有且需要确认| R[请用户选择采用、修改或忽略并结束本轮]
-    Q1 -->|没有或已确认| S[整理已记录的回答、约束、假设和参考内容]
+    A[/用户开始功能设计/] --> B[理解用户想设计的功能]
+    B --> C{本次功能意图是否清楚?}
+    C -->|还不清楚| D[请用户补充功能想法或目标并结束本轮]
+    C -->|与当前会话不是同一个功能| E[提示在新会话中开始另一个功能并结束本轮]
+    C -->|已清楚| F[进入该功能的设计讨论]
+    F --> G{是否已有可复用的设计结果?}
+    G -->|有且本轮无新回答| H[展示已有设计结果并结束本轮]
+    G -->|没有| I{用户是否补充了新信息?}
+    I -->|有| J[记录新的需求信息]
+    J --> K[更新已记录的功能信息]
+    I -->|没有| L{是否遇到无法继续的异常情况?}
+    K --> L
+    L -->|需要| M[提示如何继续、恢复或重新开始并结束本轮]
+    L -->|不需要| N{信息是否足够形成设计?}
+    N -->|还不够| O[只追问一个最关键的问题并结束本轮]
+    O -.下一轮用户回答.-> I
+    N -->|已足够| P[准备生成正式设计文档]
+    P --> Q{是否发现可参考的前期讨论内容?}
+    Q -->|有且需要用户确认| R[请用户选择采用、修改或忽略并结束本轮]
+    Q -->|没有或已确认| S[整理已记录的回答、约束、假设和参考内容]
     R -.下一轮确认后.-> S
-    S --> T[生成 design.md + behavior.md + state.md]
-    T --> T1[交叉验证]
-    T1 --> T2{Critical Blocking?}
-    T2 -->|有| T3[阻止写入 + 标记 blocked + 结束本轮]
-    T2 -->|没有| T4[执行 Design Sufficiency Review]
-    T4 --> T5[追加 Cross-Validation 与 Design Review Summary 并写入文件]
-    T5 --> U[完成本次功能设计]
+    S --> T[生成设计文档和行为说明]
+    T --> U[完成本次功能设计]
     U --> V[返回设计结果和下一步建议]
 ```
 
@@ -99,15 +76,9 @@ Feature 设计不是一次性表单，而是多轮澄清流程。每一轮只做
 4. **优先级**：最重要的是速度、体验、准确性、安全性，还是其他目标？
 5. **约束**：有什么必须遵守或必须避免的限制？
 
-系统不会机械地把所有问题都问一遍。当前流程通过 **Question Engine** 维护一个固定的问题序列（problem → scope → target-users → priority → constraints），根据 `collectedFacts` 中已经记录的字段判断哪些问题已回答，然后只返回下一个最关键的问题。
+系统不会机械地把所有问题都问一遍。它会根据已有信息判断哪些内容已经足够清楚，哪些可以从上下文合理推断，哪些仍然缺失。需要继续追问时，它会尽量只问一个最可能影响设计方向的问题。
 
-同时，**Readiness Evaluator** 会对当前收集的信息进行综合评估，返回 `low` / `medium` / `high` 三个等级：
-
-- **low**：核心事实（如问题描述）严重缺失，无法生成可靠设计。
-- **medium**：核心事实基本具备，但部分推荐问题（如优先级、约束）尚未回答。此时系统允许生成，但会追加警告。
-- **high**：信息充分，可以直接生成设计。
-
-如果用户在 medium 阶段明确表示“先继续”“先生成草稿”“后面再补”，系统可以带着假设生成草稿式设计；这类设计会保留未确认事项，提醒后续评审时重点确认。用户也可以通过 `action='collect' facts={"skip-questions": "yes"}` 显式跳过未回答的问题。
+如果用户明确表示“先继续”“先生成草稿”“后面再补”，系统可以带着假设生成草稿式设计；这类设计会保留未确认事项，提醒后续评审时重点确认。
 
 ## 5. 已记录信息与状态文件
 
@@ -164,14 +135,9 @@ Feature 设计不是一次性表单，而是多轮澄清流程。每一轮只做
 
 当前 Feature 节点不会生成 `proposal.md`、`requirements.json` 或额外的 metadata 文件。
 
-## 8. 设计自检与充分性审查
+## 8. 设计自检
 
-生成设计文档时，系统会执行两类检查：
-
-1. **Cross-Validation Summary**：检查文档结构、安全底线和明显交叉引用缺口。
-2. **Design Sufficiency Review**：检查设计是否已经足够支撑实现计划，尤其是关键约束是否具备 owner、trigger、operation、state/output、failure semantics、verification 和 compatibility boundary。
-
-两者职责不同：Cross-validation passed 只表示文档可以安全写入；不代表设计已经足够进入 implementation planning。
+生成设计文档时，系统会追加一段 Cross-Validation Summary，用来检查文档之间是否存在明显缺口。
 
 自检重点包括：
 
@@ -181,42 +147,23 @@ Feature 设计不是一次性表单，而是多轮澄清流程。每一轮只做
 - 约束与行为是否基本对齐。
 - 如果涉及删除数据、敏感凭据、权限、自动执行、跨会话状态等高风险内容，是否有相应防护说明。
 
-Cross-validation 结果可能是：
+自检结果可能是：
 
 - `Passed`：可以进入下一步。
 - `Blocking`：存在阻断问题，需要先修正文档。
-- `Critical Blocking`：存在严重阻断问题（如数据删除无备份、敏感凭据无权限控制、自动执行无防护、全局状态变更无隔离等），系统会**阻止文档写入**，标记 session 为 `draft_blocked`，并要求用户先解决这些安全问题后再重试生成。
+- `Critical Blocking`：存在严重阻断问题，不应进入后续计划或实现。
 
-这一步不是完整人工评审的替代品；它只是帮助提前发现明显不一致或风险遗漏。当 Critical Blocking 被触发时，设计产物不会被写入磁盘，避免带严重安全缺陷的文档进入后续流程。
-
-Design Sufficiency Review 不会因为约束不足而阻止写入文档；它会把结果追加到 `design.md` 和 `behavior.md` 末尾，并把 readiness 标记为：
-
-- `ready_for_planning`：可以进入 writing-plan。
-- `needs_implementation_constraints`：结构完整，但实现约束不足。
-- `needs_behavior_examples`：缺少足够可观察行为例子。
-- `needs_data_contracts`：涉及输出、payload、兼容或数据结构，但没有足够 contract。
-- `needs_failure_semantics`：涉及任务、状态或自动执行，但缺少失败、超时、中断、取消语义。
-- `not_ready`：结构或语义不足，不应进入 planning。
-
-当 Design Sufficiency Review 为 `not_ready` 时，Feature 节点仍会写出文档供继续编辑和补充 facts，但下一步建议会变为“补充实现约束 / 查看充分性报告 / 检查产物”，而不是直接进入 writing-plan。
+这一步不是完整人工评审的替代品；它只是帮助提前发现明显不一致或风险遗漏。
 
 ## 9. 完成后用户会看到什么
 
 设计成功生成后，系统会返回完成提示，并列出生成的设计文档和行为说明。
 
-如果当前环境支持交互选择，系统会根据 Design Sufficiency Review 提供下一步选项。
-
-当 review 为 ready 时，例如：
+如果当前环境支持交互选择，系统会提供下一步选项，例如：
 
 - 进入计划编写。
 - 查看生成文档。
 - 检查当前结果。
-
-当 review 为 not ready 时，例如：
-
-- 补充缺失的实现约束。
-- 查看 Design Sufficiency Review。
-- 检查生成产物。
 
 如果选择进入计划编写，系统只会提示用户手动运行：
 
@@ -234,10 +181,9 @@ Design Sufficiency Review 不会因为约束不足而阻止写入文档；它会
 2. 已存在 `design.md`。
 3. 已存在 `behavior.md`。
 4. `design.md` 中包含 Cross-Validation Summary，并且结果为 `Passed`。
-5. `design.md` 或 `behavior.md` 中包含 Design Sufficiency Review，并且 Design Readiness 为 `ready_for_planning`。
-6. `state.md` 存在，并显示该功能设计已经完成。
+5. `state.md` 存在，并显示该功能设计已经完成。
 
-只有这些条件满足后，writing-plan 才应读取设计说明和行为说明，整理成开发计划所需的上下文。如果 Cross-Validation 已通过但 Design Sufficiency Review 仍为 not ready，应先补充缺失 facts 或实现约束，再重新生成设计文档。
+只有这些条件满足后，writing-plan 才会读取设计说明和行为说明，整理成开发计划所需的上下文。
 
 ## 11. 自动触发与生命周期提示
 
@@ -274,38 +220,13 @@ OpenFlow 可能根据用户表达判断“这看起来像一个需要正式设�
 
 本文主要依据当前实现与相关测试更新，关键实现位置包括：
 
-**入口与编排：**
 - `src/commands/feature.ts`
-- `src/phases/feature/workflow/feature-workflow.ts`
-- `src/phases/feature/workflow/finalization.ts`
-- `src/hooks/feature-workflow.ts`
-
-**状态与会话：**
 - `src/phases/feature/state-machine.ts`
-- `src/phases/feature/workflow/infra/session-store.ts`
-
-**收敛与问题引导：**
-- `src/phases/feature/readiness-evaluator.ts`
-- `src/phases/feature/question-engine.ts`
-
-**文档生成：**
-- `src/phases/feature/workflow/rules/generation.ts`
-- `src/phases/feature/workflow/rules/cross-validation.ts`
+- `src/phases/feature/convergence.ts`
+- `src/phases/feature/context-harvest.ts`
 - `src/phases/feature/design-renderer.ts`
 - `src/phases/feature/behavior-renderer.ts`
-- `src/phases/feature/workflow/rules/state-document.ts`
-
-**PRD 与决策文档：**
-- `src/phases/feature/prd-generator.ts`
-- `src/phases/feature/workflow/rules/prd-template.ts`
-- `src/phases/feature/workflow/rules/prd-extractor.ts`
-- `src/phases/feature/workflow/rules/prd-utils.ts`
-
-**上下文采集：**
-- `src/phases/feature/context-harvest.ts`
-
-**下游衔接：**
 - `src/commands/writing-plan.ts`
-- `src/utils/markdown-helpers.ts`
+- `src/hooks/feature-workflow.ts`
 
 如果后续实现与本文描述不一致，应优先更新本文或修正实现，避免流程图、用户说明与实际行为发生漂移。

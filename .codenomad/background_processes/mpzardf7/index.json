@@ -1,0 +1,116 @@
+[
+  {
+    "id": "proc_2026-06-04T0942_ca59e7",
+    "workspaceId": "mpzardf7",
+    "title": "Focused archive tests",
+    "command": "bun test tests/phases/archive/validate.test.ts tests/phases/archive/collect.test.ts tests/phases/archive/issue.test.ts",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 23708,
+    "startedAt": "2026-06-04T09:42:04.115Z",
+    "outputSizeBytes": 22597,
+    "notify": {
+      "sessionID": "ses_16e005e24ffeVKJEUWHTb2LWZY",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-06-04T09:42:04.876Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 1,
+    "stoppedAt": "2026-06-04T09:42:04.834Z"
+  },
+  {
+    "id": "proc_2026-06-04T0943_9ff683",
+    "workspaceId": "mpzardf7",
+    "title": "Re-run archive tests",
+    "command": "bun test tests/phases/archive/validate.test.ts tests/phases/archive/collect.test.ts tests/phases/archive/issue.test.ts",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 21744,
+    "startedAt": "2026-06-04T09:43:58.533Z",
+    "outputSizeBytes": 12408,
+    "notify": {
+      "sessionID": "ses_16e005e24ffeVKJEUWHTb2LWZY",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-06-04T09:43:59.178Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 1,
+    "stoppedAt": "2026-06-04T09:43:59.097Z"
+  },
+  {
+    "id": "proc_2026-06-04T0946_36093b",
+    "workspaceId": "mpzardf7",
+    "title": "Archive tests round 3",
+    "command": "bun test tests/phases/archive/validate.test.ts tests/phases/archive/collect.test.ts tests/phases/archive/issue.test.ts",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 24852,
+    "startedAt": "2026-06-04T09:46:08.692Z",
+    "outputSizeBytes": 2101,
+    "notify": {
+      "sessionID": "ses_16e005e24ffeVKJEUWHTb2LWZY",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-06-04T09:46:09.142Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-06-04T09:46:09.129Z"
+  },
+  {
+    "id": "proc_2026-06-04T0946_a12e6d",
+    "workspaceId": "mpzardf7",
+    "title": "Full test suite",
+    "command": "bun test",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 20252,
+    "startedAt": "2026-06-04T09:46:22.260Z",
+    "outputSizeBytes": 312025,
+    "notify": {
+      "sessionID": "ses_16e005e24ffeVKJEUWHTb2LWZY",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-06-04T09:50:36.698Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 1,
+    "stoppedAt": "2026-06-04T09:50:36.680Z"
+  },
+  {
+    "id": "proc_2026-06-04T0951_ad88f2",
+    "workspaceId": "mpzardf7",
+    "title": "Full bun test suite",
+    "command": "bun test",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "error",
+    "pid": 24568,
+    "startedAt": "2026-06-04T09:51:46.078Z",
+    "outputSizeBytes": 312143,
+    "notify": {
+      "sessionID": "ses_16e005e24ffeVKJEUWHTb2LWZY",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-06-04T09:56:08.505Z"
+    },
+    "terminalReason": "failed",
+    "exitCode": 1,
+    "stoppedAt": "2026-06-04T09:56:08.471Z"
+  },
+  {
+    "id": "proc_2026-06-04T1017_796a58",
+    "workspaceId": "mpzardf7",
+    "title": "typecheck",
+    "command": "npm run typecheck",
+    "cwd": "F:\\ai-code\\openflow",
+    "status": "stopped",
+    "pid": 15044,
+    "startedAt": "2026-06-04T10:17:58.667Z",
+    "outputSizeBytes": 55,
+    "notify": {
+      "sessionID": "ses_16ddfbaacffeZOpl56aYaECXTd",
+      "directory": "F:\\ai-code\\openflow",
+      "sentAt": "2026-06-04T10:18:03.782Z"
+    },
+    "terminalReason": "finished",
+    "exitCode": 0,
+    "stoppedAt": "2026-06-04T10:18:03.386Z"
+  }
+]

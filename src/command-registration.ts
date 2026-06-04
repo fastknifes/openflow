@@ -12,6 +12,8 @@ const LEGACY_SKILL_DIRS = [
   'openflow-change',
   'openflow-archive',
   'openflow-migrate-docs',
+  // Legacy issue-mode: removed from active workflow, cleanup only
+  'openflow-issue',
 ]
 
 const STALE_COMMAND_FILES = [

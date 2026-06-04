@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "slug": "quality-gate-verify-toolchain",
+  "symptom": "质量门 verify 步骤硬编码了 JS 工具链命令（bun run lint/typecheck/test），在 PHP+Go 项目中永远失败返回 ENOENT。",
+  "environment": "local",
+  "status": "resolved",
+  "classification": "bugfix",
+  "confidence": "high",
+  "rootCause": "getQualityCommandSpec 函数硬编码 bun 命令，runQualityChecks 把 quality gate 建模为代码级 test runner。根本问题是职责边界错误：代码级验证应由实现节点完成，quality gate 应作为 evidence judge。",
+  "noFixNeededReason": null,
+  "evidence": [
+    {
+      "source": "code_analysis",
+      "summary": "getQualityCommandSpec 硬编码 bun 命令，在非 JS/TS 项目中全部 ENOENT。完整调查见 issue-clarification.md。"
+    }
+  ],
+  "hypotheses": [],
+  "recommendedAction": "已通过 quality-gate-evidence-judge feature 处理。",
+  "requiredChecks": [],
+  "verificationEvidence": [
+    "issue-clarification.md 完整记录了根因分析",
+    "docs/changes/2026-05-20-quality-gate-evidence-judge/ 包含对应的 feature 设计文档"
+  ],
+  "createdAt": "2026-05-19T00:00:00.000Z",
+  "updatedAt": "2026-05-20T03:30:00.000Z"
+}

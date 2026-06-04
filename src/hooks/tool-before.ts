@@ -6,7 +6,6 @@ import { logger } from '../utils/logger.js'
 import { formatSecurityChecks, formatQualityChecks } from '../utils/verification-checks.js'
 import { buildImplementationContextPrompt } from './implementation-context.js'
 import { checkImplementationGuard } from './implementation-guard.js'
-import { checkConstraintGuard } from './constraint-guard.js'
 import { isImplementationTask, isVerificationTask } from './task-classification.js'
 
 function buildVerificationPrompt(ctx: OpenFlowContext, currentPrompt: string): string | undefined {
@@ -73,26 +72,6 @@ export function createToolBeforeHook(ctx: OpenFlowContext) {
       output.args = { ...(output.args as Record<string, unknown>), prompt: guardResult.message }
       logger.info('implementation guard blocked action', { feature: guardResult.feature, tool: input.tool })
       return
-    }
-
-    // Constraint advisory guard (advisory only, never blocks)
-    try {
-      const constraintResult = await checkConstraintGuard(guardOptions)
-      if (constraintResult.advisory && constraintResult.message) {
-        // For task tool: inject into prompt
-        if (input.tool === 'task') {
-          const taskArgs = output.args as Record<string, unknown> | undefined
-          if (taskArgs && typeof taskArgs.prompt === 'string') {
-            output.args = { ...taskArgs, prompt: constraintResult.message + '\n\n' + taskArgs.prompt }
-            logger.debug('orchestrator', 'injected constraint advisory into task prompt', { sessionID: input.sessionID })
-          }
-        }
-        // For write/edit: we can't inject into prompt, so just log
-        // The advisory is informational — agents will see it if they read observations
-        logger.debug('orchestrator', 'constraint advisory for file operation', { tool: input.tool })
-      }
-    } catch {
-      // Silent failure — never block
     }
 
     if (input.tool !== 'task') return

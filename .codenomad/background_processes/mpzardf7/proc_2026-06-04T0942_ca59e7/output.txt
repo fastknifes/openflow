@@ -1,0 +1,275 @@
+bun test v1.3.6 (d530ed99)
+
+tests\phases\archive\collect.test.ts:
+(pass) collectArchiveArtifacts > copies planned design and plan into staging [31.00ms]
+(pass) collectArchiveArtifacts > ad-hoc mode generates issue artifacts [16.00ms]
+(pass) collectArchiveArtifacts > planned collection without design leaves staging without design.md
+(pass) collectArchiveArtifacts > issue mode copies clarification and generates resolution [31.00ms]
+
+tests\phases\archive\issue.test.ts:
+(pass) archive issue artifacts > writeIssueResolution generates issue-resolution from clarification sections [32.00ms]
+(pass) archive issue artifacts > generateAdHocIssueArtifacts writes clarification and resolution [15.00ms]
+
+tests\phases\archive\validate.test.ts:
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:106:26)
+(fail) validateArchive > planned mode + readiness=Ready + no issues allows archive
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:114:26)
+(fail) validateArchive > planned mode + readiness=NotReady blocks archive with readiness blocker
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:135:26)
+(fail) validateArchive > planned mode + harden unresolved must-fix blocks archive with harden blocker
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:150:26)
+(fail) validateArchive > planned mode + doc update not confirmed blocks archive with doc_update blocker [16.00ms]
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+(fail) validateArchive > ad-hoc mode + no readiness allows archive
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+(fail) validateArchive > ad-hoc mode + no readiness/harden/drift checks does not produce readiness or harden blockers
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+(fail) validateArchive > planned mode + skipQualityGateChecks=true allows archive even when readiness=NotReady
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:219:26)
+(fail) validateArchive > planned mode + drift items + drift_check enabled blocks with drift blocker
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:243:26)
+(fail) validateArchive > implementation run with root mismatch blocks with root_mismatch blocker
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:267:26)
+(fail) validateArchive > planned mode + quality gate applicability not eligible blocks with applicability blocker
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:296:28)
+(fail) validateArchive > planned mode + dirty implementation state blocks with implementation_state blocker [16.00ms]
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:313:26)
+(fail) validateArchive > planned mode + security verification failure blocks with security blocker
+246 | export function getPlanPath(projectDir: string, featureName: string, config?: OpenFlowConfig): string {
+247 |   return path.join(projectDir, config?.paths.plans ?? defaultConfig.paths.plans, `${featureName}.md`)
+248 | }
+249 | 
+250 | export async function getChangeWorkspacePath(projectDir: string, featureName: string, config?: OpenFlowConfig): Promise<string> {
+251 |   const changeDir = await resolveChangeUnitDir(projectDir, featureName, config?.paths.changes ?? defaultConfig.paths.changes, config?.paths.change_units)
+                                                                                      ^
+TypeError: undefined is not an object (evaluating 'config?.paths.changes')
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:251:81)
+      at getChangeWorkspacePath (F:\ai-code\openflow\src\config.ts:250:46)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:272:31)
+      at getChangeDocumentPath (F:\ai-code\openflow\src\config.ts:271:45)
+      at getChangePlansPath (F:\ai-code\openflow\src\config.ts:263:42)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:59:33)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:3)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:38:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:9)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:329:26)
+(fail) validateArchive > implementation run with non-ready status blocks with run_status blocker
+
+ 6 pass
+ 13 fail
+ 13 expect() calls
+Ran 19 tests across 3 files. [330.00ms]

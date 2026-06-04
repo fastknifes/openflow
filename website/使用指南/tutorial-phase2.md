@@ -6,47 +6,79 @@ layout: doc
 
 ## 这一阶段做什么
 
-阶段二覆盖 Writing Plan 与 Implement 两个节点。开发计划负责把阶段一的设计契约转化为可执行任务树，明确执行波次、依赖关系、验证命令和约束传递。
+上一阶段你已经确认了"要做什么"和"做成什么样"，这一阶段回答两个问题：**怎么一步步做**，然后**动手做**。
 
-实现阶段会在隔离环境中把计划落地为代码。核心原则是：计划中的每一行都必须能直接执行；如果任务无法执行、无法验证或约束不清，就应先修正计划，而不是直接写代码。
+### 开发计划：把设计变成可执行的任务清单
+
+设计文档告诉你目标是什么，但不会告诉你第一步改哪个文件、第二步跑什么测试。开发计划就是把这个过程拆清楚——先做什么、后做什么、每一步完成后怎么验证。
+
+好的计划有一个简单标准：**拿到计划的人（或 AI）能直接动手，不需要再猜该做什么。** 如果计划里有任务说不清楚、没法验证、或者不知道依赖什么，那就不该开始写代码，而是先回去把计划改清楚。
+
+### 实现：按计划写代码
+
+计划确认后，AI 会在约束范围内按计划执行代码变更。实现过程支持 Git Worktree 隔离——代码改动在独立分支上进行，完成后再合并回主工作区，避免中途影响其他工作。
 
 ## 操作步骤
 
 ```mermaid
 flowchart TD
-  A[/openflow-writing-plan feature] --> B[读取 design.md 与 behavior.md]
+  A[/openflow-writing-plan 需求名] --> B[AI 读取设计文档与行为文档]
   B --> C[生成 plan.md]
-  C --> D[用户检查执行波次与依赖]
-  D --> E{计划是否可执行}
-  E -- 否 --> C
-  E -- 是 --> F[/openflow-implement feature]
-  F --> G[按计划实现代码]
-  G --> H[AI 自动调用 quality-gate]
+  C --> D[检查计划：任务是否清晰、验证是否可执行]
+  D --> E{计划没问题？}
+  E -- 否，需要调整 --> C
+  E -- 是 --> F[/openflow-implement 需求名]
+  F --> G[AI 按计划执行代码变更]
+  G --> H[AI 自动触发质量门]
 
   class A,B,C,D,F,G,H main
-  class E optional
+  class E question
 
   classDef main fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
-  classDef optional fill:#f5f5f5,stroke:#9e9e9e,stroke-width:2px,color:#9e9e9e,stroke-dasharray: 5 5
-  classDef success fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#2e7d32
+  classDef question fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
 ```
 
-1. **生成开发计划**：运行 `/openflow-writing-plan <feature>`。
-2. **查看计划文档**：打开生成的 `plan.md`，确认任务结构和验证方式。
-3. **执行实现**：确认计划后运行 `/openflow-implement <feature>`。
-4. **进入质量门**：实现完成后，AI 会自动调用 `openflow-quality-gate`。
+### 第 1 步：生成开发计划
 
-## ⚠️ 必须检查的文档
+```text
+/openflow-writing-plan 添加用户资料页
+```
 
-- **`plan.md`**：查看执行波次和依赖矩阵，确认任务拆分合理，前置任务不会缺失。
-- 检查约束传递：`design.md` 中的 must 约束是否已经跟随到对应任务。
-- 检查验证命令：每个任务是否有具体、可运行、可复现的验证命令。
-- **不要跳过检查直接执行**——计划是代码变更的蓝图，不检查就执行等于放弃约束。
+AI 会读取上一阶段生成的 `design.md` 和 `behavior.md`，然后把工作拆成有序的任务列表，输出 `plan.md`。
 
-## 常见场景
+### 第 2 步：检查计划
 
-- **OMO 环境**：Writing Plan 会自动路由到 Prometheus。
-- **非 OMO 环境**：会路由到 OpenCode 原生 build 代理。
-- **工作树隔离**：可选在独立 Git Worktree 中执行，降低实现过程对主工作区的干扰。
+简单任务可以跳过这步，直接执行。复杂任务建议让 AI 帮你审查：
 
-下一步：[阶段三：验证与归档](./tutorial-phase3)。
+```text
+请帮我检查一下开发计划，任务顺序是否合理，约束是否传递到位，验证命令是否能跑。
+```
+
+### 第 3 步：执行实现
+
+```text
+/openflow-implement 添加用户资料页
+```
+
+确认计划没问题后运行。AI 会按计划执行代码变更，完成后自动触发质量门。
+
+## 常见情况
+
+| 情况 | 怎么处理 |
+|---|---|
+| 计划里某个任务说不清楚 | 让 AI 修改计划，不要直接开始写代码 |
+| 发现遗漏了一个约束 | 回去更新计划，把约束补上 |
+| 实现过程中发现设计有问题 | 回到阶段一更新设计文档，再重新生成计划 |
+| 安装了 omo | 计划会自动路由到 Prometheus 代理执行 |
+| 没有安装 omo | 使用 OpenCode 原生模式执行，功能完全够用 |
+
+## 阶段产出
+
+完成这一阶段后，你的项目会多出：
+
+- `docs/changes/{日期}-{需求名}/plan.md` — 开发计划
+- 代码变更（在主分支或 Worktree 隔离分支上）
+
+质量门的结果会在阶段三详细说明。
+
+下一步：[阶段三：验证与归档 →](./tutorial-phase3)

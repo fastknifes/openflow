@@ -47,6 +47,19 @@ interface InternalOptions {
   ) => Promise<string>
 }
 
+interface QualityGateSessionClientLike {
+  session?: {
+    create?: (options: unknown) => Promise<unknown>
+    prompt?: (options: unknown) => Promise<unknown>
+  }
+}
+
+interface QualityGateVisibleSession {
+  id?: string
+  title: string
+  created: boolean
+}
+
 interface HardenFindingSummary {
   id: string
   disposition: string
@@ -97,6 +110,11 @@ export async function handleQualityGate(
     logger.info('quality_gate', 'active implementation run found', { runID: activeRun.runID, status: activeRun.status })
   }
   const sessionID = requestedSessionID ?? activeRun?.sessionID
+  const qualityGateSession = await resolveQualityGateVisibleSession(ctx, activeRun?.feature ?? featureArg, sessionID)
+  await recordQualityGateSessionProgress(ctx, qualityGateSession, 'started', [
+    `feature=${activeRun?.feature ?? featureArg ?? '(unresolved)'}`,
+    `sourceSession=${sessionID ?? '(none)'}`,
+  ])
   let runCompletionRecorded = false
   const executionRoot = activeRun ? resolveImplementationRunExecutionRoot(ctx, activeRun) : ctx.directory
   const executionCtx: OpenFlowContext = activeRun
@@ -126,6 +144,10 @@ export async function handleQualityGate(
     }
   }
   logger.info('quality_gate', 'feature resolved', { feature: sanitizedFeature })
+  await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'context/scope', [
+    `feature=${sanitizedFeature ?? '(unresolved)'}`,
+    `executionRoot=${executionCtx.directory}`,
+  ])
 
   // ── 2. Determine context kind ───────────────────────────────────────────
   const contextKind = await resolveContextKind(executionCtx, sanitizedFeature)
@@ -167,6 +189,14 @@ export async function handleQualityGate(
     shouldRunHarden: applicability.shouldRunHarden,
     shouldRunVerify: applicability.shouldRunVerify,
   })
+  await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'applicability', [
+    `status=${applicability.status}`,
+    `reasonCode=${applicability.reasonCode}`,
+    `contextKind=${contextKind}`,
+    `changedFiles=${changedFiles.length}`,
+    `shouldRunHarden=${String(applicability.shouldRunHarden)}`,
+    `shouldRunVerify=${String(applicability.shouldRunVerify)}`,
+  ])
 
   if (acceptanceState && acceptanceState.feature === sanitizedFeature) {
     acceptanceState.qualityGateApplicability = applicability
@@ -177,6 +207,7 @@ export async function handleQualityGate(
     logger.info('quality_gate', 'quality gate not applicable, returning early', { status: applicability.status })
     const report = buildApplicabilityOnlyReport({
       feature: sanitizedFeature || '(unresolved)',
+      qualityGateSession,
       contextKind,
       limitedContext,
       applicability,
@@ -188,6 +219,12 @@ export async function handleQualityGate(
       activeRun = await recordQualityGateRunCompletion(ctx, activeRun, VerifyReadinessStatus.NotReady, 'blocked')
       runCompletionRecorded = true
     }
+    await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'readiness', [
+      `readiness=${VerifyReadinessStatus.NotReady}`,
+      `applicability=${applicability.status}`,
+      'harden=skipped',
+      'verify=skipped',
+    ])
     return report
   }
 
@@ -198,6 +235,11 @@ export async function handleQualityGate(
 
   const riskResult = decideQualityGateRisk(riskInput)
   logger.info('quality_gate', 'risk assessment completed', { riskLevel: riskResult.risk, shouldHarden: riskResult.shouldHarden, reasons: riskResult.reasons })
+  await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'risk', [
+    `risk=${riskResult.risk}`,
+    `shouldHarden=${String(riskResult.shouldHarden)}`,
+    `reasons=${riskResult.reasons.join(', ') || 'none'}`,
+  ])
 
   // ── 5. Evidence freshness check ─────────────────────────────────────────
   const workspaceState = buildScopedWorkspaceState(
@@ -217,12 +259,16 @@ export async function handleQualityGate(
   if (applicability.shouldRunHarden && riskResult.shouldHarden && executionCtx.config.harden.enabled) {
     hardenDecision = 'risk-based'
     logger.info('quality_gate', 'harden decision made', { decision: hardenDecision, shouldRunHarden: applicability.shouldRunHarden, shouldHarden: riskResult.shouldHarden, hardenEnabled: executionCtx.config.harden.enabled })
+    await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'harden decision', [
+      `decision=${hardenDecision}`,
+      'status=running',
+    ])
     logger.info('quality_gate', 'starting harden', { feature: sanitizedFeature })
     try {
       if (internalOpts?.overrideHarden) {
-        hardenOutput = await internalOpts.overrideHarden(executionCtx, sanitizedFeature, sessionID)
+        hardenOutput = await internalOpts.overrideHarden(executionCtx, sanitizedFeature, qualityGateSession.id ?? sessionID)
       } else {
-        hardenOutput = await handleHarden(executionCtx, sanitizedFeature, undefined, sessionID)
+        hardenOutput = await handleHarden(executionCtx, sanitizedFeature, undefined, qualityGateSession.id ?? sessionID)
       }
       hardenStatus = extractHardenStatus(hardenOutput)
       logger.info('quality_gate', 'harden completed', { status: hardenStatus })
@@ -232,14 +278,29 @@ export async function handleQualityGate(
       hardenOutput = `Harden execution failed: ${hardenError.message}`
       logger.error('quality_gate', 'harden execution failed', hardenError, { feature: sanitizedFeature })
     }
+    await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'harden round summary', [
+      `status=${hardenStatus ?? 'unknown'}`,
+      `rounds=${extractHardenRounds(hardenOutput)}`,
+      `summary=${extractHardenSummaryText(hardenOutput) || '(none)'}`,
+    ])
   } else if (!applicability.shouldRunHarden || !riskResult.shouldHarden) {
     hardenDecision = 'none'
     hardenStatus = 'skipped'
     logger.info('quality_gate', 'harden decision made', { decision: hardenDecision, shouldRunHarden: applicability.shouldRunHarden, shouldHarden: riskResult.shouldHarden, hardenEnabled: executionCtx.config.harden.enabled })
+    await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'harden decision', [
+      `decision=${hardenDecision}`,
+      `status=${hardenStatus}`,
+      'reason=below harden threshold or not applicable',
+    ])
   } else {
     hardenDecision = 'none'
     hardenStatus = 'disabled'
     logger.info('quality_gate', 'harden decision made', { decision: hardenDecision, shouldRunHarden: applicability.shouldRunHarden, shouldHarden: riskResult.shouldHarden, hardenEnabled: executionCtx.config.harden.enabled })
+    await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'harden decision', [
+      `decision=${hardenDecision}`,
+      `status=${hardenStatus}`,
+      'reason=harden disabled',
+    ])
   }
 
   // ── 7. Evidence-aware verify ────────────────────────────────────────────
@@ -264,12 +325,34 @@ export async function handleQualityGate(
     verifyOutput = `## Verify\n\nError: verify execution failed: ${verifyError.message}`
     logger.error('quality_gate', 'verify execution failed', verifyError, { feature: sanitizedFeature })
   }
+  await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'verify summary', [
+    `status=${extractReadinessFromOutput(verifyOutput)}`,
+    `freshness=${freshnessResult.status}`,
+    `reused=${String(freshnessResult.status === 'fresh' && Boolean(acceptanceState?.verifyResult))}`,
+  ])
 
   // ── 8. Extract readiness from verify output ─────────────────────────────
   const hardenUnavailableReason = parseHardenUnavailableReason(hardenOutput)
   const hardenGate = applyHardenReadinessGate(extractReadinessFromOutput(verifyOutput), hardenStatus, hardenOutput)
-  const readiness = hardenGate.readiness
+  let readiness = hardenGate.readiness
+  const rootMismatch = activeRun ? checkExecutionRootMismatch(activeRun, executionCtx.directory) : null
+  if (rootMismatch?.mismatched) {
+    logger.warn('quality_gate', 'execution root mismatch', {
+      expected: rootMismatch.expected,
+      actual: rootMismatch.actual,
+      runID: activeRun?.runID,
+    })
+    readiness = VerifyReadinessStatus.NotReady
+  }
   logger.info('quality_gate', 'readiness determined', { readiness, hardenStatus, hardenReadinessBlocker: hardenGate.blocker })
+  await recordQualityGateSessionProgress(executionCtx, qualityGateSession, 'readiness', [
+    `readiness=${readiness}`,
+    `hardenStatus=${hardenStatus ?? 'unknown'}`,
+    `verifyStatus=${extractReadinessFromOutput(verifyOutput)}`,
+    `blockers=${hardenGate.blockingFindings.length}`,
+    `docUpdates=${hardenGate.knownIssues.length}`,
+    rootMismatch?.mismatched ? `rootMismatch=expected ${rootMismatch.expected}, actual ${rootMismatch.actual}` : '',
+  ])
   const verifyContent = stripOpenFlowHeader(verifyOutput)
 
   if (applicability.status === 'applicable') {
@@ -318,12 +401,13 @@ export async function handleQualityGate(
 
   // ── 10. Build markdown report ───────────────────────────────────────────
   if (activeRun) {
-    activeRun = await recordQualityGateRunCompletion(ctx, activeRun, readiness, getImplementationRunStatusForReadiness(readiness))
+    activeRun = await recordQualityGateRunCompletion(ctx, activeRun, readiness, getImplementationRunStatusForReadiness(readiness, applicability.status))
     runCompletionRecorded = true
   }
 
   const report = buildQualityGateReport({
     feature: sanitizedFeature || '(unresolved)',
+    qualityGateSession,
     contextKind,
     limitedContext,
     applicability,
@@ -336,11 +420,15 @@ export async function handleQualityGate(
     hardenUnavailableReason,
     knownIssues: hardenGate.knownIssues,
     blockingFindings: hardenGate.blockingFindings,
+    blockerCount: hardenGate.blockingFindings.length + (hardenGate.blocker ? 1 : 0),
+    docUpdateCount: hardenGate.knownIssues.length,
+    verifyStatus: extractReadinessFromOutput(verifyOutput),
     verifyContent,
     freshnessResult,
     changedFiles,
     omittedFiles: scopedWorkspace.omittedFiles,
     diffLines,
+    rootMismatch: rootMismatch?.mismatched ? rootMismatch : null,
   })
   logger.info('quality_gate', 'quality gate completed', { feature: sanitizedFeature, readiness })
   return report
@@ -389,6 +477,21 @@ function resolveImplementationRunExecutionRoot(ctx: OpenFlowContext, run: Implem
   return run.directory || ctx.directory
 }
 
+function checkExecutionRootMismatch(
+  activeRun: ImplementationRun,
+  executionRoot: string,
+): { mismatched: boolean; expected: string; actual: string } {
+  const expected = activeRun.worktree || activeRun.directory
+  if (!expected) return { mismatched: false, expected: '', actual: executionRoot }
+
+  const normalize = (filePath: string) => filePath.replace(/\\/g, '/').toLowerCase().replace(/\/$/, '')
+  return {
+    mismatched: normalize(expected) !== normalize(executionRoot),
+    expected,
+    actual: executionRoot,
+  }
+}
+
 async function appendQualityGateRunEvent(
   ctx: OpenFlowContext,
   run: ImplementationRun,
@@ -421,7 +524,92 @@ function resolveRunLogPath(ctx: OpenFlowContext, filePath: string): string {
   return isAbsolute(filePath) ? filePath : join(ctx.directory, filePath)
 }
 
-function getImplementationRunStatusForReadiness(readiness: string): ImplementationRunStatus {
+async function resolveQualityGateVisibleSession(
+  ctx: OpenFlowContext,
+  feature: string | undefined,
+  parentSessionID: string | undefined,
+): Promise<QualityGateVisibleSession> {
+  const title = `Quality Gate: ${feature ? sanitizeFeatureName(feature) : 'unresolved'}`
+  const client = getQualityGateSessionClient(ctx)
+  if (!client.session?.create) {
+    return buildQualityGateVisibleSession(title, false, parentSessionID)
+  }
+
+  const body: Record<string, unknown> = { title }
+  if (parentSessionID) {
+    body.parentID = parentSessionID
+  }
+
+  try {
+    const created = await client.session.create({
+      query: { directory: ctx.directory },
+      body,
+    })
+    return buildQualityGateVisibleSession(title, true, extractCreatedSessionID(created))
+  } catch (error) {
+    logger.warn('quality_gate', 'failed to create visible quality gate session; continuing without session container', {
+      title,
+      parentSessionID,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return buildQualityGateVisibleSession(title, false, parentSessionID)
+  }
+}
+
+function buildQualityGateVisibleSession(title: string, created: boolean, id?: string): QualityGateVisibleSession {
+  return id ? { id, title, created } : { title, created }
+}
+
+async function recordQualityGateSessionProgress(
+  ctx: OpenFlowContext,
+  session: QualityGateVisibleSession,
+  stage: string,
+  lines: string[],
+): Promise<void> {
+  if (!session.id) return
+  const client = getQualityGateSessionClient(ctx)
+  if (!client.session?.prompt) return
+
+  const text = [
+    `OpenFlow Quality Gate progress: ${stage}`,
+    ...lines.map(line => `- ${line}`),
+  ].join('\n')
+
+  try {
+    await client.session.prompt({
+      path: { id: session.id },
+      query: { directory: ctx.directory },
+      body: { parts: [{ type: 'text', text }] },
+    })
+  } catch (error) {
+    logger.warn('quality_gate', 'failed to record quality gate session progress; continuing', {
+      sessionID: session.id,
+      stage,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+function getQualityGateSessionClient(ctx: OpenFlowContext): QualityGateSessionClientLike {
+  return ctx.client as QualityGateSessionClientLike
+}
+
+function extractCreatedSessionID(response: unknown): string | undefined {
+  const object = asRecord(response)
+  if (typeof object.id === 'string') return object.id
+  const data = asRecord(object.data)
+  if (typeof data.id === 'string') return data.id
+  return undefined
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+}
+
+function getImplementationRunStatusForReadiness(readiness: string, applicabilityStatus?: string): ImplementationRunStatus {
+  if (applicabilityStatus === 'limited_context') {
+    return 'blocked'
+  }
   if (readiness === 'ready' || readiness === 'ready_with_doc_updates') {
     return 'ready_for_archive'
   }
@@ -1012,6 +1200,11 @@ function extractBudgetConsumed(hardenOutput: string): number {
   return Number(match?.[1] ?? '0')
 }
 
+function extractHardenRounds(hardenOutput: string): string {
+  const match = hardenOutput.match(/Rounds:\s*(\d+)/u)
+  return match?.[1] ?? '0'
+}
+
 function extractHardenSummaryText(hardenOutput: string): string {
   const match = hardenOutput.match(/Summary:\s*([^\n]+)/u)
   return match?.[1]?.trim() ?? ''
@@ -1129,6 +1322,7 @@ function stripOpenFlowHeader(output: string): string {
 
 interface QualityGateReportInput {
   feature: string
+  qualityGateSession: QualityGateVisibleSession
   contextKind: QualityGateContextKind
   limitedContext: boolean
   applicability: QualityGateApplicabilityResult
@@ -1141,16 +1335,21 @@ interface QualityGateReportInput {
   hardenUnavailableReason: string | undefined
   knownIssues: HardenFindingSummary[]
   blockingFindings: string[]
+  blockerCount: number
+  docUpdateCount: number
+  verifyStatus: string
   verifyContent: string
   freshnessResult: EvidenceFreshnessResult
   changedFiles: string[]
   omittedFiles: string[]
   diffLines: number
+  rootMismatch: { expected: string; actual: string } | null
 }
 
 function buildQualityGateReport(input: QualityGateReportInput): string {
   const {
     feature,
+    qualityGateSession,
     contextKind,
     limitedContext,
     applicability,
@@ -1163,16 +1362,53 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     hardenUnavailableReason,
     knownIssues,
     blockingFindings,
+    blockerCount,
+    docUpdateCount,
+    verifyStatus,
     verifyContent,
     freshnessResult,
     changedFiles,
     omittedFiles,
     diffLines,
+    rootMismatch,
   } = input
 
   const effectiveReadiness = hardenUnavailableReason === 'harden_unavailable_missing_plan' && applicability.archiveReadinessEligible
     ? 'needs_workflow_stage'
     : readiness
+
+  const summarySection = [
+    '### Quality Gate Result Summary',
+    '',
+    `- **Title**: ${escapeMarkdown(qualityGateSession.title)}`,
+    `- **Quality Gate Session**: ${qualityGateSession.id ? `Session: ${escapeMarkdown(qualityGateSession.id)} (session reference)` : 'Session: unavailable (session reference)'}`,
+    `- Session: ${escapeMarkdown(qualityGateSession.id ?? 'unavailable')}`,
+    `- **Session Container**: ${qualityGateSession.created ? 'created' : qualityGateSession.id ? 'reused' : 'unavailable'}`,
+    `- **Harden**: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
+    `- Harden: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
+    `- **Verify**: ${escapeMarkdown(verifyStatus)}`,
+    `- Verify: ${escapeMarkdown(verifyStatus)}`,
+    `- **Readiness**: ${escapeMarkdown(effectiveReadiness)}`,
+    `- Readiness: ${escapeMarkdown(effectiveReadiness)}`,
+    `- **Blockers**: ${blockerCount}`,
+    `- Blockers: ${blockerCount}`,
+    `- **Doc updates**: ${docUpdateCount}`,
+    `- Doc updates: ${docUpdateCount}`,
+    '- **Archive confirmation required**: yes',
+    effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates
+      ? '- **Awaiting Archive Confirmation**: Archive will not run until the user explicitly confirms archive.'
+      : '',
+    '',
+    '### Quality Gate Session Progress',
+    '',
+    `- Harden progress: ${escapeMarkdown(hardenStatus ?? 'unknown')}`,
+    `- Verify summary: ${escapeMarkdown(verifyStatus)}`,
+    `- Readiness: ${escapeMarkdown(effectiveReadiness)}`,
+    `- Reviewer Session: parent: ${escapeMarkdown(qualityGateSession.id ?? 'unavailable')}`,
+    `- Executor Session: parent: ${escapeMarkdown(qualityGateSession.id ?? 'unavailable')}`,
+    '- round summary: see Harden Trace when harden ran',
+    '',
+  ].filter(Boolean).join('\n')
 
   // ── Context section ───────────────────────────────────────────────────
   const contextSection = [
@@ -1264,8 +1500,14 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
     hardenReadinessBlocker
       ? `- **Harden Gate**: ❌ harden status \`${hardenStatus ?? 'unknown'}\` blocks archive readiness despite verify output.`
       : '',
+    rootMismatch
+      ? `- **Root Mismatch**: ❌ execution root does not match the active ImplementationRun. Expected \`${escapeMarkdown(rootMismatch.expected)}\`; actual \`${escapeMarkdown(rootMismatch.actual)}\`.`
+      : '',
     ...blockingFindings.map(finding => `- ${finding}`),
     applicability.status === 'limited_context' ? '- **Limited Context**: ⚠️ technical verification only; this is not archive readiness.' : '',
+    applicability.status === 'limited_context' ? `- Technical verification: ${verifyStatus}` : '',
+    applicability.status === 'limited_context' ? '- Semantic archive readiness: unavailable' : '',
+    applicability.status === 'limited_context' ? '- Full behavior/design context unavailable' : '',
     '',
   ].filter(Boolean).join('\n')
 
@@ -1281,18 +1523,21 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
   // ── Next Step section ─────────────────────────────────────────────────
   let nextStep = ''
   let nextCommand = ''
-  if (effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates) {
+  if (applicability.status === 'limited_context') {
+    nextStep = 'Technical verification completed, but semantic archive readiness is unavailable until full behavior/design context exists.'
+    nextCommand = `/openflow-feature ${escapeMarkdown(feature)}`
+  } else if (effectiveReadiness === VerifyReadinessStatus.Ready || effectiveReadiness === VerifyReadinessStatus.ReadyWithDocUpdates) {
     nextStep = `Quality gate passed for \`${escapeMarkdown(feature)}\`. Archive requires explicit user confirmation before proceeding.`
     nextCommand = `/openflow-archive ${escapeMarkdown(feature)}`
   } else if (effectiveReadiness === VerifyReadinessStatus.NeedsDecision) {
-    nextStep = 'Resolve the blocking decision, then rerun the quality gate or verify.'
-    nextCommand = `/openflow-verify ${escapeMarkdown(feature)}`
+    nextStep = 'Resolve the blocking decision, then rerun the quality gate.'
+    nextCommand = `openflow-quality-gate`
   } else if (effectiveReadiness === 'needs_workflow_stage') {
     nextStep = 'Enter the explicit feature/planning workflow before archive readiness. Do not create a minimal plan or design merely to satisfy the gate.'
     nextCommand = `/openflow-feature ${escapeMarkdown(feature)}`
   } else {
     nextStep = 'Address the readiness issues identified above, then rerun the quality gate.'
-    nextCommand = `/openflow-verify ${escapeMarkdown(feature)}`
+    nextCommand = `openflow-quality-gate`
   }
 
   const nextStepSection = [
@@ -1306,6 +1551,7 @@ function buildQualityGateReport(input: QualityGateReportInput): string {
   return [
     '## Quality Gate',
     '',
+    summarySection,
     contextSection,
     riskSection,
     hardenSection,
@@ -1344,6 +1590,7 @@ function formatApplicabilityStatus(status: QualityGateApplicabilityResult['statu
 
 function buildApplicabilityOnlyReport(input: {
   feature: string
+  qualityGateSession: QualityGateVisibleSession
   contextKind: QualityGateContextKind
   limitedContext: boolean
   applicability: QualityGateApplicabilityResult
@@ -1351,6 +1598,19 @@ function buildApplicabilityOnlyReport(input: {
   omittedFiles: string[]
   diffLines: number
 }): string {
+  const summarySection = [
+    '### Summary',
+    '',
+    `- **Quality Gate Session**: ${input.qualityGateSession.id ? `\`${escapeMarkdown(input.qualityGateSession.id)}\`` : '`unavailable`'} (${escapeMarkdown(input.qualityGateSession.title)})`,
+    `- **Harden Status**: \`skipped\``,
+    `- **Verify Status**: \`skipped\``,
+    `- **Readiness**: \`${VerifyReadinessStatus.NotReady}\``,
+    '- **Blocker Count**: 1',
+    '- **Doc Update Count**: 0',
+    '- **Archive Confirmation**: explicit user confirmation is required before running archive',
+    '',
+  ].join('\n')
+
   const contextSection = [
     '### Context',
     '',
@@ -1372,6 +1632,7 @@ function buildApplicabilityOnlyReport(input: {
   return [
     '## Quality Gate',
     '',
+    summarySection,
     contextSection,
     buildApplicabilitySection(input.applicability),
     '### Next Step',

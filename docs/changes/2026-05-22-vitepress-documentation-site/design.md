@@ -1,193 +1,149 @@
-# Design: VitePress Documentation Site
+# Design: VitePress Documentation Site Refactor
 
 ## Overview
 
-使用 VitePress 为本项目构建用户文档站点，源码位于 `website/` 目录，通过 GitHub Actions 部署到 GitHub Pages。站点面向 OpenFlow 终端用户，按使用场景组织内容。
+本次变更将 `website/` VitePress 官网从“介绍 / 快速开始 / 使用指南 / 参考 / 亮点”五段式骨架，重构为面向终端用户的双导航信息架构：**指南** 与 **教程**。
 
-## Architecture
+新目标不是继续扩展旧骨架，而是解决用户反馈的核心问题：内容太散、安装指引不清、当前功能说明滞后、缺少吸引人的亮点表达，以及缺少直观图解。
 
+## Confirmed Direction
+
+用户明确确认以下方向：
+
+1. 顶部导航应收敛为“指南 / 教程”。
+2. 所有核心说明应集中到少量文档，而不是分散在介绍、参考、指南、亮点多个入口。
+3. 教程必须教用户如何使用 OpenFlow 的工作流。
+4. Issue 不再作为官网主工作流推广；其能力被质量门与归档链路消费。
+5. 安装必须分为“手动安装”和“LLM 自动安装”。
+6. OMO 与 GitNexus 均为可选增强；如果已安装，安装流程必须跳过并复用现有配置。
+7. README / README_CN 必须引用新的安装文档。
+8. 官网需要新增图解，包括工作流、implement、quality gate、harden、BDD/集成测试、archive。
+
+## Target Information Architecture
+
+```text
+website/
+├── index.md
+├── guide/
+│   ├── index.md
+│   ├── core-concepts.md
+│   ├── diagrams.md
+│   ├── highlights.md
+│   ├── comparison.md
+│   └── directory-conventions.md
+├── tutorial/
+│   ├── index.md
+│   ├── installation.md
+│   ├── installation-for-agents.md
+│   ├── quickstart.md
+│   ├── configuration.md
+│   ├── feature-workflow.md
+│   ├── implementation.md
+│   ├── quality-gate-and-archive.md
+│   ├── issue-context.md
+│   ├── mid-development-change.md
+│   ├── migrate-docs.md
+│   ├── commands.md
+│   ├── faq.md
+│   └── troubleshooting.md
+├── public/
+│   └── diagrams/
+│       ├── workflow.svg
+│       ├── implement.svg
+│       ├── quality-gate.svg
+│       ├── harden.svg
+│       ├── bdd-integration.svg
+│       └── archive.svg
+├── getting-started/   # old URL compatibility notices
+├── introduction/      # old URL compatibility notices
+├── reference/         # old URL compatibility notices
+├── highlights/        # old URL compatibility notices
+└── misc/              # old URL compatibility notices
 ```
-openflow/                          # 主仓库
-├── src/                           # 插件源码（不受影响）
-├── docs/                          # OpenFlow 内部治理文档（保持现状）
-│   ├── current/
-│   ├── changes/
-│   ├── archive/
-│   ├── decisions/
-│   └── guide/installation.md      # ← 待删除，内容已迁移
-├── website/                       # 【新增】VitePress 站点源码
-│   ├── .vitepress/
-│   │   ├── config.ts              # 站点配置（中文主导航、搜索、侧边栏）
-│   │   ├── theme/                 # 自定义主题（如需）
-│   │   └── locales/               # 预留 i18n 配置
-│   ├── index.md                   # 首页（Hero + 特性展示 + 快速链接）
-│   ├── introduction/
-│   │   ├── index.md
-│   │   ├── concepts.md            # 核心概念：行为文档约束、目录划分、工作流
-│   │   ├── comparison.md          # 与竞品对比修正版
-│   │   └── philosophy.md          # 工程哲学（含行为文档约束 rationale）
-│   ├── getting-started/
-│   │   ├── installation.md        # ← 从 docs/guide/installation.md 迁移
-│   │   ├── quickstart.md          # 10 分钟上手
-│   │   └── configuration.md       # 最小配置
-│   ├── guide/
-│   │   ├── feature-workflow.md    # 场景：开发新功能
-│   │   ├── behavior-document-guide.md # 如何阅读、判断和确认 behavior.md
-│   │   ├── implement-workflow.md  # omo vs opencode 两种实现方式
-│   │   ├── mid-development-change.md
-│   │   ├── migrate-existing-docs.md
-│   │   └── archive-and-traceability.md
-│   ├── reference/
-│   │   ├── commands.md            # 命令速查
-│   │   ├── config-options.md      # 配置项完整参考
-│   │   └── directory-conventions.md
-│   ├── highlights/
-│   │   ├── quality-gate.md        # 质量门 + Harden 对抗
-│   │   ├── drift-guardian.md      # 文档漂移检测 + SDD
-│   │   ├── smart-archive.md       # DDD 限界上下文 + 异步归档
-│   │   └── tdd-bdd-sdd.md         # 测试分层理念
-│   └── public/                    # 静态资源（logo、截图等）
-│   └── package.json               # 站点独立依赖（vitepress）
-├── .github/
-│   └── workflows/
-│       ├── publish.yml            # 现有：npm 发布
-│       └── deploy-handbook.yml    # 【新增】构建并部署到 GitHub Pages
-└── package.json                   # 主项目（不受影响）
-```
-
-## Technology Stack
-
-| Component | Choice | Version |
-|---|---|---|
-| Static Site Generator | VitePress | ^1.6.0 |
-| Deployment | GitHub Actions + GitHub Pages | — |
-| Search | VitePress Built-in Local Search | — |
-| Theme | VitePress Default Theme + 自定义 CSS | — |
 
 ## VitePress Configuration
 
-### `website/.vitepress/config.ts`
+`website/.vitepress/config.ts` uses two top-level nav items:
 
-```typescript
-import { defineConfig } from 'vitepress'
-
-export default defineConfig({
-  title: 'OpenFlow',
-  description: '面向 AI 驱动开发的文档治理工作流',
-  lang: 'zh-CN',
-  base: '/openflow/',
-  
-  themeConfig: {
-    logo: '/logo.svg',
-    nav: [
-      { text: '介绍', link: '/introduction/' },
-      { text: '快速开始', link: '/getting-started/installation' },
-      { text: '使用指南', link: '/guide/feature-workflow' },
-      { text: '参考', link: '/reference/commands' },
-    ],
-    sidebar: {
-      '/introduction/': [...],
-      '/getting-started/': [...],
-      '/guide/': [...],
-      '/reference/': [...],
-      '/highlights/': [...],
-    },
-    search: {
-      provider: 'local'
-    },
-    footer: {
-      message: 'Released under the MIT License.',
-      copyright: 'Copyright © fastknife'
-    }
-  },
-  
-  // 预留 i18n 结构
-  locales: {
-    root: {
-      label: '简体中文',
-      lang: 'zh-CN'
-    }
-    // en: { label: 'English', lang: 'en' } // 后续补充
-  }
-})
+```ts
+nav: [
+  { text: '指南', link: '/guide/' },
+  { text: '教程', link: '/tutorial/' },
+]
 ```
 
-## Deployment Architecture
+The sidebar is grouped by actual user tasks:
 
-GitHub Pages 配置：`Settings → Pages → Source: GitHub Actions`
+- `guide/`：理解 OpenFlow、核心概念、图解、亮点、适用场景、目录约定。
+- `tutorial/`：安装、上手、工作流、质量门归档、Issue 上下文、迁移、命令、FAQ、排查。
 
-### `.github/workflows/deploy-handbook.yml`
+Old directories remain as compatibility pages only, to avoid breaking previously published links while preventing stale content from appearing as canonical guidance.
 
-```yaml
-name: Deploy Handbook to GitHub Pages
+## Installation Design
 
-on:
-  push:
-    branches: [master, develop]
-    paths:
-      - 'website/**'
-      - '.github/workflows/deploy-handbook.yml'
+Installation is split into two user paths:
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: cd website && npm ci
-      - run: cd website && npm run build
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: website/.vitepress/dist
-
-  deploy:
-    needs: build
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/deploy-pages@v4
-        id: deployment
-```
-
-## Content Migration Strategy
-
-| Source | Target | Action |
+| Page | Audience | Key behavior |
 |---|---|---|
-| `docs/guide/installation.md` | `website/getting-started/installation.md` | 迁移内容，删除原文件 |
-| `README.md`（介绍部分） | `website/introduction/index.md` | 重组修正 |
-| `README.md`（Why OpenFlow / Philosophy） | `website/introduction/philosophy.md` | 重组修正 |
-| `README.md`（Comparison） | `website/introduction/comparison.md` | 重组修正，修正夸大表述 |
-| `README.md`（Workflow / Commands） | `website/guide/`、`website/reference/` | 按场景拆分 |
-| `README.md`（Configuration） | `website/getting-started/configuration.md` | 迁移修正 |
-| `docs/decisions/ADR-001` | `website/introduction/concepts.md` | 提取核心概念，不直接复制 |
+| `tutorial/installation.md` | Human users | Manual npm install, plugin config, `/openflow-init`, optional OMO/GitNexus notes |
+| `tutorial/installation-for-agents.md` | LLM agents | Copyable agent instructions with explicit “read existing config, merge, do not overwrite” rules |
 
-## Isolation from Main Project
+OMO and GitNexus are explicitly optional:
 
-- `website/package.json` 独立管理，依赖 `vitepress` 不进入主项目 `node_modules`
-- `.gitignore` 新增 `website/.vitepress/dist` 和 `website/.vitepress/cache`
-- 主项目 `tsconfig.json` 的 `include` 排除 `website/`
-- 主项目 `package.json` 的 `files`、`scripts` 均不引用 `website/`
+- If installed, skip installation and reuse existing config.
+- If not installed, ask user before installing.
+- Refusing either option must not block OpenFlow installation.
 
-## Key Design Decisions
+## Current Workflow Semantics
 
-1. **不使用 `gh-pages` 分支**：使用 GitHub Actions 直接部署，避免构建产物分支的管理负担
-2. **`website/` 而非 `docs/` 作为站点源**：避免与 OpenFlow 内部治理文档 `docs/` 冲突
-3. **中文为 `root` locale**：VitePress 默认语言为中文，后续添加英文时在 `locales` 中补充 `en`
-4. **内容骨架优先**：本次 feature 只生成骨架文件（frontmatter + 章节标题 + 简要说明），具体内容由用户后续手动完善
-5. **不迁移内部治理文档**：`docs/current/`、`docs/changes/` 等保持现状，不在站点中呈现
+The canonical flow is:
 
-## Risks & Mitigations
+```text
+brainstorm → feature → writing-plan → implement → quality-gate → archive
+```
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| `website/` 依赖与主项目冲突 | Low | Medium | 完全隔离的 package.json，无共享依赖 |
-| GitHub Actions 部署失败 | Low | High | 先在本地 `npm run build` 验证，确保产物正确 |
-| 内容迁移遗漏外部引用 | Medium | Medium | 删除 `docs/guide/installation.md` 前检查全仓库引用 |
-| 搜索对中文支持不佳 | Low | Low | VitePress 内置本地搜索支持中文分词 |
+`openflow-quality-gate` is the unified post-implementation gate. `/openflow-harden` and `/openflow-verify` are not documented as normal manual entrypoints.
+
+Issue handling is documented as context feeding the unified quality/archive chain, not as a separate public completion flow.
+
+## Diagram Strategy
+
+Use static SVG files under `website/public/diagrams/` instead of Mermaid. Rationale:
+
+- VitePress renders SVG assets without extra plugins.
+- GitHub Pages build remains dependency-free.
+- The diagrams can be embedded across multiple pages with normal Markdown image syntax.
+
+Required diagrams:
+
+1. `workflow.svg` — main OpenFlow workflow.
+2. `implement.svg` — `/openflow-implement` creates `ImplementationRun` and routes to OMO/OpenCode.
+3. `quality-gate.svg` — context bundle, risk assessment, harden, verify, readiness.
+4. `harden.svg` — Coordinator / Reviewer / Executor adversarial loop.
+5. `bdd-integration.svg` — behavior scenarios to integration evidence mapping.
+6. `archive.svg` — readiness + docs freeze + current promotion + implementation mapper.
+
+## README Updates
+
+`README.md` and `README_CN.md` should stay short and link to the canonical install pages:
+
+- `/tutorial/installation`
+- `/tutorial/installation-for-agents`
+- `/tutorial/quickstart`
+
+They must mention that OMO and GitNexus are optional and should be skipped when already installed.
+
+## Non-Goals
+
+- Do not add Mermaid or another diagram plugin.
+- Do not make OMO or GitNexus required.
+- Do not revive `/openflow-harden` or `/openflow-verify` as normal user commands.
+- Do not present Issue as a separate primary completion workflow.
+- Do not migrate internal `docs/current/*` wholesale into the public site.
+
+## Validation
+
+- `website/.vitepress/config.ts` has no LSP diagnostics.
+- `website` build must pass with `npm run build`.
+- Stale phrases such as `正在建设中` and old navigation paths should not remain in canonical pages.
+- README links must point to the new install pages.

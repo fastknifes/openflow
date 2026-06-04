@@ -10,8 +10,6 @@ layout: doc
 
 - 已安装 [OpenCode](https://github.com/opencode-ai/opencode)。
 - 有一个项目目录。OpenFlow 对已有项目尤其有价值。
-- 可以使用 npm 安装包。
-- 可选：安装 Bun，用于 omo 多 Agent 编排。
 
 ## 安装
 
@@ -31,62 +29,23 @@ npm install @fastknife/openflow
 
 如果已经有其他插件，请把 `@fastknife/openflow` 追加到已有 `plugin` 数组，不要覆盖原配置。
 
-## 可选依赖
+### 让 AI 帮你安装
 
-### omo：多 Agent 编排
+如果你正在使用 Claude Code、Cursor、Trae 等 AI Agent，直接把下面这段话粘贴给 Agent，它会自动完成安装和配置：
 
-OpenFlow 可以只依赖 OpenCode 工作；如果安装 omo（oh-my-openagent / oh-my-opencode），则可以获得更强的多 Agent 计划、执行和隔离能力。
+```text
+请帮我安装和配置 OpenFlow 插件：
 
-常见安装入口：
+1. 在当前项目中运行 npm install @fastknife/openflow
+2. 在 opencode 配置文件（~/.config/opencode/opencode.json 或项目根目录的 opencode.jsonc）中，将 @fastknife/openflow 添加到 plugin 数组。如果配置文件不存在，请创建它。
+3. 完成后告诉我安装结果
+```
+
+安装完成后，打开 OpenCode 并运行 `/openflow-init` 初始化项目。也可以在终端中直接执行：
 
 ```bash
-bunx oh-my-opencode install
+opencode run --command "/openflow-init"
 ```
-
-安装后可运行：
-
-```bash
-bunx oh-my-opencode doctor
-```
-
-### GitNexus：代码图谱与影响分析
-
-GitNexus 可为 AI 提供调用图、影响分析和代码导航能力，适合大型或高风险项目：
-
-```bash
-npm install -g gitnexus
-npx gitnexus analyze
-```
-
-如果需要语义搜索嵌入：
-
-```bash
-npx gitnexus analyze --embeddings
-```
-
-### Windows 特殊说明
-
-在 Windows 上配置 GitNexus MCP 时，Node MCP 客户端可能无法直接启动无扩展名的 npm shim。建议先找到 `gitnexus.cmd`：
-
-```powershell
-where.exe gitnexus.cmd
-```
-
-然后在 OpenCode 配置中通过 `cmd /c` 调用 `.cmd` 包装器，并把路径替换为你的实际输出：
-
-```json
-{
-  "mcp": {
-    "gitnexus": {
-      "type": "local",
-      "command": ["cmd", "/c", "C:\\Users\\<your-user>\\AppData\\Roaming\\npm\\gitnexus.cmd", "mcp"],
-      "enabled": true
-    }
-  }
-}
-```
-
-如果 `opencode.json` 已经有 `mcp` 配置，只合并 `gitnexus` 条目，不要覆盖整个 `mcp` 对象。
 
 ## 初始化项目
 
@@ -107,21 +66,6 @@ OpenFlow 开箱即用，大多数项目不需要配置。需要自定义时，�
 3. `opencode.json` 顶层的 `openflow` 字段
 
 第一个找到的配置源生效，不会跨配置源深度合并。推荐优先使用项目根目录的 `openflow.json`，因为它更容易随项目版本化和审查。
-
-### 最小配置示例
-
-只写你想覆盖的字段，未声明的字段使用默认值：
-
-```json
-{
-  "feature": {
-    "trigger_mode": "smart"
-  },
-  "verification": {
-    "quality": ["lint", "typecheck", "test"]
-  }
-}
-```
 
 ### 常见场景配置
 
@@ -222,18 +166,18 @@ OpenFlow 会收集必要事实，读取当前约束，并生成本轮变更的�
 
 OpenFlow 会创建实施记录，并根据环境选择 omo 或 OpenCode 原生执行。AI 应在设计边界内完成代码和测试变更。
 
-### 第 6 步：quality-gate
+### 第 6 步：质量门
 
 实施完成后，AI 必须调用 `openflow-quality-gate`。你通常不需要手动触发，但需要关注它的输出。
 
-质量门会检查适用性、风险、证据、验证命令和就绪状态。只有 Ready 或允许补文档后 Ready 的结果，才适合继续归档。
+质量门会检查适用性、风险、证据、验证命令和就绪状态。只有通过或允许补文档后通过的结果，才适合继续归档。
 
 ### 第 7 步：处理结果
 
-- `Ready`：可以归档。
-- `ReadyWithDocUpdates`：先补齐需要提升的文档，再归档。
-- `NotReady`：回到实现或验证，修复问题。
-- `NeedsDecision`：需要人工做取舍，不能让 AI 自行跳过。
+- **通过**：可以归档。
+- **需要补文档**：先补齐需要提升的文档，再归档。
+- **未通过**：回到实现或验证，修复问题。
+- **需要人工决策**：需要人工做取舍，不能让 AI 自行跳过。
 
 ### 第 8 步：archive
 
@@ -246,7 +190,7 @@ OpenFlow 会创建实施记录，并根据环境选择 omo 或 OpenCode 原生�
 完整链路如下：
 
 ```text
-init → brainstorm → feature → writing-plan → implement → quality-gate → archive
+初始化 → 头脑风暴 → 需求 → 开发计划 → 实施 → 质量门 → 归档
 ```
 
 ## 常用场景速查

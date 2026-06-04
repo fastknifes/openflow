@@ -1,0 +1,187 @@
+bun test v1.3.6 (d530ed99)
+
+tests\phases\archive\collect.test.ts:
+(pass) collectArchiveArtifacts > copies planned design and plan into staging [32.00ms]
+(pass) collectArchiveArtifacts > ad-hoc mode generates issue artifacts [15.00ms]
+(pass) collectArchiveArtifacts > planned collection without design leaves staging without design.md
+(pass) collectArchiveArtifacts > issue mode copies clarification and generates resolution [16.00ms]
+
+tests\phases\archive\issue.test.ts:
+(pass) archive issue artifacts > writeIssueResolution generates issue-resolution from clarification sections
+(pass) archive issue artifacts > generateAdHocIssueArtifacts writes clarification and resolution [15.00ms]
+
+tests\phases\archive\validate.test.ts:
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:106:26)
+(fail) validateArchive > planned mode + readiness=Ready + no issues allows archive
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:114:26)
+(fail) validateArchive > planned mode + readiness=NotReady blocks archive with readiness blocker
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:135:26)
+(fail) validateArchive > planned mode + harden unresolved must-fix blocks archive with harden blocker
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:150:26)
+(fail) validateArchive > planned mode + doc update not confirmed blocks archive with doc_update blocker
+(pass) validateArchive > ad-hoc mode + no readiness allows archive
+(pass) validateArchive > ad-hoc mode + no readiness/harden/drift checks does not produce readiness or harden blockers [16.00ms]
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:13:39)
+      at <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:206:26)
+      at <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:205:97)
+(fail) validateArchive > planned mode + skipQualityGateChecks=true allows archive even when readiness=NotReady
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:219:26)
+(fail) validateArchive > planned mode + drift items + drift_check enabled blocks with drift blocker
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:243:26)
+(fail) validateArchive > implementation run with root mismatch blocks with root_mismatch blocker
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:267:26)
+(fail) validateArchive > planned mode + quality gate applicability not eligible blocks with applicability blocker
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:296:28)
+(fail) validateArchive > planned mode + dirty implementation state blocks with implementation_state blocker
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:313:26)
+(fail) validateArchive > planned mode + security verification failure blocks with security blocker
+51 |     message: formatPlanProgressBlock(ac.feature, planContent, progress),
+52 |   })
+53 | }
+54 | 
+55 | async function readArchivePlanContent(ac: ArchiveContext): Promise<string | null> {
+56 |   const candidates = [ac.sourcePaths.plan, ac.planPath].filter(Boolean) as string[]
+                              ^
+TypeError: undefined is not an object (evaluating 'ac.sourcePaths.plan')
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:56:26)
+      at readArchivePlanContent (F:\ai-code\openflow\src\phases\archive\validate.ts:55:39)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:42:29)
+      at validatePlanProgress (F:\ai-code\openflow\src\phases\archive\validate.ts:39:3)
+      at validateArchive (F:\ai-code\openflow\src\phases\archive\validate.ts:25:11)
+      at async <anonymous> (F:\ai-code\openflow\tests\phases\archive\validate.test.ts:329:26)
+(fail) validateArchive > implementation run with non-ready status blocks with run_status blocker
+
+ 8 pass
+ 11 fail
+ 18 expect() calls
+Ran 19 tests across 3 files. [206.00ms]

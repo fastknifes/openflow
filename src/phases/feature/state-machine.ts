@@ -1,10 +1,9 @@
 import { buildRequirementModel } from './constraint-derivation.js'
+import type { ExtractedItem } from './context-packet.js'
 import type { RequirementModel } from './requirement-model.js'
-import type { ExtractedItem } from './context-extraction.js'
-import type { DesignReviewReport } from './design-review-report.js'
 
 export type FeatureQuestionId = 'problem' | 'target-users' | 'scope' | 'priority' | 'constraints'
-export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'generating' | 'completed' | 'failed' | 'complete' | 'draft_blocked'
+export type FeatureWorkflowState = 'collecting' | 'ready_to_generate' | 'failed' | 'draft_blocked' | 'complete'
 export type FeatureDraftStatus = 'final' | 'draft_with_assumptions'
 export type PostDesignDecision = 'proceed_to_plan' | 'review_docs' | 'inspect'
 
@@ -45,23 +44,12 @@ export interface FeatureSession {
   lastQuestionPromptedAt?: string | undefined
   lastAnsweredAt?: string | undefined
   updatedAt: string
-  /** Collected facts from brainstorm and user input */
-  collectedFacts: Record<string, string>
-  /** Pending context harvest state */
   pendingContextHarvest?: {
-    awaitingPacketId?: string
-    confirmedPacketId?: string
+    awaitingPacketId?: string | undefined
+    confirmedPacketId?: string | undefined
+    confirmedItems?: ExtractedItem[] | undefined
     ignoredPacketIds: string[]
-    confirmedItems?: ExtractedItem[]
   } | undefined
-  /** Requirement clearance clarification state */
-  clarificationState?: {
-    round: number
-    maxRounds: number
-    unresolvedDimensions?: string[]
-  } | undefined
-  /** Design review report from generation */
-  designReview?: DesignReviewReport | undefined
 }
 
 type LegacyFeatureSession = {
@@ -159,7 +147,6 @@ export function createInitialFeatureSession(feature: string): FeatureSession {
     draftStatus: 'final',
     generatedDocs: [],
     generationAttemptCount: 0,
-    collectedFacts: {},
     updatedAt: new Date().toISOString(),
   }
 }
@@ -177,6 +164,30 @@ export function normalizeFeatureSession(feature: string, raw: unknown): FeatureS
   const generatedDocs = Array.isArray(parsed.generatedDocs) ? parsed.generatedDocs : []
   const pendingQuestionId = resolvePendingQuestionId(answers, parsed.pendingQuestionId ?? parsed.currentQuestionId ?? null)
   const workflowState = resolveWorkflowState(parsed.workflowState, generatedDocs, pendingQuestionId)
+
+  const pendingContextHarvest =
+    parsed.pendingContextHarvest && typeof parsed.pendingContextHarvest === 'object'
+      ? {
+          ...(typeof parsed.pendingContextHarvest.awaitingPacketId === 'string'
+            ? { awaitingPacketId: parsed.pendingContextHarvest.awaitingPacketId }
+            : {}),
+          ...(typeof parsed.pendingContextHarvest.confirmedPacketId === 'string'
+            ? { confirmedPacketId: parsed.pendingContextHarvest.confirmedPacketId }
+            : {}),
+          ...(Array.isArray(parsed.pendingContextHarvest.confirmedItems)
+            ? {
+                confirmedItems: parsed.pendingContextHarvest.confirmedItems.filter(
+                  (item): item is ExtractedItem => isExtractedItem(item),
+                ),
+              }
+            : {}),
+          ignoredPacketIds: Array.isArray(parsed.pendingContextHarvest.ignoredPacketIds)
+            ? parsed.pendingContextHarvest.ignoredPacketIds.filter(
+                (id): id is string => typeof id === 'string',
+              )
+            : [],
+        }
+      : undefined
 
   return {
     version: 3,
@@ -204,15 +215,31 @@ export function normalizeFeatureSession(feature: string, raw: unknown): FeatureS
     lastError: typeof parsed.lastError === 'string' ? parsed.lastError : undefined,
     lastQuestionPromptedAt: typeof parsed.lastQuestionPromptedAt === 'string' ? parsed.lastQuestionPromptedAt : undefined,
     lastAnsweredAt: typeof parsed.lastAnsweredAt === 'string' ? parsed.lastAnsweredAt : undefined,
-    collectedFacts: typeof parsed.collectedFacts === 'object' && parsed.collectedFacts !== null ? parsed.collectedFacts as Record<string, string> : {},
     updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+    pendingContextHarvest,
   }
 }
 
+function isExtractedItem(value: unknown): value is ExtractedItem {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Partial<Record<keyof ExtractedItem, unknown>>
+  return (
+    typeof record.content === 'string' &&
+    (record.type === 'problem' ||
+      record.type === 'decision' ||
+      record.type === 'constraint' ||
+      record.type === 'nonGoal' ||
+      record.type === 'openQuestion' ||
+      record.type === 'risk' ||
+      record.type === 'example') &&
+    (record.confidence === 'high' || record.confidence === 'medium' || record.confidence === 'low') &&
+    (record.source === 'user' || record.source === 'assistant') &&
+    (record.confirmedBy === undefined || typeof record.confirmedBy === 'string')
+  )
+}
+
 export function getPendingQuestion(session: FeatureSession): FeatureQuestion | undefined {
-  if (!session.pendingQuestionId) {
-    return QUESTIONS.find((question) => !session.answers[question.id])
-  }
+  if (!session.pendingQuestionId) return undefined
 
   return QUESTIONS.find((question) => question.id === session.pendingQuestionId)
 }
@@ -228,15 +255,14 @@ export function applyFeatureAnswer(session: FeatureSession, answer: string, cons
     ...session.answers,
     [pendingQuestion.id]: trimmedAnswer,
   }
-  const nextPendingQuestionId = resolvePendingQuestionId(answers, null)
 
   const nextSession: FeatureSession = {
     ...session,
     answers,
     askedQuestionIds: uniqueQuestionIds([...session.askedQuestionIds, pendingQuestion.id]),
-    pendingQuestionId: nextPendingQuestionId,
-    promptMode: nextPendingQuestionId ? 'question' : 'discussion',
-    workflowState: nextPendingQuestionId ? 'collecting' : 'ready_to_generate',
+    pendingQuestionId: null,
+    promptMode: 'discussion',
+    workflowState: 'collecting',
     lastConsumedMessageId: consumedMessageId ?? session.lastConsumedMessageId,
     lastAnsweredAt: new Date().toISOString(),
   }
@@ -258,7 +284,7 @@ export function markQuestionPrompted(session: FeatureSession, questionId: Featur
 export function markGenerating(session: FeatureSession): FeatureSession {
   const nextSession: FeatureSession = {
     ...session,
-    workflowState: 'generating',
+    workflowState: 'ready_to_generate',
     pendingQuestionId: null,
     promptMode: 'discussion',
     generationAttemptCount: session.generationAttemptCount + 1,
@@ -276,7 +302,7 @@ export function markCompleted(session: FeatureSession, generatedPaths: string | 
 
   const nextSession: FeatureSession = {
     ...session,
-    workflowState: 'completed',
+    workflowState: 'complete',
     pendingQuestionId: null,
     promptMode: 'discussion',
     generatedDocs,
@@ -314,9 +340,7 @@ export function isAwaitingFormalAnswer(session: FeatureSession): boolean {
 
 export function shouldGenerateDesign(session: FeatureSession): boolean {
   return session.workflowState === 'ready_to_generate'
-    || session.workflowState === 'generating'
     || session.workflowState === 'failed'
-    || (session.workflowState === 'collecting' && !getPendingQuestion(session))
 }
 
 export function getRecommendedOptionLabel(session: FeatureSession, question: FeatureQuestion): string | undefined {
@@ -366,15 +390,15 @@ function resolveWorkflowState(
   pendingQuestionId: FeatureQuestionId | null
 ): FeatureWorkflowState {
   if (generatedDocs.length > 0) {
-    return 'completed'
+    return 'complete'
   }
 
-  if (workflowState === 'generating' || workflowState === 'failed') {
+  if (workflowState === 'failed' || workflowState === 'draft_blocked') {
     return workflowState
   }
 
   if (!pendingQuestionId) {
-    return workflowState === 'completed' ? 'completed' : 'ready_to_generate'
+    return workflowState === 'complete' ? 'complete' : 'ready_to_generate'
   }
 
   return 'collecting'
