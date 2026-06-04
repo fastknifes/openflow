@@ -63,7 +63,7 @@ flowchart LR
 /openflow-implement <feature>
 ```
 
-OpenFlow 会创建 `ImplementationRun`，并根据环境选择 OMO 或 OpenCode 原生后端。详见[实施与执行后端](./implementation)。
+OpenFlow 会创建 `ImplementationRun`，并根据环境选择 OMO 或 OpenCode 原生后端。
 
 ## Step 4：质量门
 
