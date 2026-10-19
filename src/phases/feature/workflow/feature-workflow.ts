@@ -97,7 +97,7 @@ async function initializeFeatureSession(
   }
 
   if (resolvedFeature.identity.lowConfidenceReason) {
-    if (resolvedFeature.identity.lowConfidenceReason === 'generic_instruction' && resolvedFeature.identity.sourceIntent) {
+    if (resolvedFeature.identity.lowConfidenceReason === 'session_switch' && resolvedFeature.identity.sourceIntent) {
       return {
         kind: 'low-confidence',
         response: formatSameSessionSwitchRejection(resolvedFeature.identity.slug, resolvedFeature.identity.sourceIntent),

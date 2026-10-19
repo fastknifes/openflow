@@ -1,6 +1,6 @@
 {
   "name": "@fastknife/openflow",
-  "version": "0.0.0-dev",
+  "version": "0.5.0",
   "description": "OpenFlow - document-as-constraint governance for AI-driven OpenCode development",
   "type": "module",
   "main": "./dist/index.js",
@@ -36,13 +36,21 @@
     "url": "git+https://github.com/fastknifes/openflow.git"
   },
   "dependencies": {
+    "@opencode-ai/plugin": ">=1.0.0",
     "zod": "^3.22.0"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.0.0"
+    "@opencode-ai/plugin": ">=1.0.0",
+    "@opencode/plugin": ">=2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.15.10",
+    "@opencode/plugin": "^2.0.32",
     "@types/node": "^25.4.0",
     "typescript": "^5.9.3"
   },

@@ -80,7 +80,7 @@ export async function resolveFeature(ctx: OpenFlowContext, feature: string | und
               identity: {
                 slug: activeFeature,
                 sourceIntent: feature,
-                lowConfidenceReason: 'generic_instruction' as const,
+                lowConfidenceReason: 'session_switch' as const,
               },
             }
           }

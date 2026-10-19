@@ -140,6 +140,17 @@ export const en: I18nResource = {
     { pattern: 'design|设计', tags: ['design'] },
     { pattern: 'preview|预览', tags: ['preview'] },
     { pattern: 'constraints|约束', tags: ['constraints'] },
+    { pattern: 'menu|navbar|sidebar|菜单|导航栏|侧边栏', tags: ['menu'] },
+    { pattern: 'dialog|modal|popup|弹窗|对话框|模态框', tags: ['dialog'] },
+    { pattern: 'button|按钮', tags: ['button'] },
+    { pattern: 'form|表单', tags: ['form'] },
+    { pattern: 'page|页面', tags: ['page'] },
+    { pattern: 'ui|界面', tags: ['ui'] },
+    { pattern: 'interaction|交互', tags: ['interaction'] },
+    { pattern: 'logout|退出', tags: ['logout'] },
+    { pattern: 'about|关于', tags: ['about'] },
+    { pattern: 'intro|introduction|系统介绍|系统说明|介绍', tags: ['intro'] },
+    { pattern: 'display|show|展示|显示', tags: ['display'] },
   ],
 
   // ── Contract extractor ──

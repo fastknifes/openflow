@@ -9,7 +9,7 @@ export interface DerivedFeatureIdentity {
   slug: string
   title?: string | undefined
   sourceIntent?: string | undefined
-  lowConfidenceReason?: 'generic_slug' | 'generic_instruction' | undefined
+  lowConfidenceReason?: 'generic_slug' | 'generic_instruction' | 'underivable_slug' | 'session_switch' | undefined
 }
 
 export interface FeatureSessionCandidate {
@@ -86,7 +86,10 @@ export function deriveFeatureIdentity(input: string): DerivedFeatureIdentity {
   const meaningfulWords = [...asciiWords, ...inferredWords]
     .filter((word) => !isIgnoredFeatureWord(word))
   const base = meaningfulWords.slice(0, 8).join('-')
-  const lowConfidenceReason = base ? undefined : 'generic_instruction'
+  // A concrete request whose text yields no derivable slug is "underivable",
+  // not a generic workflow instruction. Keeping these distinct prevents the
+  // session-switch guard from mistaking a plain request for a feature switch.
+  const lowConfidenceReason = base ? undefined : 'underivable_slug'
   const slug = (base ? trySanitizeFeatureName(base) : undefined) ?? trySanitizeFeatureName(trimmed) ?? 'untitled-feature'
 
   return {

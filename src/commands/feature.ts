@@ -75,9 +75,11 @@ export async function handleFeature(
   }
 
   if (resolvedFeature.identity.lowConfidenceReason) {
-    // Same-session switching rejection: if session has an active feature and
-    // the user tried to start a different one, show explicit rejection message
-    if (resolvedFeature.identity.lowConfidenceReason === 'generic_instruction' && resolvedFeature.identity.sourceIntent) {
+    // Same-session switching rejection: this is only produced by the
+    // session-guard in resolveFeature when the session already owns a
+    // different feature. Low-confidence-but-concrete input must never be
+    // misreported as an active feature that does not exist.
+    if (resolvedFeature.identity.lowConfidenceReason === 'session_switch' && resolvedFeature.identity.sourceIntent) {
       return formatSameSessionSwitchRejection(resolvedFeature.identity.slug, resolvedFeature.identity.sourceIntent)
     }
     return formatLowConfidenceFeatureIdentity(resolvedFeature.identity)
@@ -528,7 +530,7 @@ async function resolveFeature(ctx: OpenFlowContext, feature: string | undefined,
             identity: {
               slug: activeFeature,
               sourceIntent: feature,
-              lowConfidenceReason: 'generic_instruction' as const,
+              lowConfidenceReason: 'session_switch' as const,
             },
           }
         }
@@ -1310,7 +1312,9 @@ function formatKnownAnswerSummary(session: FeatureSession): string {
 function formatLowConfidenceFeatureIdentity(identity: DerivedFeatureIdentity): string {
   const reason = identity.lowConfidenceReason === 'generic_slug'
     ? 'The provided feature name is too generic to create a durable workspace name.'
-    : 'The request describes a workflow action, but not the specific feature or problem to name.'
+    : identity.lowConfidenceReason === 'underivable_slug'
+      ? 'The request is concrete, but no durable workspace name could be derived from it.'
+      : 'The request describes a workflow action, but not the specific feature or problem to name.'
 
   return `## Feature Identity Needed
 

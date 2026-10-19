@@ -156,7 +156,9 @@ ${pending}
 export function formatLowConfidenceFeatureIdentity(identity: DerivedFeatureIdentity): string {
   const reason = identity.lowConfidenceReason === 'generic_slug'
     ? 'The provided feature name is too generic to create a durable workspace name.'
-    : 'The request describes a workflow action, but not the specific feature or problem to name.'
+    : identity.lowConfidenceReason === 'underivable_slug'
+      ? 'The request is concrete, but no durable workspace name could be derived from it.'
+      : 'The request describes a workflow action, but not the specific feature or problem to name.'
 
   return `## Feature Identity Needed
 

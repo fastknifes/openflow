@@ -119,6 +119,17 @@ export const zhCN: I18nResource = {
     { pattern: '设计', tags: ['design'] },
     { pattern: '预览', tags: ['preview'] },
     { pattern: '约束', tags: ['constraints'] },
+    { pattern: '菜单|导航栏|侧边栏', tags: ['menu'] },
+    { pattern: '弹窗|对话框|模态框', tags: ['dialog'] },
+    { pattern: '按钮', tags: ['button'] },
+    { pattern: '表单', tags: ['form'] },
+    { pattern: '页面', tags: ['page'] },
+    { pattern: '界面', tags: ['ui'] },
+    { pattern: '交互', tags: ['interaction'] },
+    { pattern: '退出', tags: ['logout'] },
+    { pattern: '关于', tags: ['about'] },
+    { pattern: '系统介绍|系统说明|介绍', tags: ['intro'] },
+    { pattern: '展示|显示', tags: ['display'] },
   ],
 
   // ── Contract extractor ──
